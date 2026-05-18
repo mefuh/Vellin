@@ -9,7 +9,10 @@ COPY package.json package-lock.json* ./
 COPY shared/package.json ./shared/
 COPY server/package.json ./server/
 COPY client/package.json ./client/
-RUN npm install --omit=optional --ignore-scripts
+# Keep postinstall scripts: bcrypt needs them to build its native binding
+# (node-gyp invokes node-pre-gyp postinstall). The python3/make/g++ toolchain
+# from the base stage covers that.
+RUN npm install --omit=optional
 
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
