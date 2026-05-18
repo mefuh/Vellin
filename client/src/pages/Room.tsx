@@ -9,6 +9,7 @@ import { useUIStore } from '../stores/uiStore';
 import { roomsApi } from '../api/rooms';
 import { ApiHttpError } from '../api/client';
 import { useRoomSync } from '../hooks/useRoomSync';
+import { useIsMobile } from '../hooks/useMediaQuery';
 import { VideoPlayer } from '../components/room/VideoPlayer';
 import { RoomChat } from '../components/room/RoomChat';
 import { ReactionsOverlay } from '../components/room/ReactionsOverlay';
@@ -42,6 +43,17 @@ export function Room() {
   const kicked = useRoomStore((s) => s.kicked);
   const chatCollapsed = useUIStore((s) => s.chatCollapsed);
   const toggleChat = useUIStore((s) => s.toggleChat);
+  const isMobile = useIsMobile();
+
+  // On mobile, the chat is a bottom-sheet that overlays the player; it would be
+  // jarring to land in a room with the sheet already open (especially if the
+  // user's last desktop session left it expanded). Force-collapse once on
+  // mobile entry; user can tap the pill to reopen.
+  useEffect(() => {
+    if (isMobile && !chatCollapsed) toggleChat();
+    // We only want this on mount/breakpoint change, not on every toggle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile]);
 
   const [password, setPassword] = useState('');
   const [access, setAccess] = useState<AccessState>({ kind: 'loading' });
@@ -185,8 +197,8 @@ export function Room() {
 
   return (
     <div
+      className="h-screen"
       style={{
-        height: '100vh',
         display: 'flex',
         flexDirection: 'column',
         background: 'var(--bg-0)',
@@ -199,21 +211,24 @@ export function Room() {
           height: 60,
           display: 'flex',
           alignItems: 'center',
-          padding: '0 20px',
-          gap: 16,
+          padding: isMobile ? '0 12px' : '0 20px',
+          gap: isMobile ? 8 : 16,
           borderBottom: '1px solid var(--line-1)',
           background: 'var(--bg-1)',
+          flexShrink: 0,
         }}
       >
         <Link to="/library" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-2)' }}>
           <Icon name="chevronD" size={14} style={{ transform: 'rotate(90deg)' }} />
           <VellinLogo size={18} />
         </Link>
-        {room && (
+        {room && !isMobile && (
           <>
             <span style={{ width: 1, height: 24, background: 'var(--line-1)' }} />
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <h1 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{room.name}</h1>
+            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+              <h1 style={{ margin: 0, fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {room.name}
+              </h1>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-2)' }}>
                 vellin.app/r/{room.slug}
               </span>
@@ -226,20 +241,42 @@ export function Room() {
             </Chip>
           </>
         )}
-        <div style={{ flex: 1 }} />
-        {participants.length > 0 && (
+        {room && isMobile && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+            <h1 style={{ margin: 0, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {room.name}
+            </h1>
+            <Chip tone={wsState === 'open' ? 'live' : 'neutral'}>
+              {wsState === 'open' ? 'LIVE' : '·'}
+            </Chip>
+          </div>
+        )}
+        {!isMobile && <div style={{ flex: 1 }} />}
+        {participants.length > 0 && !isMobile && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-2)', fontSize: 13 }}>
             <Icon name="users" size={14} /> {participants.length}
           </div>
         )}
         {room && (
-          <Button variant="secondary" icon="link" onClick={() => setShowInvite(true)}>
-            Пригласить
+          <Button
+            variant="secondary"
+            icon="link"
+            size={isMobile ? 'sm' : 'md'}
+            onClick={() => setShowInvite(true)}
+            aria-label="Пригласить"
+          >
+            {isMobile ? '' : 'Пригласить'}
           </Button>
         )}
         {user?.kind === 'user' && (
-          <Button variant="ghost" icon="plus" onClick={() => setShowCreate(true)}>
-            Новая
+          <Button
+            variant="ghost"
+            icon="plus"
+            size={isMobile ? 'sm' : 'md'}
+            onClick={() => setShowCreate(true)}
+            aria-label="Новая комната"
+          >
+            {isMobile ? '' : 'Новая'}
           </Button>
         )}
       </header>
@@ -265,9 +302,11 @@ export function Room() {
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: chatCollapsed ? '1fr 72px' : '1fr 620px',
+          gridTemplateColumns: isMobile ? '1fr' : chatCollapsed ? '1fr 72px' : '1fr 620px',
           gap: 12,
-          padding: 16,
+          padding: isMobile ? 12 : 16,
+          // Reserve bottom space for the collapsed chat pill on mobile.
+          paddingBottom: isMobile ? 80 : 16,
           overflow: 'hidden',
         }}
       >
@@ -275,22 +314,18 @@ export function Room() {
           style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: 14,
+            gap: isMobile ? 12 : 14,
             minHeight: 0,
             position: 'relative',
             width: '100%',
-            // Cap by viewport height so 16:9 player height stays within (100vh − chrome).
-            // Same maxWidth on both player wrapper and info cards (via this container) →
-            // their left/right edges align.
-            maxWidth: 'calc((100vh - 190px) * 16 / 9)',
-            // Push main column content to the right edge of its track so the player's
-            // right edge sits next to the chat (just the grid gap between them).
-            marginInline: 'auto 0',
-            // Scroll only the left column. The page itself never scrolls, so the
-            // chat aside in the right column stays pinned in place.
+            // On desktop, cap by viewport height so 16:9 player stays within (100vh − chrome)
+            // and right-align so its edge meets the chat aside. On mobile, full width.
+            maxWidth: isMobile ? '100%' : 'calc((100vh - 190px) * 16 / 9)',
+            marginInline: isMobile ? '0' : 'auto 0',
+            // Scroll only the left column. The page itself never scrolls.
             overflowY: 'auto',
             overflowX: 'hidden',
-            paddingRight: 6,
+            paddingRight: isMobile ? 0 : 6,
           }}
         >
           <div style={{ position: 'relative', width: '100%' }}>
@@ -331,6 +366,7 @@ export function Room() {
           collapsed={chatCollapsed}
           send={send}
           onToggle={toggleChat}
+          variant={isMobile ? 'sheet' : 'sidebar'}
           onOpenParticipantMenu={isAdminOrOwner ? (userId) => setMenuFor(userId) : undefined}
         />
       </div>
@@ -443,7 +479,7 @@ function RoomInfoCards({
 }) {
   const displayName = videoTitle ?? (videoUrl ? deriveVideoName(videoUrl) : null);
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+    <div className="responsive-cols" data-cols="3">
       <InfoCard title="Текущее видео" icon="film">
         {displayName ? (
           <span
@@ -528,6 +564,7 @@ function VideoUrlModal({
         backdropFilter: 'blur(8px)',
         display: 'grid',
         placeItems: 'center',
+        padding: 16,
         zIndex: 80,
       }}
     >
@@ -541,7 +578,7 @@ function VideoUrlModal({
           background: 'var(--bg-1)',
           border: '1px solid var(--line-2)',
           borderRadius: 'var(--r-xl)',
-          padding: 24,
+          padding: 'clamp(18px, 4vw, 24px)',
           width: '100%',
           maxWidth: 480,
           display: 'flex',
@@ -587,12 +624,14 @@ function FullPageStatus({ title, subtitle }: { title: string; subtitle?: string 
   return (
     <div
       style={{
-        minHeight: '100vh',
+        minHeight: '100svh',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 14,
+        padding: 20,
+        textAlign: 'center',
         background: 'var(--bg-0)',
         color: 'var(--text-0)',
       }}
@@ -623,9 +662,10 @@ function FullPagePassword({
   return (
     <div
       style={{
-        minHeight: '100vh',
+        minHeight: '100svh',
         display: 'grid',
         placeItems: 'center',
+        padding: 16,
         background: 'var(--bg-0)',
         color: 'var(--text-0)',
       }}
@@ -636,7 +676,7 @@ function FullPagePassword({
           background: 'var(--bg-1)',
           border: '1px solid var(--line-2)',
           borderRadius: 'var(--r-xl)',
-          padding: 28,
+          padding: 'clamp(20px, 5vw, 28px)',
           width: '100%',
           maxWidth: 420,
           display: 'flex',

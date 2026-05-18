@@ -65,3 +65,44 @@ input,
 textarea {
   outline: none;
 }
+
+/* Mobile address-bar friendly height — falls back to 100vh on older browsers. */
+.h-screen {
+  height: 100vh;
+  height: 100svh;
+}
+
+/* Responsive cols utility — driven by data-cols attr. Used by RoomInfoCards. */
+.responsive-cols {
+  display: grid;
+  gap: 12px;
+}
+.responsive-cols[data-cols='3'] {
+  grid-template-columns: repeat(3, 1fr);
+}
+.responsive-cols[data-cols='2'] {
+  grid-template-columns: repeat(2, 1fr);
+}
+@media (max-width: 720px) {
+  .responsive-cols[data-cols='3'],
+  .responsive-cols[data-cols='2'] {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Chat bubble — fluid width replaces fixed maxWidth: 220 */
+.chat-bubble-col {
+  max-width: min(70%, 360px);
+}
+@media (max-width: 720px) {
+  .chat-bubble-col {
+    max-width: 78%;
+  }
+}
+
+/* Hide on narrow screens — for header decorations, volume slider, etc. */
+@media (max-width: 600px) {
+  .hide-on-mobile {
+    display: none !important;
+  }
+}

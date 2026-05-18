@@ -114,6 +114,7 @@ export function ParticipantMenu(props: Props) {
         zIndex: 70,
         display: 'grid',
         placeItems: 'center',
+        padding: 16,
         background: 'rgba(0,0,0,0.55)',
         backdropFilter: 'blur(6px)',
       }}
@@ -123,7 +124,7 @@ export function ParticipantMenu(props: Props) {
         onClick={(e) => e.stopPropagation()}
         role="menu"
         style={{
-          minWidth: 280,
+          width: '100%',
           maxWidth: 360,
           background: 'var(--bg-1)',
           border: '1px solid var(--line-2)',

@@ -54,7 +54,7 @@ export function InviteModal({ room, canCreate, onClose }: InviteModalProps) {
         display: 'grid',
         placeItems: 'center',
         zIndex: 90,
-        padding: 24,
+        padding: 16,
       }}
     >
       <div
@@ -63,7 +63,7 @@ export function InviteModal({ room, canCreate, onClose }: InviteModalProps) {
           background: 'var(--bg-1)',
           border: '1px solid var(--line-2)',
           borderRadius: 'var(--r-xl)',
-          padding: 28,
+          padding: 'clamp(20px, 4vw, 28px)',
           width: '100%',
           maxWidth: 460,
           display: 'flex',

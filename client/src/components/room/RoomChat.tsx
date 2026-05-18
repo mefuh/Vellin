@@ -10,6 +10,8 @@ interface RoomChatProps {
   collapsed: boolean;
   send: (msg: C2S) => boolean;
   onToggle: () => void;
+  /** Layout variant. 'sidebar' — desktop right column. 'sheet' — mobile bottom sheet. */
+  variant?: 'sidebar' | 'sheet';
   /** If provided, clicking a participant chip opens a menu for that user. */
   onOpenParticipantMenu?: (userId: string) => void;
 }
@@ -36,6 +38,7 @@ export function RoomChat({
   collapsed,
   send,
   onToggle,
+  variant = 'sidebar',
   onOpenParticipantMenu,
 }: RoomChatProps) {
   const [draft, setDraft] = useState('');
@@ -55,6 +58,127 @@ export function RoomChat({
     setDraft('');
   };
 
+  // ────────────────────────────────────────────────────────────────────────
+  // Mobile sheet variant
+  // ────────────────────────────────────────────────────────────────────────
+  if (variant === 'sheet') {
+    if (collapsed) {
+      // Compact pill anchored to the bottom — taps expand the sheet.
+      return (
+        <button
+          onClick={onToggle}
+          aria-label="Открыть чат"
+          style={{
+            position: 'fixed',
+            left: 12,
+            right: 12,
+            bottom: 12,
+            height: 56,
+            zIndex: 50,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '0 16px',
+            background: 'var(--glass-bg)',
+            backdropFilter: `blur(var(--glass-blur))`,
+            WebkitBackdropFilter: `blur(var(--glass-blur))`,
+            border: '1px solid var(--glass-bd)',
+            borderRadius: 'var(--r-xl)',
+            boxShadow: 'var(--shadow-2)',
+            color: 'var(--text-0)',
+            cursor: 'pointer',
+            textAlign: 'left',
+          }}
+        >
+          <Icon name="chat" size={18} style={{ color: 'var(--text-1)' }} />
+          <span style={{ fontSize: 14, fontWeight: 600 }}>Чат</span>
+          <Chip tone="neutral">{messages.length}</Chip>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: -6 }}>
+            {participants.slice(0, 3).map((p, i) => (
+              <div key={p.userId} style={{ marginLeft: i === 0 ? 0 : -6 }}>
+                <Avatar name={p.username} seed={p.avatarSeed} size={22} />
+              </div>
+            ))}
+            {participants.length > 3 && (
+              <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-2)' }}>
+                +{participants.length - 3}
+              </span>
+            )}
+          </div>
+        </button>
+      );
+    }
+
+    return (
+      <>
+        {/* Backdrop — tap to close. Sits below the sheet itself. */}
+        <div
+          onClick={onToggle}
+          aria-hidden
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.35)',
+            zIndex: 49,
+          }}
+        />
+        <aside
+          role="dialog"
+          aria-label="Чат комнаты"
+          style={{
+            position: 'fixed',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: '75svh',
+            maxHeight: '75svh',
+            zIndex: 50,
+            background: 'var(--glass-bg)',
+            backdropFilter: `blur(var(--glass-blur))`,
+            WebkitBackdropFilter: `blur(var(--glass-blur))`,
+            border: '1px solid var(--glass-bd)',
+            borderBottom: 'none',
+            borderRadius: 'var(--r-xl) var(--r-xl) 0 0',
+            boxShadow: 'var(--shadow-3)',
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+          }}
+        >
+          {/* Drag handle */}
+          <div
+            onClick={onToggle}
+            style={{
+              padding: '8px 0 6px',
+              display: 'flex',
+              justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+          >
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--line-3)' }} />
+          </div>
+          <ChatBody
+            messages={messages}
+            participants={participants}
+            you={you}
+            draft={draft}
+            setDraft={setDraft}
+            submit={submit}
+            scrollRef={scrollRef}
+            onToggle={onToggle}
+            send={send}
+            onOpenParticipantMenu={onOpenParticipantMenu}
+            showCloseButton
+          />
+        </aside>
+      </>
+    );
+  }
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Desktop sidebar variant (original behavior)
+  // ────────────────────────────────────────────────────────────────────────
   if (collapsed) {
     return (
       <aside
@@ -103,9 +227,55 @@ export function RoomChat({
         minHeight: 0,
       }}
     >
+      <ChatBody
+        messages={messages}
+        participants={participants}
+        you={you}
+        draft={draft}
+        setDraft={setDraft}
+        submit={submit}
+        scrollRef={scrollRef}
+        onToggle={onToggle}
+        send={send}
+        onOpenParticipantMenu={onOpenParticipantMenu}
+      />
+    </aside>
+  );
+}
+
+// Body shared between sidebar and sheet — header, participants strip, messages, input.
+interface ChatBodyProps {
+  messages: ChatMessage[];
+  participants: ParticipantInfo[];
+  you: ParticipantInfo | null;
+  draft: string;
+  setDraft: (s: string) => void;
+  submit: (e: React.FormEvent) => void;
+  scrollRef: React.RefObject<HTMLDivElement>;
+  onToggle: () => void;
+  send: (msg: C2S) => boolean;
+  onOpenParticipantMenu?: (userId: string) => void;
+  showCloseButton?: boolean;
+}
+
+function ChatBody({
+  messages,
+  participants,
+  you,
+  draft,
+  setDraft,
+  submit,
+  scrollRef,
+  onToggle,
+  send,
+  onOpenParticipantMenu,
+  showCloseButton,
+}: ChatBodyProps) {
+  return (
+    <>
       <header
         style={{
-          padding: '14px 16px',
+          padding: '12px 16px',
           borderBottom: '1px solid var(--line-1)',
           display: 'flex',
           alignItems: 'center',
@@ -116,7 +286,7 @@ export function RoomChat({
         <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Чат</h3>
         <Chip tone="neutral">{participants.length}</Chip>
         <div style={{ flex: 1 }} />
-        <button onClick={onToggle} aria-label="Свернуть">
+        <button onClick={onToggle} aria-label={showCloseButton ? 'Закрыть' : 'Свернуть'}>
           <Icon name="close" size={16} />
         </button>
       </header>
@@ -201,7 +371,7 @@ export function RoomChat({
       <form
         onSubmit={submit}
         style={{
-          padding: '10px 14px',
+          padding: '10px 14px calc(10px + env(safe-area-inset-bottom, 0px))',
           borderTop: '1px solid var(--line-1)',
           display: 'flex',
           flexDirection: 'column',
@@ -233,6 +403,7 @@ export function RoomChat({
             placeholder="Написать сообщение…"
             style={{
               flex: 1,
+              minWidth: 0,
               height: 38,
               padding: '0 14px',
               borderRadius: 'var(--r-md)',
@@ -247,7 +418,7 @@ export function RoomChat({
           </Button>
         </div>
       </form>
-    </aside>
+    </>
   );
 }
 
@@ -274,11 +445,11 @@ function MessageRow({ message, mine }: { message: ChatMessage; mine: boolean }) 
         size={28}
       />
       <div
+        className="chat-bubble-col"
         style={{
           display: 'flex',
           flexDirection: 'column',
           gap: 2,
-          maxWidth: 220,
           alignItems: mine ? 'flex-end' : 'flex-start',
         }}
       >

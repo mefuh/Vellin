@@ -43,6 +43,7 @@ export function PermissionsModal({ participant, onClose, onSave }: Props) {
         backdropFilter: 'blur(8px)',
         display: 'grid',
         placeItems: 'center',
+        padding: 16,
         zIndex: 90,
       }}
     >
@@ -52,7 +53,7 @@ export function PermissionsModal({ participant, onClose, onSave }: Props) {
           background: 'var(--bg-1)',
           border: '1px solid var(--line-2)',
           borderRadius: 'var(--r-xl)',
-          padding: 24,
+          padding: 'clamp(18px, 4vw, 24px)',
           width: '100%',
           maxWidth: 460,
           display: 'flex',

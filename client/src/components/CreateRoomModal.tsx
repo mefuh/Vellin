@@ -66,7 +66,8 @@ export function CreateRoomModal({ onClose, onCreated }: CreateRoomModalProps) {
         display: 'grid',
         placeItems: 'center',
         zIndex: 100,
-        padding: 24,
+        padding: 16,
+        overflow: 'auto',
       }}
     >
       <form
@@ -76,7 +77,7 @@ export function CreateRoomModal({ onClose, onCreated }: CreateRoomModalProps) {
           background: 'var(--bg-1)',
           border: '1px solid var(--line-2)',
           borderRadius: 'var(--r-xl)',
-          padding: 28,
+          padding: 'clamp(20px, 4vw, 28px)',
           maxWidth: 540,
           width: '100%',
           display: 'flex',
@@ -119,7 +120,7 @@ export function CreateRoomModal({ onClose, onCreated }: CreateRoomModalProps) {
           />
         </label>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
           <button
             type="button"
             onClick={() => setIsPrivate(false)}

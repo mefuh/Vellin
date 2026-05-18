@@ -2,14 +2,16 @@ import { Link } from 'react-router-dom';
 import { Button, Chip, MountainPoster, VellinLogo } from '../shared';
 import { Icon } from '../shared/Icon';
 import { useAuthStore } from '../stores/authStore';
+import { useIsMobile } from '../hooks/useMediaQuery';
 
 export function Landing() {
   const user = useAuthStore((s) => s.user);
+  const isMobile = useIsMobile();
 
   return (
     <div
       style={{
-        minHeight: '100vh',
+        minHeight: '100svh',
         background:
           'radial-gradient(1200px 600px at 80% -20%, var(--accent-soft), transparent 60%), var(--bg-0)',
         color: 'var(--text-0)',
@@ -19,15 +21,17 @@ export function Landing() {
     >
       <header
         style={{
-          height: 72,
+          minHeight: 72,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0 max(24px, 5vw)',
+          padding: '12px max(16px, 4vw)',
+          gap: 12,
+          flexWrap: 'wrap',
         }}
       >
         <VellinLogo />
-        <nav style={{ display: 'flex', gap: 8 }}>
+        <nav style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {user ? (
             <Link to="/library">
               <Button variant="primary" size="md" iconRight="arrow">
@@ -59,10 +63,10 @@ export function Landing() {
       <main
         style={{
           flex: 1,
-          padding: '40px max(24px, 5vw) 80px',
+          padding: isMobile ? '24px max(16px, 4vw) 48px' : '40px max(24px, 5vw) 80px',
           display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1.05fr) minmax(0, 1fr)',
-          gap: 48,
+          gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.05fr) minmax(0, 1fr)',
+          gap: isMobile ? 28 : 48,
           alignItems: 'center',
         }}
       >

@@ -578,6 +578,7 @@ export function VideoPlayer({
             <Icon name={muted || volume === 0 ? 'volumeOff' : 'volume'} size={20} />
           </button>
           <input
+            className="hide-on-mobile"
             type="range"
             min={0}
             max={1}
