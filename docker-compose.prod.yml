@@ -1,0 +1,65 @@
+# Production stack: postgres + node server + caddy edge.
+#
+# The dev compose (docker-compose.yml) still exposes postgres on :5432 and the
+# server on :3001 for laptop work. This file does neither — only Caddy is
+# reachable from the network (80/443), everything else is internal.
+#
+# Required env in .env.production at repo root:
+#   DOMAIN          fully-qualified hostname (e.g. vellin.ru)
+#   JWT_SECRET      >=32 chars, generate with `openssl rand -hex 32`
+#   DB_PASSWORD     postgres password, generate with `openssl rand -base64 24`
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vellin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env.production}
+      POSTGRES_DB: vellin
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'vellin']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://vellin:${DB_PASSWORD}@postgres:5432/vellin
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env.production}
+      PORT: '3001'
+      HOST: '0.0.0.0'
+      NODE_ENV: production
+      CORS_ORIGIN: https://${DOMAIN:?DOMAIN must be set in .env.production}
+      WS_TICKET_TTL_SEC: '60'
+
+  caddy:
+    build:
+      context: .
+      dockerfile: caddy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - server
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3 (QUIC)
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

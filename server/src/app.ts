@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
@@ -14,11 +14,17 @@ import { logger } from './utils/logger.js';
 export async function buildApp(): Promise<FastifyInstance> {
   const env = loadEnv();
 
+  // Cast back to the abstract FastifyInstance: passing a real pino instance via
+  // `loggerInstance` narrows the inferred logger type to `Logger<...>` which is
+  // incompatible with route handlers expecting FastifyBaseLogger. The runtime
+  // surface is identical — we just want the default generic for downstream code.
   const app = Fastify({
     loggerInstance: logger,
     bodyLimit: 1024 * 256, // 256 KB
     trustProxy: true,
-  });
+  }) as unknown as FastifyInstance & {
+    log: FastifyBaseLogger;
+  };
 
   await app.register(helmet, {
     contentSecurityPolicy: false,
@@ -48,10 +54,12 @@ export async function buildApp(): Promise<FastifyInstance> {
       return;
     }
     if ((err as { statusCode?: number }).statusCode) {
-      reply.code((err as { statusCode: number }).statusCode).send({
-        error: err.name,
-        message: err.message,
-        statusCode: (err as { statusCode: number }).statusCode,
+      const sc = (err as { statusCode: number }).statusCode;
+      const e = err as Error;
+      reply.code(sc).send({
+        error: e.name,
+        message: e.message,
+        statusCode: sc,
       });
       return;
     }

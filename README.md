@@ -29,6 +29,10 @@ Vellin/
 └── tsconfig.base.json
 ```
 
+## Деплой в продакшен
+
+См. [DEPLOY.md](DEPLOY.md): пошаговая инструкция для Ubuntu VPS с Caddy + Let's Encrypt (домен, SSH-хардеринг, Docker, env, миграции, бэкапы).
+
 ## Быстрый старт через Docker
 
 ```bash

@@ -41,18 +41,22 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    let payload: ReturnType<FastifyInstance['jwt']['verify']>;
+    let payload: unknown;
     try {
-      payload = app.jwt.verify(ticket);
+      payload = app.jwt.verify(ticket as never) as unknown;
     } catch {
       socket.close(4001, 'invalid ticket');
       return;
     }
-    if (!isWsTicket(payload as never)) {
+    if (!payload || typeof payload !== 'object' || !isWsTicket(payload as never)) {
       socket.close(4001, 'not a ws ticket');
       return;
     }
-    const ticketPayload = payload as { ticket: true; roomId: string; principal: Principal };
+    const ticketPayload = payload as {
+      ticket: true;
+      roomId: string;
+      principal: Principal;
+    };
 
     const room = await prisma.room.findUnique({
       where: { id: ticketPayload.roomId },
@@ -142,7 +146,15 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
     }
 
     socket.on('message', (raw) => {
-      if (raw.length > MAX_MESSAGE_BYTES) {
+      // `ws` types `raw` as Buffer | ArrayBuffer | Buffer[]; only Buffer/Uint8Array
+      // has .length, so normalise via byteLength on whichever shape arrives.
+      const size =
+        raw instanceof ArrayBuffer
+          ? raw.byteLength
+          : Array.isArray(raw)
+            ? raw.reduce((sum, b) => sum + b.byteLength, 0)
+            : (raw as Buffer).byteLength;
+      if (size > MAX_MESSAGE_BYTES) {
         sendError(ctx, 'invalid_payload', 'Message too large');
         return;
       }

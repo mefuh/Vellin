@@ -1,0 +1,38 @@
+# vellin.ru — production reverse proxy + SPA host
+#
+# Caddy auto-provisions Let's Encrypt certificates for both apex and www on
+# first request (ports 80/443 must reach this container from the public IP).
+# www.vellin.ru is permanently redirected to the apex.
+
+{$DOMAIN:vellin.ru} {
+	encode gzip zstd
+
+	# WebSocket endpoint. Must be matched before the /api/* handler because
+	# Caddy uses the first matching site block — this is the same site, just
+	# a route ordering concern.
+	@ws path /ws
+	reverse_proxy @ws server:3001
+
+	handle /api/* {
+		reverse_proxy server:3001
+	}
+
+	# Single-page app fallback. Anything that isn't /api or /ws falls through
+	# to the prebuilt client assets baked into the Caddy image.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	# Reduce log noise in production — only HTTP errors, structured JSON.
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+}
+
+www.{$DOMAIN:vellin.ru} {
+	redir https://{$DOMAIN:vellin.ru}{uri} permanent
+}
