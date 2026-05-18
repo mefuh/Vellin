@@ -22,7 +22,9 @@ COPY tsconfig.base.json ./
 COPY shared ./shared
 COPY client ./client
 RUN cd shared && npx tsc -b
-RUN cd client && npx tsc -b && npx vite build
+# Cap V8 heap explicitly — on a 1 GB VPS Node otherwise picks a smaller
+# default and `vite build` crashes mid-bundle with "Reached heap limit".
+RUN cd client && npx tsc -b && NODE_OPTIONS=--max-old-space-size=1536 npx vite build
 
 # ── runtime stage ────────────────────────────────────────────────────────
 FROM caddy:2-alpine
