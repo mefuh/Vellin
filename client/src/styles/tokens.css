@@ -1,0 +1,76 @@
+/* Vellin — дизайн-токены (копия из design/tokens.css) */
+:root {
+  --bg-0: #0a0807;
+  --bg-1: #0e0b0a;
+  --bg-2: #14100e;
+  --bg-3: #1a1614;
+  --bg-4: #221c19;
+  --bg-5: #2b2421;
+
+  --line-1: rgba(255, 245, 235, 0.06);
+  --line-2: rgba(255, 245, 235, 0.10);
+  --line-3: rgba(255, 245, 235, 0.16);
+
+  --text-0: #f6f1ed;
+  --text-1: #c8bdb5;
+  --text-2: #8a7f78;
+  --text-3: #5a504a;
+
+  --accent: #d1271b;
+  --accent-hi: #e8462a;
+  --accent-lo: #a01a12;
+  --accent-soft: rgba(209, 39, 27, 0.14);
+  --accent-glow: rgba(209, 39, 27, 0.35);
+
+  --ok: #4ade80;
+  --warn: #facc15;
+
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-2xl: 28px;
+
+  --glass-bg: rgba(20, 16, 14, 0.62);
+  --glass-bd: rgba(255, 245, 235, 0.08);
+  --glass-blur: 28px;
+
+  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 32px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 20px 70px rgba(0, 0, 0, 0.6), 0 2px 0 rgba(255, 255, 255, 0.04) inset;
+
+  --font-ui: "General Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+
+[data-theme='light'] {
+  --bg-0: #f5f1ec;
+  --bg-1: #ebe6e0;
+  --bg-2: #f9f5f0;
+  --bg-3: #ffffff;
+  --bg-4: #f3eee8;
+  --bg-5: #e7e0d8;
+
+  --line-1: rgba(20, 16, 12, 0.08);
+  --line-2: rgba(20, 16, 12, 0.14);
+  --line-3: rgba(20, 16, 12, 0.22);
+
+  --text-0: #14110e;
+  --text-1: #3d352e;
+  --text-2: #6e6258;
+  --text-3: #968a80;
+
+  --accent: #c11d12;
+  --accent-hi: #d1271b;
+  --accent-lo: #8d130b;
+  --accent-soft: rgba(193, 29, 18, 0.10);
+  --accent-glow: rgba(193, 29, 18, 0.25);
+
+  --glass-bg: rgba(255, 250, 245, 0.7);
+  --glass-bd: rgba(20, 16, 12, 0.08);
+
+  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.5) inset, 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-2: 0 1px 0 rgba(255, 255, 255, 0.5) inset, 0 8px 28px rgba(0, 0, 0, 0.08);
+  --shadow-3: 0 20px 60px rgba(0, 0, 0, 0.12);
+}

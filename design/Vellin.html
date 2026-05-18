@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Vellin — UI/UX</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&f[]=jetbrains-mono@400,500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="tokens.css">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0a0807; font-family: "General Sans", Inter, sans-serif; color: #f6f1ed; }
+    *, *::before, *::after { box-sizing: border-box; }
+  </style>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="tweaks-panel.jsx"></script>
+  <script type="text/babel" src="shared.jsx"></script>
+  <script type="text/babel" src="screens/landing.jsx"></script>
+  <script type="text/babel" src="screens/auth.jsx"></script>
+  <script type="text/babel" src="screens/room.jsx"></script>
+  <script type="text/babel" src="screens/create-modal.jsx"></script>
+  <script type="text/babel" src="screens/invite.jsx"></script>
+  <script type="text/babel" src="screens/profile.jsx"></script>
+  <script type="text/babel" src="screens/settings.jsx"></script>
+  <script type="text/babel" src="screens/mobile.jsx"></script>
+
+  <script type="text/babel">
+    const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "theme": "dark",
+      "glass": "medium",
+      "chatCollapsed": false
+    }/*EDITMODE-END*/;
+
+    function App() {
+      const { values: t, setTweak } = useTweaks(TWEAK_DEFAULTS);
+
+      // Применяем тему и стекло на корень
+      React.useEffect(() => {
+        document.documentElement.setAttribute('data-theme', t.theme);
+        const glass = t.glass === 'none' ? '0px' : t.glass === 'subtle' ? '8px' : t.glass === 'medium' ? '28px' : '40px';
+        document.documentElement.style.setProperty('--glass-blur', glass);
+      }, [t.theme, t.glass]);
+
+      return (
+        <>
+          <DesignCanvas>
+            <DCSection id="overview" title="Vellin" subtitle="Платформа для совместного просмотра — полный набор экранов">
+              <DCArtboard id="landing" label="01 · Лендинг" width={1280} height={820}>
+                <Landing/>
+              </DCArtboard>
+              <DCArtboard id="auth" label="02 · Регистрация / Гость" width={1280} height={820}>
+                <Auth/>
+              </DCArtboard>
+            </DCSection>
+
+            <DCSection id="room" title="Главный интерфейс комнаты" subtitle="Сердце продукта: плеер, синхрон, чат и участники">
+              <DCArtboard id="room-main" label="03 · Комната (desktop)" width={1440} height={900}>
+                <Room/>
+              </DCArtboard>
+              <DCArtboard id="create" label="04 · Создание комнаты" width={1280} height={820}>
+                <CreateRoomModal/>
+              </DCArtboard>
+              <DCArtboard id="invite" label="05 · Приглашение" width={1280} height={820}>
+                <InviteModal/>
+              </DCArtboard>
+            </DCSection>
+
+            <DCSection id="account" title="Аккаунт и настройки" subtitle="Профиль, настройки комнаты, роли и доступы">
+              <DCArtboard id="profile" label="06 · Профиль" width={1280} height={820}>
+                <Profile/>
+              </DCArtboard>
+              <DCArtboard id="settings" label="07 · Настройки комнаты" width={1280} height={820}>
+                <RoomSettings/>
+              </DCArtboard>
+            </DCSection>
+
+            <DCSection id="mobile" title="Мобильная версия" subtitle="Адаптация для iPhone — главная, комната и fullscreen плеер">
+              <DCArtboard id="mobile-home" label="08 · Главная (мобайл)" width={400} height={800}>
+                <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', background: 'var(--bg-0)' }}>
+                  <MobileHome/>
+                </div>
+              </DCArtboard>
+              <DCArtboard id="mobile-room" label="09 · Комната (мобайл)" width={400} height={800}>
+                <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', background: 'var(--bg-0)' }}>
+                  <MobileRoom/>
+                </div>
+              </DCArtboard>
+              <DCArtboard id="mobile-player" label="10 · Плеер в полный экран" width={400} height={800}>
+                <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', background: 'var(--bg-0)' }}>
+                  <MobilePlayer/>
+                </div>
+              </DCArtboard>
+            </DCSection>
+          </DesignCanvas>
+
+          <TweaksPanel title="Tweaks">
+            <TweakSection label="Тема">
+              <TweakRadio
+                label="Режим"
+                value={t.theme}
+                options={[{ value: 'dark', label: 'Тёмная' }, { value: 'light', label: 'Светлая' }]}
+                onChange={(v) => setTweak('theme', v)}
+              />
+            </TweakSection>
+            <TweakSection label="Атмосфера">
+              <TweakSelect
+                label="Glassmorphism"
+                value={t.glass}
+                options={[
+                  { value: 'none', label: 'Выключить' },
+                  { value: 'subtle', label: 'Лёгкий' },
+                  { value: 'medium', label: 'Средний' },
+                  { value: 'heavy', label: 'Глубокий' },
+                ]}
+                onChange={(v) => setTweak('glass', v)}
+              />
+            </TweakSection>
+            <TweakSection label="Подсказка">
+              <div style={{ fontSize: 12, color: 'var(--text-2, #888)', lineHeight: 1.5 }}>
+                Чат и панель участников в экране «Комната» можно свернуть кликом на стрелку справа сверху чата.
+              </div>
+            </TweakSection>
+          </TweaksPanel>
+        </>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>

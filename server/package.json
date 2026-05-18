@@ -1,0 +1,41 @@
+{
+  "name": "@vellin/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "db:reset": "prisma migrate reset --force"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@fastify/helmet": "^12.0.1",
+    "@fastify/jwt": "^9.0.1",
+    "@fastify/rate-limit": "^10.1.1",
+    "@fastify/websocket": "^11.0.1",
+    "@prisma/client": "^5.22.0",
+    "@vellin/shared": "*",
+    "bcrypt": "^5.1.1",
+    "fastify": "^5.1.0",
+    "nanoid": "^5.0.9",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/node": "^22.10.1",
+    "@types/ws": "^8.5.13",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

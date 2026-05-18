@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vellin
+      POSTGRES_PASSWORD: vellin
+      POSTGRES_DB: vellin
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "vellin"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://vellin:vellin@postgres:5432/vellin
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-to-something-very-long-and-random}
+      PORT: "3001"
+      HOST: "0.0.0.0"
+      NODE_ENV: production
+      CORS_ORIGIN: http://localhost:8080
+      WS_TICKET_TTL_SEC: "60"
+    ports:
+      - "3001:3001"
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:

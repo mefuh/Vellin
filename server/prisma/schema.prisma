@@ -1,0 +1,115 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  username     String    @unique
+  passwordHash String
+  avatarSeed   String
+  createdAt    DateTime  @default(now())
+
+  rooms        Room[]       @relation("RoomOwner")
+  messages     Message[]
+  memberships  Membership[]
+}
+
+model Room {
+  id              String    @id @default(cuid())
+  slug            String    @unique
+  name            String
+  isPrivate       Boolean   @default(false)
+  passwordHash    String?
+  maxParticipants Int       @default(20)
+  allowGuests     Boolean   @default(true)
+  hostOnlyControl Boolean   @default(false)
+
+  ownerId         String
+  owner           User      @relation("RoomOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  videoUrl          String?
+  videoPositionSec  Float    @default(0)
+  videoStatus       String   @default("paused")
+  videoUpdatedAt    DateTime @default(now())
+  /// Frozen snapshot of ResolvedMedia for the current videoUrl. Stored as
+  /// JSON-encoded string so the runtime can boot cold without re-resolving.
+  /// Null when no video is set or for pre-resolver rooms.
+  videoResolvedJson String?
+
+  messages    Message[]
+  inviteLinks InviteLink[]
+  memberships Membership[]
+
+  createdAt DateTime @default(now())
+
+  @@index([ownerId])
+  @@index([isPrivate])
+}
+
+model Membership {
+  id              String   @id @default(cuid())
+  roomId          String
+  room            Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role            String   // 'admin' | 'member' — owner is implied by Room.ownerId
+  permissionsJson String   @default("{}") // partial RoomPermissions; empty = default member
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, roomId])
+  @@index([roomId])
+}
+
+model Message {
+  id              String   @id @default(cuid())
+  roomId          String
+  room            Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId          String?
+  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  guestName       String?
+  guestAvatarSeed String?
+  kind            String   @default("user")
+  body            String
+  createdAt       DateTime @default(now())
+
+  @@index([roomId, createdAt])
+}
+
+model InviteLink {
+  id        String    @id @default(cuid())
+  roomId    String
+  room      Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  token     String    @unique
+  maxUses   Int?
+  uses      Int       @default(0)
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([roomId])
+}
+
+/// Cache of resolved media URLs. Keyed by the raw user-supplied URL.
+/// Reused across rooms — popular YouTube/etc. links resolve once globally.
+model ResolvedMedia {
+  sourceUrl   String    @id
+  kind        String
+  mediaUrl    String
+  mime        String?
+  title       String?
+  durationSec Float?
+  poster      String?
+  /// Raw resolver dump (e.g. yt-dlp --dump-json output) for debugging.
+  rawJson     String
+  resolvedAt  DateTime
+  /// Null = never expires (direct mp4, magnet, etc.).
+  expiresAt   DateTime?
+
+  @@index([expiresAt])
+}

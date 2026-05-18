@@ -1,0 +1,29 @@
+node_modules
+dist
+build
+.tsbuildinfo
+*.tsbuildinfo
+
+.env
+.env.local
+.env.*.local
+
+logs
+*.log
+npm-debug.log*
+
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+server/prisma/dev.db
+server/prisma/*.db-journal
+
+# Vite
+client/dist
+client/.vite
+
+# Editor / assistant scratch
+CLAUDE.md
+.claude/

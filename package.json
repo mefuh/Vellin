@@ -1,0 +1,31 @@
+{
+  "name": "vellin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vellin — платформа для совместного просмотра видео в реальном времени",
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "build": "npm run build -w @vellin/shared && npm run build -w @vellin/server && npm run build -w @vellin/client",
+    "build:shared": "npm run build -w @vellin/shared",
+    "build:server": "npm run build -w @vellin/server",
+    "build:client": "npm run build -w @vellin/client",
+    "dev": "concurrently -n shared,server,client -c blue,green,magenta \"npm run dev -w @vellin/shared\" \"npm run dev -w @vellin/server\" \"npm run dev -w @vellin/client\"",
+    "dev:server": "npm run dev -w @vellin/server",
+    "dev:client": "npm run dev -w @vellin/client",
+    "db:migrate": "npm run db:migrate -w @vellin/server",
+    "db:generate": "npm run db:generate -w @vellin/server",
+    "db:studio": "npm run db:studio -w @vellin/server",
+    "lint": "echo \"no lint configured\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
