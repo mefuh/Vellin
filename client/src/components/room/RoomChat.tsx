@@ -50,6 +50,21 @@ export function RoomChat({
     el.scrollTop = el.scrollHeight;
   }, [messages.length]);
 
+  // After leaving fullscreen, snap to the latest message — while the player was
+  // fullscreen this chat was covered and its scroll could fall behind. Deferred
+  // to the next frame so the post-exit reflow has settled before we measure.
+  useEffect(() => {
+    const onFsChange = (): void => {
+      if (document.fullscreenElement) return;
+      requestAnimationFrame(() => {
+        const el = scrollRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const body = draft.trim();
@@ -286,9 +301,13 @@ function ChatBody({
         <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Чат</h3>
         <Chip tone="neutral">{participants.length}</Chip>
         <div style={{ flex: 1 }} />
-        <button onClick={onToggle} aria-label={showCloseButton ? 'Закрыть' : 'Свернуть'}>
-          <Icon name="close" size={16} />
-        </button>
+        {/* Desktop sidebar chat is permanently open — the close button is only
+            offered on the mobile bottom-sheet. */}
+        {showCloseButton && (
+          <button onClick={onToggle} aria-label="Закрыть">
+            <Icon name="close" size={16} />
+          </button>
+        )}
       </header>
 
       <div

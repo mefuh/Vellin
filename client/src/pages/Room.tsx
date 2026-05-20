@@ -12,7 +12,6 @@ import { useRoomSync } from '../hooks/useRoomSync';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { VideoPlayer } from '../components/room/VideoPlayer';
 import { RoomChat } from '../components/room/RoomChat';
-import { ReactionsOverlay } from '../components/room/ReactionsOverlay';
 import { InviteModal } from '../components/room/InviteModal';
 import { CreateRoomModal } from '../components/CreateRoomModal';
 import { PlaylistPanel } from '../components/room/PlaylistPanel';
@@ -39,7 +38,6 @@ export function Room() {
   const historyLength = useRoomStore((s) => s.historyLength);
   const you = useRoomStore((s) => s.you);
   const messages = useRoomStore((s) => s.messages);
-  const reactions = useRoomStore((s) => s.reactions);
   const kicked = useRoomStore((s) => s.kicked);
   const chatCollapsed = useUIStore((s) => s.chatCollapsed);
   const toggleChat = useUIStore((s) => s.toggleChat);
@@ -302,11 +300,9 @@ export function Room() {
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: isMobile
-            ? '1fr'
-            : chatCollapsed
-              ? '1fr 56px'
-              : '1fr clamp(340px, 38vw, 620px)',
+          // Desktop chat is always open — no collapse affordance. Mobile keeps
+          // its bottom-sheet, so its column stays a single track.
+          gridTemplateColumns: isMobile ? '1fr' : '1fr clamp(340px, 38vw, 620px)',
           gap: 12,
           padding: isMobile ? 12 : 16,
           // Reserve bottom space for the collapsed chat pill on mobile.
@@ -346,7 +342,6 @@ export function Room() {
               client={client}
               onRequestUrl={() => setShowVideoPicker(true)}
             />
-            <ReactionsOverlay reactions={reactions} />
           </div>
           <PlaylistPanel
             playlist={playlist}
@@ -367,7 +362,7 @@ export function Room() {
           messages={messages}
           participants={participants}
           you={you}
-          collapsed={chatCollapsed}
+          collapsed={isMobile ? chatCollapsed : false}
           send={send}
           onToggle={toggleChat}
           variant={isMobile ? 'sheet' : 'sidebar'}

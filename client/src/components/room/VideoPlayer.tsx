@@ -8,6 +8,9 @@ import type { EngineError, PlayerEngine } from './engines/PlayerEngine';
 import { WebTorrentEngine, type TorrentStats } from './engines/WebTorrentEngine';
 import { roomsApi } from '../../api/rooms';
 import { useRoomStore } from '../../stores/roomStore';
+import { useIsMobile } from '../../hooks/useMediaQuery';
+import { FullscreenChatOverlay } from './FullscreenChatOverlay';
+import { ReactionsOverlay } from './ReactionsOverlay';
 
 interface VideoPlayerProps {
   video: VideoState | null;
@@ -59,6 +62,13 @@ export function VideoPlayer({
   const [autoplayMuted, setAutoplayMuted] = useState(false);
   const [engineError, setEngineError] = useState<EngineError | null>(null);
   const [ready, setReady] = useState(false);
+
+  const isMobile = useIsMobile();
+  // Fullscreen API state — drives the in-player chat overlay (desktop only).
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  // True while the fullscreen chat input is focused — pins the controls open
+  // so the chat panel (and the input) can't fade out from under the user.
+  const [chatInputFocused, setChatInputFocused] = useState(false);
   // Quality settings are LOCAL per user — never sent to server.
   const [qualityLevels, setQualityLevels] = useState<string[]>([]);
   const [currentQuality, setCurrentQuality] = useState<string>('auto');
@@ -69,7 +79,7 @@ export function VideoPlayer({
   const [controlsVisible, setControlsVisible] = useState(true);
   const hideTimerRef = useRef<number | null>(null);
   const isPaused = video?.status !== 'playing';
-  const keepControlsOpen = isPaused || qualityOpen;
+  const keepControlsOpen = isPaused || qualityOpen || (isFullscreen && chatInputFocused);
   const keepOpenRef = useRef(keepControlsOpen);
   keepOpenRef.current = keepControlsOpen;
 
@@ -177,14 +187,12 @@ export function VideoPlayer({
     controller.reset();
     controller.attach(engine);
 
-    void engine
-      .load(resolved.mediaUrl)
-      .then(() => {
-        if (video) controller.applyInitial(video);
-      })
-      .catch(() => {
-        /* error already emitted via engine.on('error') */
-      });
+    // Initial sync is driven by the [video, ready] effect below once the
+    // engine reports ready — that always reads the *latest* server state, so a
+    // slow load (a torrent can take up to a minute) never applies stale state.
+    void engine.load(resolved.mediaUrl).catch(() => {
+      /* error already emitted via engine.on('error') */
+    });
 
     return () => {
       offErr();
@@ -239,21 +247,15 @@ export function VideoPlayer({
     return () => window.clearTimeout(id);
   }, [resolved?.expiresAt, video?.url, updateVideo]);
 
-  // Apply remote state updates whenever video state advances.
+  // Apply authoritative server state — discrete events (video_apply) AND the
+  // 5s heartbeat (video_sync). `video` gets a fresh object identity on every
+  // server update, so this runs once per event and once per heartbeat; the
+  // controller disambiguates them and the joiner catches up here when `ready`
+  // first flips true.
   useEffect(() => {
     if (!video || !engineRef.current || !ready) return;
-    controller.applyEvent({
-      t: 'video_apply',
-      action: 'seek',
-      positionSec: video.positionSec,
-      anchorServerTs: video.anchorServerTs,
-      emittedServerTs: Date.now(),
-      status: video.status,
-      seq: video.lastEventSeq,
-      byUserId: video.hostUserId,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [video?.lastEventSeq, ready]);
+    controller.applyServerState(video);
+  }, [video, ready, controller]);
 
   // Volume side effects (only after engine is ready — YT methods raise before onReady).
   useEffect(() => {
@@ -263,6 +265,13 @@ export function VideoPlayer({
     // the regular controls. The pill is only meant for the autoplay edge case.
     if (!muted && autoplayMuted) setAutoplayMuted(false);
   }, [volume, muted, ready, autoplayMuted]);
+
+  // Track Fullscreen API state so the in-player chat overlay can mount/unmount.
+  useEffect(() => {
+    const onChange = (): void => setIsFullscreen(document.fullscreenElement != null);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
 
   // Auto-hide reconciler: every time the "keep open" condition flips, either
   // pin controls (paused / quality menu open) or arm the inactivity timer.
@@ -347,6 +356,7 @@ export function VideoPlayer({
         }}
       >
         <MountainPoster seed={2} />
+        <ReactionsOverlay />
         <div
           style={{
             position: 'absolute',
@@ -410,6 +420,10 @@ export function VideoPlayer({
         playsInline
       />
 
+      {/* Reactions live inside the player element so they keep flying in
+          fullscreen — an overlay outside it would be hidden by the top-layer. */}
+      <ReactionsOverlay />
+
       {engineError && engineError.kind !== 'autoplay_blocked' && (
         <ErrorOverlay
           error={engineError}
@@ -426,7 +440,10 @@ export function VideoPlayer({
         <button
           onClick={() => {
             setEngineError(null);
-            togglePlay();
+            // Catch up to the room from this genuine user gesture: re-apply the
+            // live server state so playback both resumes AND jumps to the
+            // current position, never the stale spot we were stuck at.
+            controller.applyServerState(video, true);
           }}
           aria-label="Play"
           style={{
@@ -488,6 +505,17 @@ export function VideoPlayer({
           <Icon name="volumeOff" size={16} />
           Звук выключен — нажмите для включения
         </button>
+      )}
+
+      {/* Fullscreen-only chat layer (desktop): the regular chat is off-screen
+          in fullscreen, so messages are mirrored here — a recent-history panel
+          while the controls are up, brief pop-ups while the player is idle. */}
+      {isFullscreen && !isMobile && (
+        <FullscreenChatOverlay
+          expanded={controlsVisible}
+          send={send}
+          onInputFocusChange={setChatInputFocused}
+        />
       )}
 
       <div

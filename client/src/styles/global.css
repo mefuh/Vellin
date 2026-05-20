@@ -106,3 +106,34 @@ textarea {
     display: none !important;
   }
 }
+
+/* Fullscreen chat overlay — message entry, and the ephemeral pop-and-fade
+   shown over the video while the player controls are hidden. */
+@keyframes vellinFsChatIn {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes vellinFsChatPop {
+  0% {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  6% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  84% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}

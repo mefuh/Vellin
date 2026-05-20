@@ -1,9 +1,14 @@
-import type { S2CVideoApply, S2CVideoSync, VideoState } from '@vellin/shared';
+import type { VideoState, VideoStatus } from '@vellin/shared';
 import type { PlayerEngine } from './engines/PlayerEngine';
 
-const SOFT_CORRECTION_THRESHOLD_SEC = 0.4;
-const HARD_SEEK_THRESHOLD_SEC = 2.0;
-const SOFT_CORRECTION_DURATION_MS = 1500;
+// Drift bands for the 5-second heartbeat correction.
+const SOFT_BAND_SEC = 0.4; // below this we are in sync — do nothing
+const HARD_BAND_SEC = 2.0; // at/above this — snap with a hard seek
+const SOFT_CORRECTION_MS = 1500;
+// On a discrete event (play/pause/seek) snap into place if off by more than this.
+const EVENT_SNAP_SEC = 0.4;
+// A 'pause' fired within this distance of the end is end-of-media, not a user.
+const END_EPSILON_SEC = 0.5;
 
 export type LocalIntent =
   | { kind: 'play'; positionSec: number }
@@ -17,13 +22,31 @@ export interface VideoControllerOptions {
 
 /**
  * Engine-agnostic glue between the authoritative video state from the server
- * and a concrete player implementation (HTML5 <video> or YouTube iframe).
+ * and a concrete player implementation (HTML5 <video>, HLS, DASH, torrent).
+ *
+ * Echo suppression is **semantic**, not time-based: a play/pause event coming
+ * out of the media element is forwarded to the server only when it genuinely
+ * changes the shared status away from what the server last told us. An event
+ * that merely re-confirms the intended status — the asynchronous echo of our
+ * own `engine.play()/pause()`, or a late joiner clicking "play" to satisfy the
+ * browser autoplay policy — is dropped. A joiner can therefore never re-anchor
+ * the room just by catching up to it.
  */
 export class VideoController {
   private engine: PlayerEngine | null = null;
-  private softCorrectionTimer: ReturnType<typeof setTimeout> | null = null;
-  private lastSeq = 0;
+  private softTimer: ReturnType<typeof setTimeout> | null = null;
   private unsubscribers: Array<() => void> = [];
+
+  /** Highest server event sequence applied. Resets to 0 on a fresh engine. */
+  private lastSeq = 0;
+  /** False until the first server state has been applied to the current engine. */
+  private hasBaseline = false;
+  /**
+   * Shared play/paused status as last known from the server, advanced
+   * optimistically when we forward a local intent so that rapid local toggles
+   * are not mistaken for echo before the server round-trip completes.
+   */
+  private intendedStatus: VideoStatus = 'paused';
 
   constructor(private readonly opts: VideoControllerOptions) {}
 
@@ -31,126 +54,147 @@ export class VideoController {
     if (this.engine === engine) return;
     this.detach();
     this.engine = engine;
+    // Only play/pause are observed. Seeks are issued explicitly by the UI
+    // (the custom progress bar) — the native <video> exposes no scrub control —
+    // so any 'seeked' event is always the echo of a programmatic seek.
     this.unsubscribers.push(
-      engine.on('play', () => this.opts.onLocalIntent({ kind: 'play', positionSec: engine.getCurrentTime() })),
-      engine.on('pause', () => this.opts.onLocalIntent({ kind: 'pause', positionSec: engine.getCurrentTime() })),
-      engine.on('seeked', () =>
-        this.opts.onLocalIntent({
-          kind: 'seek',
-          positionSec: engine.getCurrentTime(),
-          playing: !engine.isPaused(),
-        }),
-      ),
+      engine.on('play', () => this.handleEnginePlay()),
+      engine.on('pause', () => this.handleEnginePause()),
     );
   }
 
   detach(): void {
     for (const u of this.unsubscribers) u();
     this.unsubscribers = [];
-    if (this.softCorrectionTimer) clearTimeout(this.softCorrectionTimer);
+    this.clearSoftTimer();
     this.engine = null;
   }
 
   reset(): void {
     this.lastSeq = 0;
-    if (this.softCorrectionTimer) {
-      clearTimeout(this.softCorrectionTimer);
-      this.softCorrectionTimer = null;
-    }
+    this.hasBaseline = false;
+    this.intendedStatus = 'paused';
+    this.clearSoftTimer();
     this.engine?.setPlaybackRate(1);
   }
 
-  applyInitial(state: VideoState): void {
+  /**
+   * Apply an authoritative server state. Called for every welcome, every
+   * discrete event (`video_apply`) and every 5s heartbeat (`video_sync`) — the
+   * controller tells them apart by the sequence number:
+   *  - seq advanced      → discrete event: snap to the new position.
+   *  - seq went backwards → server restarted: re-baseline from scratch.
+   *  - seq unchanged     → heartbeat: gentle drift correction only.
+   *
+   * `force` re-applies as a re-baseline regardless of seq — used to catch a
+   * late joiner up once they click through the browser's autoplay block.
+   */
+  applyServerState(state: VideoState, force = false): void {
+    const engine = this.engine;
+    if (!engine) return;
+
+    // seq only ever decreases when the server process restarted (TCP keeps WS
+    // messages ordered within a session), so a backwards step is a re-baseline.
+    const rebaseline = force || !this.hasBaseline || state.lastEventSeq < this.lastSeq;
+    const discrete = state.lastEventSeq > this.lastSeq;
     this.lastSeq = state.lastEventSeq;
-    if (!this.engine) return;
-    const target = this.targetPosition(state.positionSec, state.anchorServerTs, state.status === 'playing');
-    this.engine.beginRemoteUpdate();
-    this.engine.seek(target);
-    if (state.status === 'playing') {
-      void this.engine.play().catch(() => {
-        /* autoplay denied — overlay will be shown */
-      });
-    } else {
-      this.engine.pause();
-    }
-    this.engine.endRemoteUpdate();
-  }
+    this.hasBaseline = true;
+    this.intendedStatus = state.status;
 
-  applyEvent(msg: S2CVideoApply): void {
-    if (msg.seq < this.lastSeq) return;
-    this.lastSeq = msg.seq;
-    if (!this.engine) return;
-    const target = this.targetPosition(msg.positionSec, msg.anchorServerTs, msg.status === 'playing');
-    this.engine.beginRemoteUpdate();
-    const drift = Math.abs(this.engine.getCurrentTime() - target);
-    if (msg.action === 'seek' || drift > HARD_SEEK_THRESHOLD_SEC) {
-      this.engine.seek(target);
-    }
-    if (msg.status === 'playing') {
-      void this.engine.play().catch(() => undefined);
-    } else {
-      this.engine.pause();
-    }
-    this.engine.endRemoteUpdate();
-  }
+    const playing = state.status === 'playing';
+    const target = this.targetPosition(state.positionSec, state.anchorServerTs, playing);
 
-  applySync(msg: S2CVideoSync): void {
-    if (msg.seq < this.lastSeq) return;
-    this.lastSeq = msg.seq;
-    if (!this.engine) return;
-
-    if (msg.status === 'paused') {
-      const target = msg.positionSec;
-      const drift = Math.abs(this.engine.getCurrentTime() - target);
-      this.engine.beginRemoteUpdate();
-      if (drift > HARD_SEEK_THRESHOLD_SEC) this.engine.seek(target);
-      if (!this.engine.isPaused()) this.engine.pause();
-      this.engine.endRemoteUpdate();
-      return;
-    }
-
-    const target = this.targetPosition(msg.positionSec, msg.anchorServerTs, true);
-    const drift = this.engine.getCurrentTime() - target;
-    const absDrift = Math.abs(drift);
-
-    if (absDrift < SOFT_CORRECTION_THRESHOLD_SEC) {
-      this.engine.setPlaybackRate(1);
-      if (this.softCorrectionTimer) {
-        clearTimeout(this.softCorrectionTimer);
-        this.softCorrectionTimer = null;
+    engine.beginRemoteUpdate();
+    try {
+      if (rebaseline || discrete) {
+        // Authoritative change — snap into place when meaningfully off.
+        if (Math.abs(engine.getCurrentTime() - target) > EVENT_SNAP_SEC) {
+          engine.seek(target);
+        }
+        engine.setPlaybackRate(1);
+        this.clearSoftTimer();
+      } else {
+        // Heartbeat — keep accumulated drift inside the soft band.
+        this.driftCorrect(engine, state.positionSec, target, playing);
       }
-      if (this.engine.isPaused()) {
-        this.engine.beginRemoteUpdate();
-        void this.engine.play().catch(() => undefined);
-        this.engine.endRemoteUpdate();
+      if (playing) {
+        void engine.play().catch(() => {
+          /* autoplay blocked — surfaced separately via the engine 'error' event */
+        });
+      } else {
+        engine.pause();
+      }
+    } finally {
+      engine.endRemoteUpdate();
+    }
+  }
+
+  private driftCorrect(
+    engine: PlayerEngine,
+    positionSec: number,
+    target: number,
+    playing: boolean,
+  ): void {
+    if (!playing) {
+      if (Math.abs(engine.getCurrentTime() - positionSec) > HARD_BAND_SEC) {
+        engine.seek(positionSec);
       }
       return;
     }
-    if (absDrift >= HARD_SEEK_THRESHOLD_SEC) {
-      this.engine.beginRemoteUpdate();
-      this.engine.seek(target);
-      this.engine.setPlaybackRate(1);
-      if (this.engine.isPaused()) void this.engine.play().catch(() => undefined);
-      this.engine.endRemoteUpdate();
+    const drift = engine.getCurrentTime() - target; // +ahead / -behind
+    const abs = Math.abs(drift);
+    if (abs < SOFT_BAND_SEC) {
+      engine.setPlaybackRate(1);
+      this.clearSoftTimer();
       return;
     }
-    const rate = drift > 0 ? 0.94 : 1.06;
-    this.engine.setPlaybackRate(rate);
-    if (this.softCorrectionTimer) clearTimeout(this.softCorrectionTimer);
-    this.softCorrectionTimer = setTimeout(() => {
+    if (abs >= HARD_BAND_SEC) {
+      engine.seek(target);
+      engine.setPlaybackRate(1);
+      this.clearSoftTimer();
+      return;
+    }
+    // Nudge: slow down when ahead of the room, speed up when behind it.
+    engine.setPlaybackRate(drift > 0 ? 0.94 : 1.06);
+    this.clearSoftTimer();
+    this.softTimer = setTimeout(() => {
       this.engine?.setPlaybackRate(1);
-      this.softCorrectionTimer = null;
-    }, SOFT_CORRECTION_DURATION_MS);
-    if (this.engine.isPaused()) {
-      this.engine.beginRemoteUpdate();
-      void this.engine.play().catch(() => undefined);
-      this.engine.endRemoteUpdate();
-    }
+      this.softTimer = null;
+    }, SOFT_CORRECTION_MS);
+  }
+
+  private handleEnginePlay(): void {
+    const engine = this.engine;
+    if (!engine) return;
+    // Already playing as far as the room is concerned → this is the echo of our
+    // own catch-up (or a joiner clicking past the autoplay block). Drop it.
+    if (this.intendedStatus === 'playing') return;
+    this.intendedStatus = 'playing';
+    this.opts.onLocalIntent({ kind: 'play', positionSec: engine.getCurrentTime() });
+  }
+
+  private handleEnginePause(): void {
+    const engine = this.engine;
+    if (!engine) return;
+    if (this.intendedStatus === 'paused') return;
+    // The media element fires 'pause' right before 'ended'; that is the video
+    // finishing, not a user pausing the room for everyone.
+    const duration = engine.getDuration();
+    if (duration > 0 && engine.getCurrentTime() >= duration - END_EPSILON_SEC) return;
+    this.intendedStatus = 'paused';
+    this.opts.onLocalIntent({ kind: 'pause', positionSec: engine.getCurrentTime() });
   }
 
   private targetPosition(positionSec: number, anchorServerTs: number, isPlaying: boolean): number {
     if (!isPlaying) return positionSec;
     const nowServer = Date.now() + this.opts.getClockOffsetMs();
     return positionSec + Math.max(0, (nowServer - anchorServerTs) / 1000);
+  }
+
+  private clearSoftTimer(): void {
+    if (this.softTimer) {
+      clearTimeout(this.softTimer);
+      this.softTimer = null;
+    }
   }
 }

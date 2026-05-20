@@ -1,11 +1,14 @@
 import { useMemo } from 'react';
-import type { ReactionEvent } from '@vellin/shared';
+import { useRoomStore } from '../../stores/roomStore';
 
-interface ReactionsOverlayProps {
-  reactions: ReactionEvent[];
-}
-
-export function ReactionsOverlay({ reactions }: ReactionsOverlayProps) {
+/**
+ * Flying-emoji layer. Rendered *inside* the player element so it survives the
+ * Fullscreen API — an overlay placed outside the fullscreen element would be
+ * hidden behind the top-layer and reactions would never show in fullscreen.
+ * Reads reactions straight from the store so it needs no prop threading.
+ */
+export function ReactionsOverlay() {
+  const reactions = useRoomStore((s) => s.reactions);
   const items = useMemo(
     () =>
       reactions.map((r) => ({
