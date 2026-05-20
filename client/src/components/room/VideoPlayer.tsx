@@ -529,7 +529,7 @@ export function VideoPlayer({
             }}
           />
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, color: '#fff', fontSize: 13, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#fff', fontSize: 13, flexWrap: 'wrap' }}>
           {canManagePlaylist && hasPrev && (
             <button
               onClick={() => send({ t: 'playlist_prev', clientTs: Date.now() })}
@@ -591,15 +591,21 @@ export function VideoPlayer({
             style={{ width: 100, accentColor: '#fff' }}
           />
           <div style={{ flex: 1, minWidth: 0 }} />
-          <Chip tone="neutral">
-            {kindLabel(resolved.kind)}
-            {resolved.kind === 'torrent' && torrentStats
-              ? ` · ${torrentStats.peers} peers`
-              : ''}
-          </Chip>
-          <Chip tone={video.status === 'playing' ? 'live' : 'neutral'}>
-            {video.status === 'playing' ? 'LIVE' : 'PAUSED'}
-          </Chip>
+          {/* Source/status chips are informational — hidden on narrow screens
+              so the control row never wraps and orphans the trailing buttons. */}
+          <span className="hide-on-mobile" style={{ display: 'inline-flex' }}>
+            <Chip tone="neutral">
+              {kindLabel(resolved.kind)}
+              {resolved.kind === 'torrent' && torrentStats
+                ? ` · ${torrentStats.peers} peers`
+                : ''}
+            </Chip>
+          </span>
+          <span className="hide-on-mobile" style={{ display: 'inline-flex' }}>
+            <Chip tone={video.status === 'playing' ? 'live' : 'neutral'}>
+              {video.status === 'playing' ? 'LIVE' : 'PAUSED'}
+            </Chip>
+          </span>
           {canSetVideoUrl && (
             <button onClick={onRequestUrl} title="Сменить видео" aria-label="Change video">
               <Icon name="film" size={18} />

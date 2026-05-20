@@ -9,6 +9,7 @@ interface UIState {
   chatCollapsed: boolean;
   setTheme: (t: Theme) => void;
   toggleChat: () => void;
+  setChatCollapsed: (collapsed: boolean) => void;
   applyTheme: () => void;
 }
 
@@ -44,6 +45,11 @@ export const useUIStore = create<UIState>((set, get) => {
       const next = !get().chatCollapsed;
       set({ chatCollapsed: next });
       persist({ theme: get().theme, chatCollapsed: next });
+    },
+    setChatCollapsed: (collapsed) => {
+      if (get().chatCollapsed === collapsed) return;
+      set({ chatCollapsed: collapsed });
+      persist({ theme: get().theme, chatCollapsed: collapsed });
     },
     applyTheme: () => {
       document.documentElement.setAttribute('data-theme', get().theme);

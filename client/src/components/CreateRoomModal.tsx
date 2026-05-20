@@ -120,7 +120,7 @@ export function CreateRoomModal({ onClose, onCreated }: CreateRoomModalProps) {
           />
         </label>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: 10 }}>
           <button
             type="button"
             onClick={() => setIsPrivate(false)}

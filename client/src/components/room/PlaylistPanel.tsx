@@ -133,7 +133,7 @@ export function PlaylistPanel({ playlist, canManage, send }: Props) {
                 placeholder="https://… — название подтянется автоматически"
                 style={{
                   flex: 1,
-                  height: 34,
+                  height: 30,
                   padding: '0 12px',
                   borderRadius: 'var(--r-md)',
                   border: '1px solid var(--line-2)',

@@ -2,11 +2,14 @@ import { Link } from 'react-router-dom';
 import { Button, Chip, MountainPoster, VellinLogo } from '../shared';
 import { Icon } from '../shared/Icon';
 import { useAuthStore } from '../stores/authStore';
-import { useIsMobile } from '../hooks/useMediaQuery';
+import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery';
 
 export function Landing() {
   const user = useAuthStore((s) => s.user);
   const isMobile = useIsMobile();
+  // On phones — collapse the demo-poster chips so they never wrap: the LIVE
+  // chip drops to a bare count and the title chip is hidden.
+  const compactPoster = useMediaQuery('(max-width: 420px)');
 
   return (
     <div
@@ -63,7 +66,7 @@ export function Landing() {
       <main
         style={{
           flex: 1,
-          padding: isMobile ? '24px max(16px, 4vw) 48px' : '40px max(24px, 5vw) 80px',
+          padding: isMobile ? '24px max(16px, 4vw) 48px' : '40px max(16px, 4vw) 80px',
           display: 'grid',
           gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.05fr) minmax(0, 1fr)',
           gap: isMobile ? 28 : 48,
@@ -72,7 +75,7 @@ export function Landing() {
       >
         <section style={{ maxWidth: 600, display: 'flex', flexDirection: 'column', gap: 24 }}>
           <Chip tone="accent" icon="sparkles" style={{ alignSelf: 'flex-start' }}>
-            beta v 0.1.0 · создан для просмотра Универа
+            beta v 0.1.1 · создан для просмотра Универа
           </Chip>
           <h1
             style={{
@@ -111,7 +114,7 @@ export function Landing() {
               </Button>
             </Link>
           </div>
-          <div style={{ display: 'flex', gap: 24, marginTop: 12, color: 'var(--text-2)', fontSize: 13 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 20px', marginTop: 12, color: 'var(--text-2)', fontSize: 13 }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <Icon name="check" size={14} /> Heartbeat sync 5с
             </span>
@@ -142,16 +145,37 @@ export function Landing() {
               inset: 0,
               display: 'flex',
               alignItems: 'flex-end',
+              alignContent: 'flex-end',
               padding: 24,
               background: 'linear-gradient(to top, rgba(0,0,0,0.65), transparent 55%)',
-              gap: 16,
+              gap: 8,
               flexWrap: 'wrap',
             }}
           >
-            <Chip tone="live">LIVE · 4 участника</Chip>
-            <Chip tone="neutral" icon="film">
-              Big Buck Bunny
+            <Chip tone="live" hideDot={compactPoster}>
+              {compactPoster ? (
+                <>
+                  LIVE
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: '#fff',
+                      boxShadow: '0 0 6px #fff',
+                    }}
+                  />
+                  4
+                </>
+              ) : (
+                'LIVE · 4 участника'
+              )}
             </Chip>
+            {!compactPoster && (
+              <Chip tone="neutral" icon="film">
+                Big Buck Bunny
+              </Chip>
+            )}
             <Chip tone="success" icon="check">
               в синхроне
             </Chip>

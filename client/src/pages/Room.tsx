@@ -43,17 +43,17 @@ export function Room() {
   const kicked = useRoomStore((s) => s.kicked);
   const chatCollapsed = useUIStore((s) => s.chatCollapsed);
   const toggleChat = useUIStore((s) => s.toggleChat);
+  const setChatCollapsed = useUIStore((s) => s.setChatCollapsed);
   const isMobile = useIsMobile();
 
   // On mobile, the chat is a bottom-sheet that overlays the player; it would be
   // jarring to land in a room with the sheet already open (especially if the
-  // user's last desktop session left it expanded). Force-collapse once on
-  // mobile entry; user can tap the pill to reopen.
+  // user's last desktop session left it expanded). Force-collapse on mobile
+  // entry; user can tap the pill to reopen. setChatCollapsed is idempotent, so
+  // this stays correct under StrictMode's double-invoked effects.
   useEffect(() => {
-    if (isMobile && !chatCollapsed) toggleChat();
-    // We only want this on mount/breakpoint change, not on every toggle.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMobile]);
+    if (isMobile) setChatCollapsed(true);
+  }, [isMobile, setChatCollapsed]);
 
   const [password, setPassword] = useState('');
   const [access, setAccess] = useState<AccessState>({ kind: 'loading' });
@@ -211,7 +211,7 @@ export function Room() {
           height: 60,
           display: 'flex',
           alignItems: 'center',
-          padding: isMobile ? '0 12px' : '0 20px',
+          padding: isMobile ? '0 12px' : '0 16px',
           gap: isMobile ? 8 : 16,
           borderBottom: '1px solid var(--line-1)',
           background: 'var(--bg-1)',
@@ -284,7 +284,7 @@ export function Room() {
       {wsError && (
         <div
           style={{
-            padding: '8px 20px',
+            padding: isMobile ? '8px 12px' : '8px 16px',
             background: 'rgba(209,39,27,0.12)',
             color: 'var(--accent-hi)',
             fontSize: 13,
@@ -302,7 +302,11 @@ export function Room() {
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : chatCollapsed ? '1fr 72px' : '1fr 620px',
+          gridTemplateColumns: isMobile
+            ? '1fr'
+            : chatCollapsed
+              ? '1fr 56px'
+              : '1fr clamp(340px, 38vw, 620px)',
           gap: 12,
           padding: isMobile ? 12 : 16,
           // Reserve bottom space for the collapsed chat pill on mobile.
@@ -501,7 +505,7 @@ function RoomInfoCards({
         )}
       </InfoCard>
       <InfoCard title="Участники" icon="users">
-        <div style={{ display: 'flex', gap: -8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
           {participants.slice(0, 5).map((p, i) => (
             <div key={p.userId} style={{ marginLeft: i === 0 ? 0 : -8 }}>
               <Avatar

@@ -94,7 +94,7 @@ export function RoomChat({
           <span style={{ fontSize: 14, fontWeight: 600 }}>Чат</span>
           <Chip tone="neutral">{messages.length}</Chip>
           <div style={{ flex: 1 }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: -6 }}>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
             {participants.slice(0, 3).map((p, i) => (
               <div key={p.userId} style={{ marginLeft: i === 0 ? 0 : -6 }}>
                 <Avatar name={p.username} seed={p.avatarSeed} size={22} />

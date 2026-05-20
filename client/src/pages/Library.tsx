@@ -48,7 +48,7 @@ export function Library() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
+    <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
       <header
         style={{
           height: 72,
@@ -116,27 +116,32 @@ export function Library() {
         >
           <Icon name="link" size={16} style={{ color: 'var(--text-2)' }} />
           <span style={{ color: 'var(--text-1)', fontSize: 14 }}>Перейти по slug:</span>
-          <input
-            value={joinSlug}
-            onChange={(e) => setJoinSlug(e.target.value)}
-            placeholder="dusk-alps-7f3"
-            style={{
-              flex: '1 1 220px',
-              height: 36,
-              padding: '0 12px',
-              borderRadius: 'var(--r-md)',
-              border: '1px solid var(--line-2)',
-              background: 'var(--bg-2)',
-              color: 'var(--text-0)',
-              fontSize: 14,
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void join(joinSlug);
-            }}
-          />
-          <Button variant="secondary" iconRight="arrow" onClick={() => void join(joinSlug)} disabled={!joinSlug.trim()}>
-            Войти
-          </Button>
+          {/* input + button stay grouped so the button never wraps away on
+              its own line — the pair wraps together as one unit on mobile. */}
+          <div style={{ display: 'flex', gap: 8, flex: '1 1 240px', minWidth: 0 }}>
+            <input
+              value={joinSlug}
+              onChange={(e) => setJoinSlug(e.target.value)}
+              placeholder="dusk-alps-7f3"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                height: 38,
+                padding: '0 12px',
+                borderRadius: 'var(--r-md)',
+                border: '1px solid var(--line-2)',
+                background: 'var(--bg-2)',
+                color: 'var(--text-0)',
+                fontSize: 14,
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void join(joinSlug);
+              }}
+            />
+            <Button variant="secondary" iconRight="arrow" onClick={() => void join(joinSlug)} disabled={!joinSlug.trim()}>
+              Войти
+            </Button>
+          </div>
           {joinError && <span style={{ color: 'var(--accent-hi)', fontSize: 12 }}>{joinError}</span>}
         </section>
 
@@ -157,7 +162,7 @@ export function Library() {
         <section
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))',
             gap: 16,
           }}
         >
