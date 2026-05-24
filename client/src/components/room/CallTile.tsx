@@ -43,7 +43,10 @@ export function CallTile({
 
   const isCircle = shape === 'circle';
   const tileWidth = size;
-  const tileHeight = isCircle ? size : Math.round(size * (9 / 16));
+  // Rect tiles let the grid decide width (fills its 1fr cell); only the
+  // aspect ratio is fixed. Circles stay an exact square so the round mask
+  // doesn't squash. The fallback height is for sizing inner content (avatar).
+  const fallbackHeight = isCircle ? tileWidth : Math.round(tileWidth * (9 / 16));
   const speakingRing =
     speaking && member.audio
       ? `0 0 0 2px var(--accent-hi), 0 0 16px 2px rgba(232,70,42,0.45)`
@@ -58,8 +61,9 @@ export function CallTile({
       title={username}
       style={{
         position: 'relative',
-        width: tileWidth,
-        height: tileHeight,
+        width: isCircle ? tileWidth : '100%',
+        height: isCircle ? tileWidth : undefined,
+        aspectRatio: isCircle ? '1 / 1' : '16 / 9',
         borderRadius: isCircle ? '50%' : 14,
         overflow: 'hidden',
         background: 'var(--bg-3)',
@@ -92,7 +96,7 @@ export function CallTile({
             justifyContent: 'center',
           }}
         >
-          <Avatar name={username} seed={avatarSeed} size={Math.round(tileHeight * 0.6)} />
+          <Avatar name={username} seed={avatarSeed} size={Math.round(fallbackHeight * 0.6)} />
         </div>
       )}
       {!member.audio && (

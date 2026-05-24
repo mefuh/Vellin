@@ -115,6 +115,11 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       audioCtxRef.current = new Ctor();
     }
+    // Browsers start the context suspended until a user gesture — resume on
+    // each entry so attaching an analyser doesn't silently no-op.
+    if (audioCtxRef.current.state === 'suspended') {
+      void audioCtxRef.current.resume().catch(() => undefined);
+    }
     return audioCtxRef.current;
   }, []);
 
@@ -200,17 +205,17 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       const rec: PeerRecord = { pc, polite, makingOffer: false, isSettingRemoteAnswer: false };
 
       // Pre-create both transceivers so toggling mic/camera doesn't reshape SDP.
-      pc.addTransceiver('audio', { direction: 'sendrecv' });
-      pc.addTransceiver('video', { direction: 'sendrecv' });
+      // Hold onto the returned transceivers — using `pc.getSenders()` by index
+      // is fragile if the browser ever reorders or adds an implicit one.
+      const audioTx = pc.addTransceiver('audio', { direction: 'sendrecv' });
+      const videoTx = pc.addTransceiver('video', { direction: 'sendrecv' });
 
-      // Attach our current tracks to the senders (in slot order: audio, video).
       const local = localStreamRef.current;
       if (local) {
-        const senders = pc.getSenders();
         const audioTrack = local.getAudioTracks()[0] ?? null;
         const videoTrack = local.getVideoTracks()[0] ?? null;
-        if (senders[0] && audioTrack) void senders[0].replaceTrack(audioTrack);
-        if (senders[1] && videoTrack) void senders[1].replaceTrack(videoTrack);
+        if (audioTrack) void audioTx.sender.replaceTrack(audioTrack);
+        if (videoTrack) void videoTx.sender.replaceTrack(videoTrack);
       }
 
       pc.onicecandidate = (ev) => {
@@ -228,7 +233,10 @@ export function useCall(opts: UseCallOpts): UseCallApi {
           next.set(peerUserId, stream);
           return next;
         });
-        if (ev.track.kind === 'audio') attachAnalyser(peerUserId, stream);
+        // NB: do NOT attach a Web Audio analyser to a remote PeerConnection
+        // stream — Chrome silently mutes the <audio> playback for that stream
+        // once a MediaStreamAudioSourceNode owns it. Active-speaker indicator
+        // for remote peers is intentionally left for a future getStats() pass.
       };
 
       pc.onnegotiationneeded = async () => {

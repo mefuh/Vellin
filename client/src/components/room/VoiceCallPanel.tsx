@@ -69,8 +69,8 @@ export function VoiceCallPanel() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
-            gap: 8,
+            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+            gap: 10,
           }}
         >
           {callMembers.map((m) => (
