@@ -23,7 +23,16 @@ function RemoteAudio({ stream }: { stream: MediaStream }) {
     const el = ref.current;
     if (!el) return;
     if (el.srcObject !== stream) el.srcObject = stream;
-    el.play().catch(() => undefined);
+    console.log(
+      `[call] RemoteAudio: stream=${stream.id} tracks=${stream
+        .getTracks()
+        .map((t) => `${t.kind}(enabled=${t.enabled},muted=${t.muted})`)
+        .join(',')}`,
+    );
+    el.play().then(
+      () => console.log(`[call] RemoteAudio: play() OK for ${stream.id}`),
+      (err) => console.warn(`[call] RemoteAudio: play() FAIL for ${stream.id}`, err),
+    );
   }, [stream]);
   return <audio ref={ref} autoPlay playsInline />;
 }

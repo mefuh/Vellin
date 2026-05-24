@@ -204,18 +204,26 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       const polite = myUserId < peerUserId;
       const rec: PeerRecord = { pc, polite, makingOffer: false, isSettingRemoteAnswer: false };
 
-      // Pre-create both transceivers so toggling mic/camera doesn't reshape SDP.
-      // Hold onto the returned transceivers — using `pc.getSenders()` by index
-      // is fragile if the browser ever reorders or adds an implicit one.
-      const audioTx = pc.addTransceiver('audio', { direction: 'sendrecv' });
-      const videoTx = pc.addTransceiver('video', { direction: 'sendrecv' });
-
+      // addTrack is the simplest, most battle-tested pattern: it implicitly
+      // creates a transceiver with the track attached, so the initial offer
+      // SDP always correctly describes our local media.
       const local = localStreamRef.current;
       if (local) {
-        const audioTrack = local.getAudioTracks()[0] ?? null;
-        const videoTrack = local.getVideoTracks()[0] ?? null;
-        if (audioTrack) void audioTx.sender.replaceTrack(audioTrack);
-        if (videoTrack) void videoTx.sender.replaceTrack(videoTrack);
+        for (const track of local.getTracks()) {
+          try {
+            pc.addTrack(track, local);
+          } catch (err) {
+            console.warn(`[call] ${peerUserId} addTrack(${track.kind}) failed`, err);
+          }
+        }
+        console.log(
+          `[call] createPeer ${peerUserId} polite=${polite} tracks=${local
+            .getTracks()
+            .map((t) => `${t.kind}:${t.enabled}`)
+            .join(',')}`,
+        );
+      } else {
+        console.warn(`[call] createPeer ${peerUserId}: no local stream — peer will be receive-only`);
       }
 
       pc.onicecandidate = (ev) => {
@@ -227,6 +235,12 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         // The browser emits ontrack as tracks are added; the first stream entry
         // is the inbound stream for this peer.
         const stream = ev.streams[0] ?? new MediaStream([ev.track]);
+        console.log(
+          `[call] ${peerUserId} ontrack ${ev.track.kind} streamId=${stream.id} streamTracks=${stream
+            .getTracks()
+            .map((t) => t.kind)
+            .join(',')}`,
+        );
         setRemoteStreams((prev) => {
           if (prev.get(peerUserId) === stream) return prev;
           const next = new Map(prev);
@@ -242,17 +256,19 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       pc.onnegotiationneeded = async () => {
         try {
           rec.makingOffer = true;
+          console.log(`[call] ${peerUserId} negotiationneeded → creating offer`);
           await pc.setLocalDescription();
           if (!pc.localDescription) return;
           sendSignal(peerUserId, { kind: 'offer', sdp: pc.localDescription.sdp });
         } catch (err) {
-          console.warn('call:negotiation failed', err);
+          console.warn('[call] negotiation failed', err);
         } finally {
           rec.makingOffer = false;
         }
       };
 
       pc.oniceconnectionstatechange = () => {
+        console.log(`[call] ${peerUserId} ICE: ${pc.iceConnectionState}`);
         if (pc.iceConnectionState === 'failed') {
           try {
             pc.restartIce();
@@ -260,6 +276,14 @@ export function useCall(opts: UseCallOpts): UseCallApi {
             /* ignore */
           }
         }
+      };
+
+      pc.onconnectionstatechange = () => {
+        console.log(`[call] ${peerUserId} connection: ${pc.connectionState}`);
+      };
+
+      pc.onsignalingstatechange = () => {
+        console.log(`[call] ${peerUserId} signaling: ${pc.signalingState}`);
       };
 
       pcsRef.current.set(peerUserId, rec);
@@ -315,12 +339,20 @@ export function useCall(opts: UseCallOpts): UseCallApi {
             !rec.makingOffer &&
             (pc.signalingState === 'stable' || rec.isSettingRemoteAnswer);
           const offerCollision = !readyForOffer;
-          if (!polite && offerCollision) return; // impolite ignores
+          console.log(
+            `[call] recv offer from ${fromUserId} state=${pc.signalingState} makingOffer=${rec.makingOffer} polite=${polite} collision=${offerCollision}`,
+          );
+          if (!polite && offerCollision) {
+            console.log(`[call] glare with ${fromUserId}: impolite, ignoring`);
+            return;
+          }
           await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
           await pc.setLocalDescription();
           if (!pc.localDescription) return;
           sendSignal(fromUserId, { kind: 'answer', sdp: pc.localDescription.sdp });
+          console.log(`[call] sent answer to ${fromUserId}`);
         } else if (payload.kind === 'answer') {
+          console.log(`[call] recv answer from ${fromUserId} state=${pc.signalingState}`);
           rec.isSettingRemoteAnswer = true;
           await pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
           rec.isSettingRemoteAnswer = false;
@@ -329,11 +361,11 @@ export function useCall(opts: UseCallOpts): UseCallApi {
             await pc.addIceCandidate(payload.candidate ?? undefined);
           } catch (e) {
             // Ignore stale ICE after rollback; rethrow real issues.
-            if (!rec.makingOffer) console.warn('call:addIceCandidate', e);
+            if (!rec.makingOffer) console.warn('[call] addIceCandidate', e);
           }
         }
       } catch (err) {
-        console.warn('call:signal handling failed', err);
+        console.warn('[call] signal handling failed', err);
       }
     });
     return off;
@@ -445,11 +477,18 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     if (!stream) return;
     const existing = stream.getVideoTracks()[0];
     if (existing) {
+      // Remove the camera: stop the track, drop the sender, trigger renegotiation.
       existing.stop();
       stream.removeTrack(existing);
       for (const rec of pcsRef.current.values()) {
         const sender = rec.pc.getSenders().find((s) => s.track === existing);
-        if (sender) await sender.replaceTrack(null);
+        if (sender) {
+          try {
+            rec.pc.removeTrack(sender);
+          } catch (err) {
+            console.warn('[call] removeTrack failed', err);
+          }
+        }
       }
       setMyStream(new MediaStream(stream.getTracks()));
       broadcastMyMedia();
@@ -465,9 +504,14 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     const track = camStream.getVideoTracks()[0];
     if (!track) return;
     stream.addTrack(track);
+    // addTrack on each PC creates a new sender + transceiver and fires
+    // onnegotiationneeded — perfect-negotiation will exchange the new SDP.
     for (const rec of pcsRef.current.values()) {
-      const sender = rec.pc.getSenders().find((s) => !s.track || s.track.kind === 'video');
-      if (sender) await sender.replaceTrack(track);
+      try {
+        rec.pc.addTrack(track, stream);
+      } catch (err) {
+        console.warn('[call] addTrack(video) failed', err);
+      }
     }
     setMyStream(new MediaStream(stream.getTracks()));
     broadcastMyMedia();
