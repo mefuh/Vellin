@@ -26,11 +26,20 @@ import {
   handleVideoEnded,
 } from './handlers/playlist.js';
 import { handleReaction } from './handlers/reactions.js';
+import {
+  handleCallJoin,
+  handleCallLeave,
+  handleCallMedia,
+  handleCallSignal,
+} from './handlers/call.js';
 import { roomMutex } from '../utils/async-mutex.js';
 import { getOrCreateMembership } from '../rooms/membership.js';
 import { getEffectivePermissions } from '../rooms/permissions.js';
+import { getRtcConfig } from '../env.js';
 
-const MAX_MESSAGE_BYTES = 16 * 1024;
+// 32 KB — leaves comfortable headroom for SDP offers with bundled codecs
+// (typical 8–12 KB; some Chromium builds clear 16 KB).
+const MAX_MESSAGE_BYTES = 32 * 1024;
 
 export async function registerWebSocket(app: FastifyInstance): Promise<void> {
   app.get('/ws', { websocket: true }, async (socket, req) => {
@@ -119,6 +128,8 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       playlist: welcome.playlist,
       historyLength: welcome.historyLength,
       hostOnlyControl: false,
+      call: welcome.call,
+      rtc: getRtcConfig(),
     };
     ctx.send(welcomeMsg);
 
@@ -158,10 +169,6 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         sendError(ctx, 'invalid_payload', 'Message too large');
         return;
       }
-      if (!ctx.bucket.consume(1)) {
-        sendError(ctx, 'rate_limited', 'Slow down');
-        return;
-      }
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw.toString('utf-8'));
@@ -174,6 +181,13 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         return;
       }
       const c2sMsg = parsed as C2S;
+      // WebRTC signaling spikes during peer-mesh setup — half the cost so a
+      // 9-peer offer/answer/ICE storm doesn't trip the bucket.
+      const cost = c2sMsg.t === 'call_signal' ? 0.5 : 1;
+      if (!ctx.bucket.consume(cost)) {
+        sendError(ctx, 'rate_limited', 'Slow down');
+        return;
+      }
       if (c2sMsg.t !== 'pong') {
         logger.info(
           {
@@ -289,6 +303,23 @@ async function dispatch(msg: C2S, ctx: ConnectionContext, runtime: Awaited<Retur
 
     case 'reaction':
       handleReaction(runtime, ctx, msg);
+      return;
+
+    case 'call_join':
+      await roomMutex.run(`call:${runtime.roomId}`, () => handleCallJoin(runtime, ctx, msg));
+      return;
+
+    case 'call_leave':
+      await roomMutex.run(`call:${runtime.roomId}`, () => handleCallLeave(runtime, ctx, msg));
+      return;
+
+    case 'call_media':
+      await roomMutex.run(`call:${runtime.roomId}`, () => handleCallMedia(runtime, ctx, msg));
+      return;
+
+    case 'call_signal':
+      // Hot path — server only relays; no shared state mutation.
+      handleCallSignal(runtime, ctx, msg);
       return;
 
     default: {

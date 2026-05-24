@@ -11,7 +11,8 @@ export type IconName =
   | 'trash' | 'star' | 'arrow' | 'check' | 'sun' | 'moon' | 'image'
   | 'headphones' | 'speaker' | 'grid' | 'list' | 'filter' | 'sort'
   | 'arrowDown' | 'flame' | 'waveform' | 'refresh' | 'hash'
-  | 'userMinus' | 'userPlus' | 'gripVertical';
+  | 'userMinus' | 'userPlus' | 'gripVertical'
+  | 'video' | 'videoOff' | 'phone' | 'phoneOff';
 
 interface IconProps {
   name: IconName;
@@ -248,6 +249,28 @@ const PATHS: Record<IconName, ReactNode> = {
       <circle cx="15" cy="12" r="1.2" fill="currentColor" stroke="none" />
       <circle cx="9" cy="18" r="1.2" fill="currentColor" stroke="none" />
       <circle cx="15" cy="18" r="1.2" fill="currentColor" stroke="none" />
+    </>
+  ),
+  video: (
+    <>
+      <rect x="3" y="6" width="13" height="12" rx="2" />
+      <path d="M16 10l5-3v10l-5-3z" />
+    </>
+  ),
+  videoOff: (
+    <>
+      <path d="M16 10l5-3v10l-5-3" />
+      <path d="M3 6h10l3 3v9H6a3 3 0 01-3-3V6z" />
+      <path d="M3 3l18 18" />
+    </>
+  ),
+  phone: (
+    <path d="M22 16.92v3a2 2 0 01-2.18 2 19.8 19.8 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.8 19.8 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.13.96.37 1.9.72 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.91.35 1.85.59 2.81.72A2 2 0 0122 16.92z" />
+  ),
+  phoneOff: (
+    <>
+      <path d="M10.7 13.3a16 16 0 005 5l1.27-1.27a2 2 0 012.11-.45c.91.35 1.85.59 2.81.72A2 2 0 0122 19.3v.6a2 2 0 01-2.18 2 19.8 19.8 0 01-8.63-3.07 19.5 19.5 0 01-3.6-3" />
+      <path d="M3 3l18 18" />
     </>
   ),
 };

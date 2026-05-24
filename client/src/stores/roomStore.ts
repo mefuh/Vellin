@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import type {
+  CallMember,
+  CallSnapshot,
   ChatMessage,
   ParticipantInfo,
   PlaylistItem,
@@ -7,8 +9,13 @@ import type {
   RoomDetails,
   RoomPermissions,
   RoomRole,
+  RtcConfig,
   VideoState,
 } from '@vellin/shared';
+
+const EMPTY_CALL: CallSnapshot = { members: [], startedByUserId: null, startedAt: null };
+
+export type MyCallState = 'idle' | 'connecting' | 'in';
 
 interface RoomState {
   room: RoomDetails | null;
@@ -20,6 +27,14 @@ interface RoomState {
   messages: ChatMessage[];
   reactions: ReactionEvent[];
   kicked: boolean;
+  /** Server-authoritative voice/video call membership in this room. */
+  call: CallSnapshot;
+  /** ICE servers handed to RTCPeerConnection — supplied by welcome. */
+  rtc: RtcConfig | null;
+  /** Local call-state machine. */
+  myCallState: MyCallState;
+  /** Local mic/cam intent — kept in sync with server-confirmed state. */
+  myMedia: { audio: boolean; video: boolean };
   setRoom: (room: RoomDetails | null) => void;
   reset: () => void;
   applyWelcome: (data: {
@@ -29,6 +44,8 @@ interface RoomState {
     recentMessages: ChatMessage[];
     playlist: PlaylistItem[];
     historyLength: number;
+    call: CallSnapshot;
+    rtc: RtcConfig;
   }) => void;
   upsertParticipant: (p: ParticipantInfo) => void;
   removeParticipant: (userId: string) => void;
@@ -44,6 +61,12 @@ interface RoomState {
   removeReaction: (id: string) => void;
   updateVideo: (updater: (v: VideoState | null) => VideoState | null) => void;
   setVideoUrl: (url: string, video: VideoState) => void;
+  applyCallSnapshot: (snapshot: CallSnapshot) => void;
+  upsertCallMember: (member: CallMember) => void;
+  removeCallMember: (userId: string) => void;
+  setCallMemberMedia: (userId: string, audio: boolean, video: boolean) => void;
+  setMyCallState: (s: MyCallState) => void;
+  setMyMedia: (m: { audio: boolean; video: boolean }) => void;
 }
 
 export const useRoomStore = create<RoomState>((set) => ({
@@ -56,6 +79,10 @@ export const useRoomStore = create<RoomState>((set) => ({
   messages: [],
   reactions: [],
   kicked: false,
+  call: EMPTY_CALL,
+  rtc: null,
+  myCallState: 'idle',
+  myMedia: { audio: false, video: false },
 
   setRoom: (room) => set({ room }),
 
@@ -70,9 +97,13 @@ export const useRoomStore = create<RoomState>((set) => ({
       messages: [],
       reactions: [],
       kicked: false,
+      call: EMPTY_CALL,
+      rtc: null,
+      myCallState: 'idle',
+      myMedia: { audio: false, video: false },
     }),
 
-  applyWelcome: ({ you, participants, video, recentMessages, playlist, historyLength }) =>
+  applyWelcome: ({ you, participants, video, recentMessages, playlist, historyLength, call, rtc }) =>
     set({
       you,
       participants,
@@ -80,6 +111,8 @@ export const useRoomStore = create<RoomState>((set) => ({
       playlist,
       historyLength,
       messages: recentMessages,
+      call,
+      rtc,
     }),
 
   upsertParticipant: (p) =>
@@ -125,4 +158,45 @@ export const useRoomStore = create<RoomState>((set) => ({
       video,
       room: s.room ? { ...s.room, videoUrl: url, videoPositionSec: 0, videoStatus: 'paused' } : s.room,
     })),
+
+  applyCallSnapshot: (snapshot) => set({ call: snapshot }),
+
+  upsertCallMember: (member) =>
+    set((s) => {
+      const others = s.call.members.filter((m) => m.userId !== member.userId);
+      const members = [...others, member].sort((a, b) => a.joinedAt - b.joinedAt);
+      const started = s.call.members.length === 0;
+      return {
+        call: {
+          members,
+          startedByUserId: started ? member.userId : s.call.startedByUserId,
+          startedAt: started ? member.joinedAt : s.call.startedAt,
+        },
+      };
+    }),
+
+  removeCallMember: (userId) =>
+    set((s) => {
+      const members = s.call.members.filter((m) => m.userId !== userId);
+      const empty = members.length === 0;
+      return {
+        call: {
+          members,
+          startedByUserId: empty ? null : s.call.startedByUserId,
+          startedAt: empty ? null : s.call.startedAt,
+        },
+      };
+    }),
+
+  setCallMemberMedia: (userId, audio, video) =>
+    set((s) => ({
+      call: {
+        ...s.call,
+        members: s.call.members.map((m) => (m.userId === userId ? { ...m, audio, video } : m)),
+      },
+    })),
+
+  setMyCallState: (myCallState) => set({ myCallState }),
+
+  setMyMedia: (myMedia) => set({ myMedia }),
 }));

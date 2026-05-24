@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { C2S, ChatMessage, ParticipantInfo } from '@vellin/shared';
 import { Avatar, Button, Chip } from '../../shared';
 import { Icon } from '../../shared/Icon';
+import { VoiceCallPanel } from './VoiceCallPanel';
 
 interface RoomChatProps {
   messages: ChatMessage[];
@@ -369,6 +370,8 @@ function ChatBody({
           );
         })}
       </div>
+
+      <VoiceCallPanel />
 
       <div
         ref={scrollRef}

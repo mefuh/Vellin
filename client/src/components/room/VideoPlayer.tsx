@@ -10,6 +10,7 @@ import { roomsApi } from '../../api/rooms';
 import { useRoomStore } from '../../stores/roomStore';
 import { useIsMobile } from '../../hooks/useMediaQuery';
 import { FullscreenChatOverlay } from './FullscreenChatOverlay';
+import { FullscreenCallOverlay } from './FullscreenCallOverlay';
 import { ReactionsOverlay } from './ReactionsOverlay';
 
 interface VideoPlayerProps {
@@ -510,6 +511,9 @@ export function VideoPlayer({
       {/* Fullscreen-only chat layer (desktop): the regular chat is off-screen
           in fullscreen, so messages are mirrored here — a recent-history panel
           while the controls are up, brief pop-ups while the player is idle. */}
+      {isFullscreen && !isMobile && (
+        <FullscreenCallOverlay expanded={controlsVisible} />
+      )}
       {isFullscreen && !isMobile && (
         <FullscreenChatOverlay
           expanded={controlsVisible}

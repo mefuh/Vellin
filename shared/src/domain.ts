@@ -177,3 +177,37 @@ export interface InviteLink {
   expiresAt: string | null;
   createdAt: string;
 }
+
+// ── Voice/video call ────────────────────────────────────────────────────
+
+/** Cap on simultaneous voice participants in one room's call. */
+export const CALL_MAX_VOICE = 10;
+/** Cap on simultaneous video tracks (a video slot also occupies a voice slot). */
+export const CALL_MAX_VIDEO = 4;
+
+export interface CallMember {
+  userId: string;
+  /** Mic track enabled (false = muted). */
+  audio: boolean;
+  /** Camera track enabled. */
+  video: boolean;
+  joinedAt: number;
+}
+
+export interface CallSnapshot {
+  members: CallMember[];
+  /** First member of the current call (null when call is empty). */
+  startedByUserId: string | null;
+  startedAt: number | null;
+}
+
+/** Portable mirror of browser `RTCIceServer` — usable on Node and client. */
+export interface IceServerConfig {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+export interface RtcConfig {
+  iceServers: IceServerConfig[];
+}

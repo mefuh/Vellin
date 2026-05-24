@@ -1,10 +1,13 @@
 import type {
+  CallMember,
+  CallSnapshot,
   ChatMessage,
   ParticipantInfo,
   PlaylistItem,
   ReactionEvent,
   RoomPermissions,
   RoomRole,
+  RtcConfig,
   VideoState,
   VideoStatus,
 } from './domain.js';
@@ -25,7 +28,11 @@ export type C2S =
   | C2SPlaylistRemove
   | C2SPlaylistReorder
   | C2SPlaylistPlay
-  | C2SPlaylistPrev;
+  | C2SPlaylistPrev
+  | C2SCallJoin
+  | C2SCallLeave
+  | C2SCallMedia
+  | C2SCallSignal;
 
 export interface C2SHello {
   t: 'hello';
@@ -108,6 +115,46 @@ export interface C2SPlaylistPrev {
   clientTs: number;
 }
 
+// ── Call signaling (C2S) ────────────────────────────────────────────────
+
+/** Portable mirror of `RTCIceCandidateInit` — structurally compatible with
+ *  the browser type when client passes it to `addIceCandidate`. */
+export interface IceCandidatePayload {
+  candidate?: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+  usernameFragment?: string | null;
+}
+
+/** Discriminated WebRTC signal envelope relayed peer-to-peer via the server. */
+export type CallSignalPayload =
+  | { kind: 'offer'; sdp: string }
+  | { kind: 'answer'; sdp: string }
+  | { kind: 'ice'; candidate: IceCandidatePayload | null };
+
+export interface C2SCallJoin {
+  t: 'call_join';
+  /** Initial intent — mic always starts muted regardless. */
+  wantVideo: boolean;
+  clientTs: number;
+}
+export interface C2SCallLeave {
+  t: 'call_leave';
+  clientTs: number;
+}
+export interface C2SCallMedia {
+  t: 'call_media';
+  audio: boolean;
+  video: boolean;
+  clientTs: number;
+}
+export interface C2SCallSignal {
+  t: 'call_signal';
+  toUserId: string;
+  payload: CallSignalPayload;
+  clientTs: number;
+}
+
 // ── Server → Client ─────────────────────────────────────────────────────
 export type S2C =
   | S2CWelcome
@@ -123,7 +170,13 @@ export type S2C =
   | S2CPermissionsUpdate
   | S2CUserKicked
   | S2CPing
-  | S2CError;
+  | S2CError
+  | S2CCallState
+  | S2CCallPeerJoined
+  | S2CCallPeerLeft
+  | S2CCallPeerMedia
+  | S2CCallSignalRelay
+  | S2CCallError;
 
 export interface S2CWelcome {
   t: 'welcome';
@@ -137,6 +190,10 @@ export interface S2CWelcome {
   historyLength: number;
   /** @deprecated Legacy flag — clients should derive controls from `you.permissions`. */
   hostOnlyControl: boolean;
+  /** Snapshot of the room's voice/video call at join time (members may be empty). */
+  call: CallSnapshot;
+  /** ICE servers for any RTCPeerConnections this client opens. */
+  rtc: RtcConfig;
 }
 export interface S2CUserJoin {
   t: 'user_join';
@@ -225,6 +282,42 @@ export interface S2CError {
     | 'duplicate_session'
     | 'kicked'
     | 'resolve_failed';
+  message: string;
+}
+
+// ── Call signaling (S2C) ────────────────────────────────────────────────
+
+export interface S2CCallState {
+  t: 'call_state';
+  snapshot: CallSnapshot;
+  serverTs: number;
+}
+export interface S2CCallPeerJoined {
+  t: 'call_peer_joined';
+  member: CallMember;
+  serverTs: number;
+}
+export interface S2CCallPeerLeft {
+  t: 'call_peer_left';
+  userId: string;
+  serverTs: number;
+}
+export interface S2CCallPeerMedia {
+  t: 'call_peer_media';
+  userId: string;
+  audio: boolean;
+  video: boolean;
+  serverTs: number;
+}
+export interface S2CCallSignalRelay {
+  t: 'call_signal_relay';
+  fromUserId: string;
+  payload: CallSignalPayload;
+  serverTs: number;
+}
+export interface S2CCallError {
+  t: 'call_error';
+  code: 'voice_full' | 'video_full' | 'guest_forbidden' | 'not_in_call' | 'invalid_target';
   message: string;
 }
 

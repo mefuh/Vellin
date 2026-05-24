@@ -1,5 +1,7 @@
 import type { Room, User } from '@prisma/client';
 import type {
+  CallMember,
+  CallSnapshot,
   ChatMessage,
   ParticipantInfo,
   PlaylistItem,
@@ -13,6 +15,8 @@ import type {
 } from '@vellin/shared';
 import {
   ALL_PERMISSIONS,
+  CALL_MAX_VIDEO,
+  CALL_MAX_VOICE,
   DEFAULT_GUEST_PERMISSIONS,
 } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
@@ -45,6 +49,20 @@ export interface Session {
   isOpen(): boolean;
 }
 
+/**
+ * Typed business failure from the voice/video call layer — mapped to
+ * `S2CCallError` by the handler. Plain `Error` still escapes as `S2CError`.
+ */
+export class CallError extends Error {
+  constructor(
+    readonly code: 'voice_full' | 'video_full' | 'guest_forbidden' | 'not_in_call' | 'invalid_target',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CallError';
+  }
+}
+
 interface SessionEntry {
   session: Session;
   joinedAt: number;
@@ -75,6 +93,10 @@ export class RoomRuntime {
 
   /** Sessions keyed by userId (one active session per user). */
   readonly participants = new Map<string, SessionEntry>();
+  /** Active voice/video call members keyed by userId. Empty = no active call. */
+  private readonly callMembers = new Map<string, CallMember>();
+  private callStartedAt: number | null = null;
+  private callStartedByUserId: string | null = null;
   readonly playlist: PlaylistItem[] = [];
   /** Last N played-and-replaced videos, newest at the end. Powers "previous". */
   private readonly history: PlaylistItem[] = [];
@@ -117,6 +139,9 @@ export class RoomRuntime {
       if (entry.pendingRemovalTimer) clearTimeout(entry.pendingRemovalTimer);
     }
     this.participants.clear();
+    this.callMembers.clear();
+    this.callStartedAt = null;
+    this.callStartedByUserId = null;
     roomStore.delete(this.roomId);
   }
 
@@ -144,6 +169,82 @@ export class RoomRuntime {
 
   snapshotPlaylist(): PlaylistItem[] {
     return this.playlist.map((p) => ({ ...p }));
+  }
+
+  // ── Call (voice/video) — callers must hold roomMutex 'call:<id>' ─────
+
+  snapshotCall(): CallSnapshot {
+    return {
+      members: [...this.callMembers.values()].map((m) => ({ ...m })),
+      startedByUserId: this.callStartedByUserId,
+      startedAt: this.callStartedAt,
+    };
+  }
+
+  callHas(userId: string): boolean {
+    return this.callMembers.has(userId);
+  }
+
+  joinCall(userId: string, wantVideo: boolean): CallMember {
+    const entry = this.participants.get(userId);
+    if (!entry) throw new CallError('not_in_call', 'Сначала войдите в комнату');
+    if (entry.session.principal.kind === 'guest') {
+      throw new CallError('guest_forbidden', 'Звонок доступен только зарегистрированным');
+    }
+    const existing = this.callMembers.get(userId);
+    if (existing) return { ...existing };
+    if (this.callMembers.size >= CALL_MAX_VOICE) {
+      throw new CallError('voice_full', `В звонке уже ${CALL_MAX_VOICE} участников`);
+    }
+    const videoSlotFree =
+      [...this.callMembers.values()].filter((m) => m.video).length < CALL_MAX_VIDEO;
+    const now = Date.now();
+    const member: CallMember = {
+      userId,
+      audio: false, // mic always starts muted
+      video: !!wantVideo && videoSlotFree,
+      joinedAt: now,
+    };
+    this.callMembers.set(userId, member);
+    if (this.callMembers.size === 1) {
+      this.callStartedAt = now;
+      this.callStartedByUserId = userId;
+    }
+    return { ...member };
+  }
+
+  leaveCall(userId: string): boolean {
+    const removed = this.callMembers.delete(userId);
+    if (this.callMembers.size === 0) {
+      this.callStartedAt = null;
+      this.callStartedByUserId = null;
+    }
+    return removed;
+  }
+
+  setCallMedia(userId: string, next: { audio: boolean; video: boolean }): CallMember {
+    const cur = this.callMembers.get(userId);
+    if (!cur) throw new CallError('not_in_call', 'Вы не в звонке');
+    if (next.video && !cur.video) {
+      const live = [...this.callMembers.values()].filter((m) => m.video).length;
+      if (live >= CALL_MAX_VIDEO) {
+        throw new CallError('video_full', `Камеры заняты (${CALL_MAX_VIDEO}/${CALL_MAX_VIDEO})`);
+      }
+    }
+    cur.audio = !!next.audio;
+    cur.video = !!next.video;
+    return { ...cur };
+  }
+
+  /** Cleans up call membership when a user is removed from the room outright. */
+  private evictFromCall(userId: string): boolean {
+    if (!this.callMembers.delete(userId)) return false;
+    if (this.callMembers.size === 0) {
+      this.callStartedAt = null;
+      this.callStartedByUserId = null;
+    }
+    this.broadcast({ t: 'call_peer_left', userId, serverTs: Date.now() });
+    return true;
   }
 
   listParticipants(): ParticipantInfo[] {
@@ -248,6 +349,7 @@ export class RoomRuntime {
       entry.pendingRemovalTimer = undefined;
     }
     this.participants.delete(targetUserId);
+    this.evictFromCall(targetUserId);
     try {
       session.close(4403, 'kicked');
     } catch {
@@ -328,6 +430,7 @@ export class RoomRuntime {
       const current = this.participants.get(userId);
       if (!current || current.session !== session) return;
       this.participants.delete(userId);
+      this.evictFromCall(userId);
       this.broadcast({ t: 'user_leave', userId, serverTs: Date.now() });
       if (this.participants.size === 0) {
         this.destroy();
@@ -657,6 +760,7 @@ export class RoomRuntime {
     you: ParticipantInfo;
     playlist: PlaylistItem[];
     historyLength: number;
+    call: CallSnapshot;
   }> {
     const recent = await prisma.message.findMany({
       where: { roomId: this.roomId },
@@ -694,6 +798,7 @@ export class RoomRuntime {
       recentMessages,
       playlist: this.snapshotPlaylist(),
       historyLength: this.history.length,
+      call: this.snapshotCall(),
       you:
         you ?? {
           userId: forUserId,

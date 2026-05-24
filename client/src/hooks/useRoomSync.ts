@@ -4,6 +4,7 @@ import { WSClient, type WSConnectionState } from '../ws/WSClient';
 import { useRoomStore } from '../stores/roomStore';
 import { roomsApi } from '../api/rooms';
 import { ApiHttpError } from '../api/client';
+import { callSignalBus } from '../ws/callSignalBus';
 
 export interface UseRoomSyncOpts {
   slug: string;
@@ -66,6 +67,8 @@ export function useRoomSync(opts: UseRoomSyncOpts): RoomSyncApi {
               recentMessages: msg.recentMessages,
               playlist: msg.playlist,
               historyLength: msg.historyLength,
+              call: msg.call,
+              rtc: msg.rtc,
             });
             break;
           case 'user_join':
@@ -144,6 +147,30 @@ export function useRoomSync(opts: UseRoomSyncOpts): RoomSyncApi {
           case 'ping':
             // handled inside WSClient
             break;
+          case 'call_state':
+            store.applyCallSnapshot(msg.snapshot);
+            break;
+          case 'call_peer_joined':
+            store.upsertCallMember(msg.member);
+            break;
+          case 'call_peer_left':
+            store.removeCallMember(msg.userId);
+            break;
+          case 'call_peer_media':
+            store.setCallMemberMedia(msg.userId, msg.audio, msg.video);
+            break;
+          case 'call_signal_relay':
+            callSignalBus.emit(msg.fromUserId, msg.payload);
+            break;
+          case 'call_error':
+            onErrorRef.current?.(msg.message);
+            break;
+          default: {
+            // Exhaustiveness check — fails compile if a new S2C variant
+            // is added to the union without handling here.
+            const _exhaustive: never = msg;
+            void _exhaustive;
+          }
         }
       },
       onStateChange: setState,

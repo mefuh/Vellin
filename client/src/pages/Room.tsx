@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { DEFAULT_GUEST_PERMISSIONS, type RoomPermissions } from '@vellin/shared';
+import { CALL_MAX_VOICE, DEFAULT_GUEST_PERMISSIONS, type RoomPermissions } from '@vellin/shared';
 import { Button, Chip, VellinLogo, Avatar } from '../shared';
 import { Icon } from '../shared/Icon';
 import { useAuthStore } from '../stores/authStore';
@@ -9,6 +9,8 @@ import { useUIStore } from '../stores/uiStore';
 import { roomsApi } from '../api/rooms';
 import { ApiHttpError } from '../api/client';
 import { useRoomSync } from '../hooks/useRoomSync';
+import { useCall } from '../hooks/useCall';
+import { CallProvider } from '../hooks/CallContext';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { VideoPlayer } from '../components/room/VideoPlayer';
 import { RoomChat } from '../components/room/RoomChat';
@@ -17,6 +19,8 @@ import { CreateRoomModal } from '../components/CreateRoomModal';
 import { PlaylistPanel } from '../components/room/PlaylistPanel';
 import { ParticipantMenu } from '../components/room/ParticipantMenu';
 import { PermissionsModal } from '../components/room/PermissionsModal';
+import { RemoteAudioMixer } from '../components/room/RemoteAudioMixer';
+import { CallBanner } from '../components/room/CallBanner';
 import { membersApi } from '../api/members';
 
 type AccessState =
@@ -118,6 +122,22 @@ export function Room() {
     [send],
   );
 
+  // ── Voice/video call ──────────────────────────────────────────────────
+  const rtcConfig = useRoomStore((s) => s.rtc);
+  const callMembers = useRoomStore((s) => s.call.members);
+  const setMyCallStateStore = useRoomStore((s) => s.setMyCallState);
+  const callApi = useCall({
+    myUserId: you?.userId ?? null,
+    myUserKind: you?.kind ?? null,
+    rtcConfig,
+    callMembers,
+    wsState,
+    send,
+  });
+  useEffect(() => {
+    setMyCallStateStore(callApi.state);
+  }, [callApi.state, setMyCallStateStore]);
+
   // Redirect kicked users back to the library.
   useEffect(() => {
     if (!kicked) return;
@@ -194,6 +214,7 @@ export function Room() {
   }
 
   return (
+    <CallProvider value={callApi}>
     <div
       className="h-screen"
       style={{
@@ -255,6 +276,34 @@ export function Room() {
             <Icon name="users" size={14} /> {participants.length}
           </div>
         )}
+        {callMembers.length > 0 && (
+          <Chip tone="live" icon="phone">
+            {isMobile ? `${callMembers.length}` : `звонок · ${callMembers.length}`}
+          </Chip>
+        )}
+        {user?.kind === 'user' &&
+          (callApi.state === 'in' ? (
+            <Button
+              variant="secondary"
+              icon="phoneOff"
+              size={isMobile ? 'sm' : 'md'}
+              onClick={callApi.leave}
+              aria-label="Покинуть звонок"
+            >
+              {isMobile ? '' : 'Покинуть'}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              icon="phone"
+              size={isMobile ? 'sm' : 'md'}
+              disabled={callMembers.length >= CALL_MAX_VOICE || callApi.state === 'connecting'}
+              onClick={() => void callApi.join({ withVideo: false })}
+              aria-label="Начать звонок"
+            >
+              {isMobile ? '' : callMembers.length === 0 ? 'Звонок' : 'Войти'}
+            </Button>
+          ))}
         {room && (
           <Button
             variant="secondary"
@@ -278,6 +327,8 @@ export function Room() {
           </Button>
         )}
       </header>
+
+      <CallBanner />
 
       {wsError && (
         <div
@@ -425,7 +476,9 @@ export function Room() {
       {showCreate && (
         <CreateRoomModal onClose={() => setShowCreate(false)} onCreated={(s) => navigate(`/room/${s}`)} />
       )}
+      <RemoteAudioMixer />
     </div>
+    </CallProvider>
   );
 }
 
