@@ -1,6 +1,6 @@
 {
   "name": "@vellin/client",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,6 +10,7 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@sapphi-red/web-noise-suppressor": "^0.3.5",
     "@vellin/shared": "*",
     "hls.js": "^1.6.16",
     "react": "^18.3.1",

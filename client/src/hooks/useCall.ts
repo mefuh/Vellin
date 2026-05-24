@@ -9,6 +9,7 @@ import type {
 import { callSignalBus } from '../ws/callSignalBus';
 import { useRoomStore } from '../stores/roomStore';
 import type { WSConnectionState } from '../ws/WSClient';
+import { setupAudioPipeline, type AudioPipeline } from './audioPipeline';
 
 /**
  * WebRTC P2P-mesh call hook. One instance per room. Handles:
@@ -54,7 +55,9 @@ interface PeerRecord {
 }
 
 interface AnalyserRecord {
-  source: MediaStreamAudioSourceNode;
+  // `source` is non-null only for analysers we own (e.g. raw-mic fallback);
+  // when the pipeline owns the AnalyserNode it manages disconnection itself.
+  source: MediaStreamAudioSourceNode | null;
   analyser: AnalyserNode;
   data: Uint8Array<ArrayBuffer>;
 }
@@ -68,6 +71,8 @@ const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
   autoGainControl: true,
+  channelCount: 1,
+  sampleRate: 48000,
 };
 const SPEAKING_THRESHOLD = 0.04;
 const SPEAKING_LINGER_MS = 350;
@@ -83,6 +88,12 @@ export function useCall(opts: UseCallOpts): UseCallApi {
 
   const pcsRef = useRef<Map<string, PeerRecord>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
+  // `outboundStreamRef` is what we actually feed into each PC: processed
+  // audio (via RNNoise pipeline) + any added video tracks. Separate from
+  // `localStreamRef` so the local self-tile keeps showing raw camera.
+  const outboundStreamRef = useRef<MediaStream | null>(null);
+  const pipelineRef = useRef<AudioPipeline | null>(null);
+  const micOnRef = useRef<boolean>(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analysersRef = useRef<Map<string, AnalyserRecord>>(new Map());
   const lastSpokeRef = useRef<Map<string, number>>(new Map());
@@ -100,8 +111,10 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   );
 
   const broadcastMyMedia = useCallback((): void => {
+    // Authoritative source for mic state is the GainNode ref (track.enabled
+    // doesn't reflect the post-RNNoise mute when the pipeline is active).
     const stream = localStreamRef.current;
-    const audio = !!stream?.getAudioTracks()[0]?.enabled;
+    const audio = micOnRef.current;
     const video = !!stream?.getVideoTracks()[0]?.enabled;
     useRoomStore.getState().setMyMedia({ audio, video });
     send({ t: 'call_media', audio, video, clientTs: Date.now() });
@@ -149,10 +162,12 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   const detachAnalyser = useCallback((key: string): void => {
     const rec = analysersRef.current.get(key);
     if (!rec) return;
-    try {
-      rec.source.disconnect();
-    } catch {
-      /* ignore */
+    if (rec.source) {
+      try {
+        rec.source.disconnect();
+      } catch {
+        /* ignore */
+      }
     }
     analysersRef.current.delete(key);
     lastSpokeRef.current.delete(key);
@@ -206,24 +221,25 @@ export function useCall(opts: UseCallOpts): UseCallApi {
 
       // addTrack is the simplest, most battle-tested pattern: it implicitly
       // creates a transceiver with the track attached, so the initial offer
-      // SDP always correctly describes our local media.
-      const local = localStreamRef.current;
-      if (local) {
-        for (const track of local.getTracks()) {
+      // SDP always correctly describes our local media. We send `outbound`
+      // (= post-RNNoise audio + raw video), not the raw mic stream.
+      const outbound = outboundStreamRef.current;
+      if (outbound) {
+        for (const track of outbound.getTracks()) {
           try {
-            pc.addTrack(track, local);
+            pc.addTrack(track, outbound);
           } catch (err) {
             console.warn(`[call] ${peerUserId} addTrack(${track.kind}) failed`, err);
           }
         }
         console.log(
-          `[call] createPeer ${peerUserId} polite=${polite} tracks=${local
+          `[call] createPeer ${peerUserId} polite=${polite} tracks=${outbound
             .getTracks()
             .map((t) => `${t.kind}:${t.enabled}`)
             .join(',')}`,
         );
       } else {
-        console.warn(`[call] createPeer ${peerUserId}: no local stream — peer will be receive-only`);
+        console.warn(`[call] createPeer ${peerUserId}: no outbound stream — peer will be receive-only`);
       }
 
       pc.onicecandidate = (ev) => {
@@ -435,27 +451,65 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         setState('idle');
         return;
       }
-      const audio = stream.getAudioTracks()[0];
-      if (audio) audio.enabled = false; // mic always starts muted
+      // Diagnostic: confirm what the browser actually applied vs what we asked
+      // for (some platforms silently drop AGC/NS hints).
+      const audioSettings = stream.getAudioTracks()[0]?.getSettings();
+      console.log('[call] mic settings:', audioSettings);
+
       localStreamRef.current = stream;
+      micOnRef.current = false;
       setMyStream(stream);
-      attachAnalyser('__self__', stream);
+
+      // Build the RNNoise pipeline. If it fails (older browser, blocked WASM,
+      // wasm fetch error), fall back to the raw mic — peers still hear us,
+      // just without the extra noise suppression layer.
+      const ctx = ensureAudioCtx();
+      let pipeline: AudioPipeline | null = null;
+      try {
+        pipeline = await setupAudioPipeline(ctx, stream);
+        pipelineRef.current = pipeline;
+        // Outbound = processed audio + (currently zero) video tracks.
+        const outbound = new MediaStream([
+          pipeline.outboundAudioTrack,
+          ...stream.getVideoTracks(),
+        ]);
+        outboundStreamRef.current = outbound;
+        // Self-analyser reuses the pipeline's analyser tap (post-gain), so
+        // the speaking indicator goes silent the instant the mic mutes.
+        analysersRef.current.set('__self__', {
+          source: null,
+          analyser: pipeline.selfAnalyser,
+          data: new Uint8Array(new ArrayBuffer(pipeline.selfAnalyser.fftSize)),
+        });
+        console.log('[call] RNNoise pipeline ready');
+      } catch (err) {
+        console.warn('[call] RNNoise pipeline failed, falling back to raw mic', err);
+        const fallbackAudio = stream.getAudioTracks()[0];
+        if (fallbackAudio) fallbackAudio.enabled = false;
+        outboundStreamRef.current = new MediaStream(stream.getTracks());
+        attachAnalyser('__self__', stream);
+      }
+
       useRoomStore.getState().setMyMedia({ audio: false, video: withVideo });
       send({ t: 'call_join', wantVideo: withVideo, clientTs: Date.now() });
       setState('in');
     },
-    [myUserId, myUserKind, send, attachAnalyser],
+    [myUserId, myUserKind, send, attachAnalyser, ensureAudioCtx],
   );
 
   const leave = useCallback<UseCallApi['leave']>(() => {
     if (stateRef.current === 'idle') return;
     send({ t: 'call_leave', clientTs: Date.now() });
     closeAllPeers();
+    pipelineRef.current?.teardown();
+    pipelineRef.current = null;
     const stream = localStreamRef.current;
     if (stream) {
       for (const t of stream.getTracks()) t.stop();
     }
     localStreamRef.current = null;
+    outboundStreamRef.current = null;
+    micOnRef.current = false;
     detachAnalyser('__self__');
     setMyStream(null);
     setRemoteStreams(new Map());
@@ -465,21 +519,30 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   }, [send, closeAllPeers, detachAnalyser]);
 
   const toggleMic = useCallback<UseCallApi['toggleMic']>(() => {
-    const stream = localStreamRef.current;
-    const t = stream?.getAudioTracks()[0];
-    if (!t) return;
-    t.enabled = !t.enabled;
+    const next = !micOnRef.current;
+    micOnRef.current = next;
+    const pipeline = pipelineRef.current;
+    if (pipeline) {
+      pipeline.setMicEnabled(next);
+    } else {
+      // Fallback path: no RNNoise pipeline → flip the raw mic track directly.
+      const stream = localStreamRef.current;
+      const t = stream?.getAudioTracks()[0];
+      if (t) t.enabled = next;
+    }
     broadcastMyMedia();
   }, [broadcastMyMedia]);
 
   const toggleCamera = useCallback<UseCallApi['toggleCamera']>(async () => {
     const stream = localStreamRef.current;
-    if (!stream) return;
+    const outbound = outboundStreamRef.current;
+    if (!stream || !outbound) return;
     const existing = stream.getVideoTracks()[0];
     if (existing) {
-      // Remove the camera: stop the track, drop the sender, trigger renegotiation.
+      // Remove the camera: stop the track, drop senders, trigger renegotiation.
       existing.stop();
       stream.removeTrack(existing);
+      try { outbound.removeTrack(existing); } catch { /* ignore */ }
       for (const rec of pcsRef.current.values()) {
         const sender = rec.pc.getSenders().find((s) => s.track === existing);
         if (sender) {
@@ -504,11 +567,12 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     const track = camStream.getVideoTracks()[0];
     if (!track) return;
     stream.addTrack(track);
+    outbound.addTrack(track);
     // addTrack on each PC creates a new sender + transceiver and fires
     // onnegotiationneeded — perfect-negotiation will exchange the new SDP.
     for (const rec of pcsRef.current.values()) {
       try {
-        rec.pc.addTrack(track, stream);
+        rec.pc.addTrack(track, outbound);
       } catch (err) {
         console.warn('[call] addTrack(video) failed', err);
       }
@@ -524,6 +588,10 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       // Hook-level teardown. Avoid sending leave during route changes since the
       // server cleans us up on WS close anyway.
       closeAllPeers();
+      pipelineRef.current?.teardown();
+      pipelineRef.current = null;
+      outboundStreamRef.current = null;
+      micOnRef.current = false;
       const stream = localStreamRef.current;
       if (stream) for (const t of stream.getTracks()) t.stop();
       localStreamRef.current = null;
