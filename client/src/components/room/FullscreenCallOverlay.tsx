@@ -46,7 +46,7 @@ export function FullscreenCallOverlay({ expanded }: FullscreenCallOverlayProps) 
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'flex-end',
-        gap: 8,
+        gap: 14,
         opacity: expanded ? 1 : 0.85,
         transition: 'opacity 180ms ease',
         pointerEvents: 'none',

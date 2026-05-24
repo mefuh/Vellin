@@ -49,7 +49,11 @@ export function CallTile({
       ? `0 0 0 2px var(--accent-hi), 0 0 16px 2px rgba(232,70,42,0.45)`
       : `inset 0 0 0 1px var(--line-2)`;
 
-  return (
+  const label = isMe ? 'Вы' : username;
+
+  // For circular tiles the round mask would clip text — render the name as
+  // a sibling underneath instead. Rect tiles keep the inside-bottom pill.
+  const media = (
     <div
       title={username}
       style={{
@@ -96,8 +100,8 @@ export function CallTile({
           aria-label="Микрофон выключен"
           style={{
             position: 'absolute',
-            bottom: 6,
-            right: 6,
+            bottom: isCircle ? '10%' : 6,
+            right: isCircle ? '10%' : 6,
             width: 22,
             height: 22,
             borderRadius: '50%',
@@ -112,29 +116,63 @@ export function CallTile({
           <Icon name="micOff" size={12} />
         </span>
       )}
-      <span
-        style={{
-          position: 'absolute',
-          left: 6,
-          bottom: 6,
-          maxWidth: 'calc(100% - 36px)',
-          padding: '2px 7px',
-          borderRadius: 999,
-          background: 'rgba(10,8,7,0.7)',
-          color: '#fff',
-          fontSize: 11,
-          fontWeight: 500,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          backdropFilter: 'blur(6px)',
-        }}
-      >
-        {isMe ? 'Вы' : username}
-      </span>
+      {!isCircle && (
+        <span
+          style={{
+            position: 'absolute',
+            left: 6,
+            bottom: 6,
+            maxWidth: 'calc(100% - 36px)',
+            padding: '2px 7px',
+            borderRadius: 999,
+            background: 'rgba(10,8,7,0.7)',
+            color: '#fff',
+            fontSize: 11,
+            fontWeight: 500,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            backdropFilter: 'blur(6px)',
+          }}
+        >
+          {label}
+        </span>
+      )}
       {/* aria reachable text — keeps screen readers informed; visually hidden. */}
       <span style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }}>
         {`Участник ${userId}`}
+      </span>
+    </div>
+  );
+
+  if (!isCircle) return media;
+
+  return (
+    <div
+      title={username}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 4,
+        flexShrink: 0,
+      }}
+    >
+      {media}
+      <span
+        style={{
+          maxWidth: tileWidth + 16,
+          fontSize: 11,
+          fontWeight: 500,
+          color: 'var(--text-0)',
+          textShadow: '0 1px 3px rgba(0,0,0,0.7)',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          padding: '0 4px',
+        }}
+      >
+        {label}
       </span>
     </div>
   );
