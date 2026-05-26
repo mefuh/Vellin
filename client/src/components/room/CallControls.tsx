@@ -8,10 +8,11 @@ interface CallControlsProps {
   cameraDisabledHint?: string;
   onToggleMic: () => void;
   onToggleCamera: () => void;
+  onOpenSettings: () => void;
   onLeave: () => void;
 }
 
-/** Toolbar inside the voice-chat panel: mute, camera, leave. */
+/** Toolbar inside the voice-chat panel: mute, camera, settings, leave. */
 export function CallControls({
   micOn,
   cameraOn,
@@ -19,6 +20,7 @@ export function CallControls({
   cameraDisabledHint,
   onToggleMic,
   onToggleCamera,
+  onOpenSettings,
   onLeave,
 }: CallControlsProps) {
   return (
@@ -35,6 +37,11 @@ export function CallControls({
         disabled={cameraDisabled}
         title={cameraDisabled ? (cameraDisabledHint ?? 'Камера недоступна') : cameraOn ? 'Выключить камеру' : 'Включить камеру'}
         onClick={onToggleCamera}
+      />
+      <ControlButton
+        icon="settings"
+        title="Настройки звонка"
+        onClick={onOpenSettings}
       />
       <ControlButton
         icon="phoneOff"

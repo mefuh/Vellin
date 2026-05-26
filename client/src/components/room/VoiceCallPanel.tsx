@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { CallMember, ParticipantInfo } from '@vellin/shared';
 import { CALL_MAX_VIDEO, CALL_MAX_VOICE } from '@vellin/shared';
 import { Button, Icon } from '../../shared';
@@ -6,6 +6,7 @@ import { useRoomStore } from '../../stores/roomStore';
 import { useCallContext } from '../../hooks/CallContext';
 import { CallControls } from './CallControls';
 import { CallTile } from './CallTile';
+import { CallSettingsModal } from './CallSettingsModal';
 
 /**
  * Embedded inside `RoomChat.ChatBody` between the participants strip and the
@@ -28,6 +29,7 @@ export function VoiceCallPanel() {
   const callFull = callMembers.length >= CALL_MAX_VOICE;
   const videoCount = callMembers.filter((m) => m.video).length;
   const cameraDisabled = !iAmIn || (!myMedia.video && videoCount >= CALL_MAX_VIDEO);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Index participants by id for quick name/avatar lookup.
   const participantsById = useMemo(() => {
@@ -112,6 +114,7 @@ export function VoiceCallPanel() {
           }
           onToggleMic={toggleMic}
           onToggleCamera={() => void toggleCamera()}
+          onOpenSettings={() => setSettingsOpen(true)}
           onLeave={leave}
         />
       ) : myKind === 'guest' ? (
@@ -133,6 +136,7 @@ export function VoiceCallPanel() {
               : 'Войти в звонок'}
         </Button>
       )}
+      <CallSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </section>
   );
 }

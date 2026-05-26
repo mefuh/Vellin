@@ -1,6 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { CallMember } from '@vellin/shared';
 import { Avatar, Icon } from '../../shared';
+import { useCallSettingsStore } from '../../stores/callSettingsStore';
+
+// Note: video mirroring is applied at the source (canvas-flipped track in
+// `useCall`), so peers and self see the same image. No CSS transform here.
 
 export interface CallTileProps {
   userId: string;
@@ -120,6 +125,7 @@ export function CallTile({
           <Icon name="micOff" size={12} />
         </span>
       )}
+      {!isMe && !isCircle && <PeerVolumeControl userId={userId} />}
       {!isCircle && (
         <span
           style={{
@@ -179,5 +185,187 @@ export function CallTile({
         {label}
       </span>
     </div>
+  );
+}
+
+/**
+ * Top-right speaker control on remote rect tiles. Click toggles a small
+ * popover with a 0–100% slider. Persists per-userId in `callSettingsStore`,
+ * applied by `<RemoteAudioMixer>` via the `<audio>` element's `volume` prop.
+ */
+function PeerVolumeControl({ userId }: { userId: string }) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [popPos, setPopPos] = useState<{ top: number; right: number } | null>(null);
+  const volume = useCallSettingsStore((s) => s.peerVolumes[userId] ?? 1);
+  const setPeerVolume = useCallSettingsStore((s) => s.setPeerVolume);
+
+  // Compute the popover position relative to the button. Lives outside the
+  // tile (via portal) so it isn't clipped by the tile's `overflow: hidden`.
+  // Re-runs on resize / any ancestor scroll so the popover follows the button.
+  useLayoutEffect(() => {
+    if (!open) {
+      setPopPos(null);
+      return;
+    }
+    const update = (): void => {
+      const btn = buttonRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setPopPos({
+        top: r.bottom + 8,
+        right: Math.max(8, window.innerWidth - r.right),
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    // `true` → capture phase so we hear ancestor scrolls too.
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent): void => {
+      const t = e.target;
+      if (!(t instanceof Node)) return;
+      if (buttonRef.current?.contains(t)) return;
+      if (popoverRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const muted = volume <= 0;
+  const pct = Math.round(volume * 100);
+
+  const toggleMute = (): void => {
+    setPeerVolume(userId, muted ? 1 : 0);
+  };
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        title={muted ? 'Звук собеседника выключен' : `Громкость: ${pct}%`}
+        aria-label={`Громкость собеседника: ${pct}%`}
+        style={{
+          position: 'absolute',
+          top: 6,
+          right: 6,
+          zIndex: 2,
+          width: 24,
+          height: 24,
+          borderRadius: '50%',
+          padding: 0,
+          border: 'none',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: open ? 'var(--bg-3)' : 'rgba(10,8,7,0.78)',
+          boxShadow: open
+            ? 'inset 0 0 0 1px var(--accent-hi)'
+            : 'inset 0 0 0 1px transparent',
+          backdropFilter: 'blur(6px)',
+          color: muted ? 'var(--accent-hi)' : 'var(--text-1)',
+          transition: 'background .12s, box-shadow .12s, color .12s',
+        }}
+      >
+        <Icon name={muted ? 'volumeOff' : 'volume'} size={13} />
+      </button>
+      {open && popPos && createPortal(
+        <div
+          ref={popoverRef}
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-label="Громкость собеседника"
+          style={{
+            position: 'fixed',
+            top: popPos.top,
+            right: popPos.right,
+            zIndex: 110,
+            padding: '12px 14px',
+            background: 'rgba(10,8,7,0.96)',
+            border: '1px solid var(--line-2)',
+            borderRadius: 12,
+            boxShadow: 'var(--shadow-3)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            backdropFilter: 'blur(10px)',
+          }}
+        >
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); toggleMute(); }}
+            title={muted ? 'Включить звук' : 'Выключить звук'}
+            aria-label={muted ? 'Включить звук' : 'Выключить звук'}
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: '50%',
+              padding: 0,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'transparent',
+              color: muted ? 'var(--accent-hi)' : 'var(--text-1)',
+              transition: 'color .12s, background .12s',
+              flexShrink: 0,
+            }}
+          >
+            <Icon name={muted ? 'volumeOff' : 'volume'} size={16} />
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={volume}
+            onChange={(e) => setPeerVolume(userId, parseFloat(e.target.value))}
+            aria-label="Громкость"
+            style={{
+              width: 150,
+              height: 20,
+              accentColor: 'var(--accent-hi)',
+              cursor: 'pointer',
+              margin: 0,
+              flexShrink: 0,
+            }}
+          />
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: muted ? 'var(--text-2)' : 'var(--text-0)',
+              minWidth: 42,
+              textAlign: 'right',
+              fontVariantNumeric: 'tabular-nums',
+              flexShrink: 0,
+            }}
+          >
+            {pct}%
+          </span>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
