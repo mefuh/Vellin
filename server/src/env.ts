@@ -15,13 +15,16 @@ const schema = z.object({
    * Email главного администратора сервиса. Любой пользователь с таким email
    * автоматически получает isAdmin=true и доступ к /api/admin/*.
    * Сравнение case-insensitive с trim. Без значения панель недоступна никому.
+   * Принимает пустую строку — docker compose `${VAR:-}` всегда пробрасывает
+   * значение, даже когда переменная не задана.
    */
   ADMIN_EMAIL: z
     .string()
     .trim()
-    .email()
+    .transform((v) => v.toLowerCase())
+    .pipe(z.union([z.literal(''), z.string().email()]))
     .optional()
-    .transform((v) => (v ? v.toLowerCase() : undefined)),
+    .transform((v) => (v ? v : undefined)),
 });
 
 export type AppEnv = z.infer<typeof schema>;
