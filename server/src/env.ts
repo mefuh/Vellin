@@ -11,6 +11,17 @@ const schema = z.object({
   WS_TICKET_TTL_SEC: z.coerce.number().int().positive().default(60),
   /** Optional JSON-encoded RTCIceServer[] appended to the default STUN. */
   ICE_SERVERS: z.string().optional(),
+  /**
+   * Email главного администратора сервиса. Любой пользователь с таким email
+   * автоматически получает isAdmin=true и доступ к /api/admin/*.
+   * Сравнение case-insensitive с trim. Без значения панель недоступна никому.
+   */
+  ADMIN_EMAIL: z
+    .string()
+    .trim()
+    .email()
+    .optional()
+    .transform((v) => (v ? v.toLowerCase() : undefined)),
 });
 
 export type AppEnv = z.infer<typeof schema>;
@@ -26,6 +37,14 @@ export function loadEnv(): AppEnv {
   }
   cached = parsed.data;
   return cached;
+}
+
+/** Главный администратор задаётся через email в .env. */
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const target = loadEnv().ADMIN_EMAIL;
+  if (!target) return false;
+  return email.trim().toLowerCase() === target;
 }
 
 const DEFAULT_ICE_SERVERS: IceServerConfig[] = [

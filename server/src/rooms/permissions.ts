@@ -12,7 +12,9 @@ export function getEffectivePermissions(
   role: RoomRole,
   customJson: string | null | undefined,
 ): RoomPermissions {
-  if (role === 'owner' || role === 'admin') return { ...ALL_PERMISSIONS };
+  if (role === 'superadmin' || role === 'owner' || role === 'admin') {
+    return { ...ALL_PERMISSIONS };
+  }
   if (role === 'guest') return { ...DEFAULT_GUEST_PERMISSIONS };
   if (!customJson) return { ...DEFAULT_MEMBER_PERMISSIONS };
   try {

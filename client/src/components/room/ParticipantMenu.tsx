@@ -24,6 +24,19 @@ function buildActions(target: ParticipantInfo, you: ParticipantInfo, props: Prop
   const actions: Action[] = [];
   const myRole = you.role;
   const targetRole = target.role;
+  if (myRole === 'superadmin') {
+    // Главный админ сервиса — может кикнуть кого угодно, включая владельца.
+    if (target.userId !== you.userId) {
+      actions.push({
+        key: 'kick',
+        label: 'Удалить из комнаты',
+        icon: 'userMinus',
+        danger: true,
+        onClick: () => props.onKick(target.userId),
+      });
+    }
+    return actions;
+  }
   if (myRole === 'owner') {
     if (targetRole === 'member') {
       actions.push({

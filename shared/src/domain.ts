@@ -10,6 +10,8 @@ export interface PublicUser {
 export interface AuthUser extends PublicUser {
   email: string | null;
   createdAt: string;
+  /** True only for the single user whose email matches ADMIN_EMAIL on the server. */
+  isAdmin: boolean;
 }
 
 export interface RoomSummary {
@@ -118,7 +120,14 @@ export interface ReactionEvent {
   createdAt: number;
 }
 
-export type RoomRole = 'owner' | 'admin' | 'member' | 'guest';
+/**
+ * Роль участника в комнате.
+ * - `superadmin`: главный админ сервиса, имеет полный контроль над любой комнатой
+ *   (включая возможность кикнуть владельца). Не сохраняется в БД — назначается
+ *   на лету при WS-handshake'е с admin-ticket'ом.
+ * - `owner`/`admin`/`member`/`guest`: обычная иерархия комнаты.
+ */
+export type RoomRole = 'superadmin' | 'owner' | 'admin' | 'member' | 'guest';
 
 export interface RoomPermissions {
   canPlayPause: boolean;
@@ -167,6 +176,29 @@ export interface ParticipantInfo {
   role: RoomRole;
   permissions: RoomPermissions;
   joinedAt: number;
+}
+
+/**
+ * Расширенная сводка комнаты для админ-панели — включает приватные комнаты
+ * и live-метрики из RoomRuntime. Возвращается только хуком `requireAdmin`.
+ */
+export interface AdminRoomSummary {
+  id: string;
+  slug: string;
+  name: string;
+  isPrivate: boolean;
+  allowGuests: boolean;
+  hostOnlyControl: boolean;
+  maxParticipants: number;
+  ownerId: string;
+  ownerUsername: string;
+  ownerEmail: string | null;
+  createdAt: string;
+  /** Текущее число живых сессий из RoomRuntime (без shadow). 0 если рантайма нет. */
+  liveParticipants: number;
+  /** Запущен ли рантайм в памяти. */
+  isActive: boolean;
+  videoUrl: string | null;
 }
 
 export interface InviteLink {
