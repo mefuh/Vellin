@@ -37,10 +37,12 @@ export function CallSettingsModal({ open, onClose }: Props) {
   const preferredCameraId = useCallSettingsStore((s) => s.preferredCameraId);
   const mirrorSelfVideo = useCallSettingsStore((s) => s.mirrorSelfVideo);
   const circleSize = useCallSettingsStore((s) => s.circleSize);
+  const tilePositions = useCallSettingsStore((s) => s.tilePositions);
   const setPreferredMicId = useCallSettingsStore((s) => s.setPreferredMicId);
   const setPreferredCameraId = useCallSettingsStore((s) => s.setPreferredCameraId);
   const setMirrorSelfVideo = useCallSettingsStore((s) => s.setMirrorSelfVideo);
   const setCircleSize = useCallSettingsStore((s) => s.setCircleSize);
+  const resetTilePositions = useCallSettingsStore((s) => s.resetTilePositions);
 
   // Close on ESC.
   useEffect(() => {
@@ -215,6 +217,26 @@ export function CallSettingsModal({ open, onClose }: Props) {
           <p style={{ margin: '6px 2px 0', color: 'var(--text-2)', fontSize: 12 }}>
             Меняет размер плиток с видео и аватарок в правом верхнем углу плеера.
           </p>
+          {Object.keys(tilePositions).length > 0 && (
+            <button
+              type="button"
+              onClick={resetTilePositions}
+              style={{
+                alignSelf: 'flex-start',
+                marginTop: 10,
+                padding: '6px 12px',
+                background: 'transparent',
+                color: 'var(--text-1)',
+                border: '1px solid var(--line-2)',
+                borderRadius: 8,
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+            >
+              Сбросить расположение кружков ({Object.keys(tilePositions).length})
+            </button>
+          )}
         </Section>
 
         <Section label={`Громкость собеседников · ${remotePeers.length}`}>
