@@ -7,16 +7,25 @@ import { persist, createJSONStorage } from 'zustand/middleware';
  * volume (0..1). Lives outside `roomStore` because none of this belongs to the
  * room — it follows the human, not the room.
  */
+export type CircleSize = 'small' | 'standard' | 'large';
+
 export interface CallSettingsState {
   preferredMicId: string | null;
   preferredCameraId: string | null;
   mirrorSelfVideo: boolean;
+  /**
+   * Visual size of the Telegram-style circle tiles + audio-only avatar
+   * bubbles in the fullscreen overlay. Doesn't affect the rect tiles in
+   * the chat panel.
+   */
+  circleSize: CircleSize;
   // keyed by peer userId. Missing entry == 1.0 (full volume).
   peerVolumes: Record<string, number>;
 
   setPreferredMicId: (id: string | null) => void;
   setPreferredCameraId: (id: string | null) => void;
   setMirrorSelfVideo: (on: boolean) => void;
+  setCircleSize: (size: CircleSize) => void;
   setPeerVolume: (userId: string, vol: number) => void;
   resetPeerVolume: (userId: string) => void;
 }
@@ -31,11 +40,13 @@ export const useCallSettingsStore = create<CallSettingsState>()(
       // Off by default — toggling on physically flips the outbound camera
       // track via a canvas pipeline (visible to everyone, not just self).
       mirrorSelfVideo: false,
+      circleSize: 'standard',
       peerVolumes: {},
 
       setPreferredMicId: (id) => set({ preferredMicId: id }),
       setPreferredCameraId: (id) => set({ preferredCameraId: id }),
       setMirrorSelfVideo: (on) => set({ mirrorSelfVideo: on }),
+      setCircleSize: (size) => set({ circleSize: size }),
       setPeerVolume: (userId, vol) =>
         set((s) => ({ peerVolumes: { ...s.peerVolumes, [userId]: clamp01(vol) } })),
       resetPeerVolume: (userId) =>

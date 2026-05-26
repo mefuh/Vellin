@@ -104,13 +104,13 @@ export function CallTile({
           <Avatar name={username} seed={avatarSeed} size={Math.round(fallbackHeight * 0.6)} />
         </div>
       )}
-      {!member.audio && (
+      {!member.audio && !isCircle && (
         <span
           aria-label="Микрофон выключен"
           style={{
             position: 'absolute',
-            bottom: isCircle ? '10%' : 6,
-            right: isCircle ? '10%' : 6,
+            bottom: 6,
+            right: 6,
             width: 22,
             height: 22,
             borderRadius: '50%',
@@ -180,8 +180,24 @@ export function CallTile({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           padding: '0 4px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
         }}
       >
+        {!member.audio && (
+          <span
+            aria-label="Микрофон выключен"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              color: 'var(--accent-hi)',
+              flexShrink: 0,
+            }}
+          >
+            <Icon name="micOff" size={12} />
+          </span>
+        )}
         {label}
       </span>
     </div>

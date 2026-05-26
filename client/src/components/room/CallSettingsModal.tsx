@@ -3,8 +3,14 @@ import { createPortal } from 'react-dom';
 import type { ParticipantInfo } from '@vellin/shared';
 import { Avatar, Icon } from '../../shared';
 import { useCallContext } from '../../hooks/CallContext';
-import { useCallSettingsStore } from '../../stores/callSettingsStore';
+import { useCallSettingsStore, type CircleSize } from '../../stores/callSettingsStore';
 import { useRoomStore } from '../../stores/roomStore';
+
+const CIRCLE_SIZE_OPTIONS: ReadonlyArray<{ value: CircleSize; label: string }> = [
+  { value: 'small', label: 'Маленькие' },
+  { value: 'standard', label: 'Стандартные' },
+  { value: 'large', label: 'Большие' },
+];
 
 interface Props {
   open: boolean;
@@ -30,9 +36,11 @@ export function CallSettingsModal({ open, onClose }: Props) {
   const preferredMicId = useCallSettingsStore((s) => s.preferredMicId);
   const preferredCameraId = useCallSettingsStore((s) => s.preferredCameraId);
   const mirrorSelfVideo = useCallSettingsStore((s) => s.mirrorSelfVideo);
+  const circleSize = useCallSettingsStore((s) => s.circleSize);
   const setPreferredMicId = useCallSettingsStore((s) => s.setPreferredMicId);
   const setPreferredCameraId = useCallSettingsStore((s) => s.setPreferredCameraId);
   const setMirrorSelfVideo = useCallSettingsStore((s) => s.setMirrorSelfVideo);
+  const setCircleSize = useCallSettingsStore((s) => s.setCircleSize);
 
   // Close on ESC.
   useEffect(() => {
@@ -161,6 +169,52 @@ export function CallSettingsModal({ open, onClose }: Props) {
             />
             Отзеркалить видео (видят все — изображение инвертируется на лету)
           </label>
+        </Section>
+
+        <Section label="Размер кружков в полноэкранном плеере">
+          <div
+            role="radiogroup"
+            aria-label="Размер кружков"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 6,
+              padding: 4,
+              background: 'var(--bg-2)',
+              borderRadius: 10,
+              border: '1px solid var(--line-2)',
+            }}
+          >
+            {CIRCLE_SIZE_OPTIONS.map((opt) => {
+              const checked = circleSize === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={checked}
+                  onClick={() => setCircleSize(opt.value)}
+                  style={{
+                    padding: '8px 10px',
+                    background: checked ? 'var(--bg-3)' : 'transparent',
+                    color: checked ? 'var(--text-0)' : 'var(--text-2)',
+                    border: 'none',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: checked ? 600 : 500,
+                    boxShadow: checked ? 'inset 0 0 0 1px var(--line-2)' : 'none',
+                    transition: 'background .12s, color .12s',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          <p style={{ margin: '6px 2px 0', color: 'var(--text-2)', fontSize: 12 }}>
+            Меняет размер плиток с видео и аватарок в правом верхнем углу плеера.
+          </p>
         </Section>
 
         <Section label={`Громкость собеседников · ${remotePeers.length}`}>

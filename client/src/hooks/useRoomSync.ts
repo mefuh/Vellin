@@ -6,6 +6,7 @@ import { roomsApi } from '../api/rooms';
 import { adminApi } from '../api/admin';
 import { ApiHttpError } from '../api/client';
 import { callSignalBus } from '../ws/callSignalBus';
+import { callSpeakingBus } from '../ws/callSpeakingBus';
 
 export interface UseRoomSyncOpts {
   slug: string;
@@ -229,6 +230,9 @@ export function useRoomSync(opts: UseRoomSyncOpts): RoomSyncApi {
             break;
           case 'call_signal_relay':
             callSignalBus.emit(msg.fromUserId, msg.payload);
+            break;
+          case 'call_peer_speaking':
+            callSpeakingBus.emit(msg.userId, msg.speaking);
             break;
           case 'call_error':
             onErrorRef.current?.(msg.message);

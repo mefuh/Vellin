@@ -2,8 +2,17 @@ import { useMemo } from 'react';
 import type { CallMember, ParticipantInfo } from '@vellin/shared';
 import { useRoomStore } from '../../stores/roomStore';
 import { useCallContext } from '../../hooks/CallContext';
+import { useCallSettingsStore, type CircleSize } from '../../stores/callSettingsStore';
 import { Avatar } from '../../shared';
 import { CallTile } from './CallTile';
+
+// Pixel sizes for the three discrete options the user can pick in the call
+// settings modal. Audio-only bubble shrinks proportionally so the overlap
+// row still fits along the right edge of the player.
+const CIRCLE_PX: Record<CircleSize, number> = { small: 78, standard: 108, large: 144 };
+const BUBBLE_PX: Record<CircleSize, number> = { small: 30, standard: 38, large: 48 };
+const BUBBLE_AVATAR_PX: Record<CircleSize, number> = { small: 24, standard: 32, large: 40 };
+const BUBBLE_OVERLAP_PX: Record<CircleSize, number> = { small: -8, standard: -10, large: -14 };
 
 interface FullscreenCallOverlayProps {
   /** Mirrors VideoPlayer's `controlsVisible` so the labels fade with the chrome. */
@@ -20,7 +29,13 @@ export function FullscreenCallOverlay({ expanded }: FullscreenCallOverlayProps) 
   const callMembers = useRoomStore((s) => s.call.members);
   const participants = useRoomStore((s) => s.participants);
   const you = useRoomStore((s) => s.you);
+  const circleSize = useCallSettingsStore((s) => s.circleSize);
   const { myStream, remoteStreams, speaking } = useCallContext();
+
+  const tilePx = CIRCLE_PX[circleSize];
+  const bubblePx = BUBBLE_PX[circleSize];
+  const bubbleAvatarPx = BUBBLE_AVATAR_PX[circleSize];
+  const bubbleOverlapPx = BUBBLE_OVERLAP_PX[circleSize];
 
   const participantsById = useMemo(() => {
     const m = new Map<string, ParticipantInfo>();
@@ -63,9 +78,9 @@ export function FullscreenCallOverlay({ expanded }: FullscreenCallOverlayProps) 
             avatarSeed={p?.avatarSeed ?? m.userId}
             member={m}
             stream={isMe ? myStream : remoteStreams.get(m.userId) ?? null}
-            speaking={speaking.has(isMe ? '__self__' : m.userId)}
+            speaking={speaking.has(m.userId)}
             shape="circle"
-            size={108}
+            size={tilePx}
             isMe={isMe}
           />
         );
@@ -74,17 +89,16 @@ export function FullscreenCallOverlay({ expanded }: FullscreenCallOverlayProps) 
       {audioOnly.length > 0 && (
         <div style={{ display: 'flex', gap: -8, paddingLeft: 8 }}>
           {audioOnly.map((m, i) => {
-            const isMe = m.userId === myUserId;
             const p = participantsById.get(m.userId) ?? null;
-            const isSpeaking = speaking.has(isMe ? '__self__' : m.userId);
+            const isSpeaking = speaking.has(m.userId);
             return (
               <div
                 key={m.userId}
                 title={p?.username}
                 style={{
-                  marginLeft: i === 0 ? 0 : -10,
-                  width: 38,
-                  height: 38,
+                  marginLeft: i === 0 ? 0 : bubbleOverlapPx,
+                  width: bubblePx,
+                  height: bubblePx,
                   borderRadius: '50%',
                   overflow: 'hidden',
                   background: 'var(--bg-3)',
@@ -102,7 +116,7 @@ export function FullscreenCallOverlay({ expanded }: FullscreenCallOverlayProps) 
                 <Avatar
                   name={p?.username ?? m.userId}
                   seed={p?.avatarSeed ?? m.userId}
-                  size={32}
+                  size={bubbleAvatarPx}
                 />
               </div>
             );

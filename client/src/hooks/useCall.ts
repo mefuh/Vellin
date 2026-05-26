@@ -7,6 +7,7 @@ import type {
   RtcConfig,
 } from '@vellin/shared';
 import { callSignalBus } from '../ws/callSignalBus';
+import { callSpeakingBus } from '../ws/callSpeakingBus';
 import { useRoomStore } from '../stores/roomStore';
 import { useCallSettingsStore } from '../stores/callSettingsStore';
 import type { WSConnectionState } from '../ws/WSClient';
@@ -131,6 +132,9 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   const analysersRef = useRef<Map<string, AnalyserRecord>>(new Map());
   const lastSpokeRef = useRef<Map<string, number>>(new Map());
   const rafRef = useRef<number | null>(null);
+  // Last self-speaking value the server was told about — used to debounce
+  // the `call_speaking` broadcast down to actual transitions.
+  const prevSelfSpeakingRef = useRef<boolean>(false);
   const stateRef = useRef<CallState>('idle');
   stateRef.current = state;
 
@@ -206,14 +210,17 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     lastSpokeRef.current.delete(key);
   }, []);
 
-  // rAF loop measuring RMS for each analyser; updates `speaking` set.
+  // rAF loop measuring RMS for the local analyser (key = myUserId). Only the
+  // local user's key is managed here — remote entries come from the
+  // `callSpeakingBus` subscription below. On every self transition we send
+  // `call_speaking` so peers can render the same indicator.
   useEffect(() => {
-    if (state !== 'in') return;
+    if (state !== 'in' || !myUserId) return;
     let active = true;
     const tick = (): void => {
       if (!active) return;
       const now = performance.now();
-      const next = new Set<string>();
+      let selfActive = false;
       for (const [key, rec] of analysersRef.current.entries()) {
         rec.analyser.getByteTimeDomainData(rec.data);
         let sumSq = 0;
@@ -226,13 +233,27 @@ export function useCall(opts: UseCallOpts): UseCallApi {
           lastSpokeRef.current.set(key, now);
         }
         const last = lastSpokeRef.current.get(key) ?? 0;
-        if (now - last < SPEAKING_LINGER_MS) next.add(key);
+        const isActive = now - last < SPEAKING_LINGER_MS;
+        if (key === myUserId) selfActive = isActive;
       }
-      // Only update state when the set actually changed.
+
+      // Mutate only the self entry — preserve remote entries set by the bus.
       setSpeaking((prev) => {
-        if (prev.size === next.size && [...prev].every((id) => next.has(id))) return prev;
+        const has = prev.has(myUserId);
+        if (has === selfActive) return prev;
+        const next = new Set(prev);
+        if (selfActive) next.add(myUserId);
+        else next.delete(myUserId);
         return next;
       });
+
+      // Broadcast to peers on transitions only. Muted mic ⇒ definitely not
+      // speaking (analyser is post-mute, but cheap guard).
+      if (selfActive !== prevSelfSpeakingRef.current) {
+        prevSelfSpeakingRef.current = selfActive;
+        send({ t: 'call_speaking', speaking: selfActive, clientTs: Date.now() });
+      }
+
       rafRef.current = window.requestAnimationFrame(tick);
     };
     rafRef.current = window.requestAnimationFrame(tick);
@@ -241,7 +262,23 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       if (rafRef.current != null) window.cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [state]);
+  }, [state, myUserId, send]);
+
+  // Remote speaker indicators come over WS via `callSpeakingBus`. Merge them
+  // into the same `speaking` set the local analyser writes to.
+  useEffect(() => {
+    return callSpeakingBus.on((peerUserId, speaking) => {
+      if (peerUserId === myUserId) return; // self managed by local analyser
+      setSpeaking((prev) => {
+        const has = prev.has(peerUserId);
+        if (has === speaking) return prev;
+        const next = new Set(prev);
+        if (speaking) next.add(peerUserId);
+        else next.delete(peerUserId);
+        return next;
+      });
+    });
+  }, [myUserId]);
 
   // ── Peer connection lifecycle ───────────────────────────────────────────
 
@@ -355,6 +392,15 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       setRemoteStreams((prev) => {
         if (!prev.has(peerUserId)) return prev;
         const next = new Map(prev);
+        next.delete(peerUserId);
+        return next;
+      });
+      // Clear any lingering speaking indicator — handles hard-disconnects
+      // where the peer left while their last `call_speaking: true` was the
+      // most recent broadcast.
+      setSpeaking((prev) => {
+        if (!prev.has(peerUserId)) return prev;
+        const next = new Set(prev);
         next.delete(peerUserId);
         return next;
       });
@@ -588,7 +634,9 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         outboundStreamRef.current = outbound;
         // Self-analyser reuses the pipeline's analyser tap (post-gain), so
         // the speaking indicator goes silent the instant the mic mutes.
-        analysersRef.current.set('__self__', {
+        // Keyed by `myUserId` so the same Set conveys both local and remote
+        // speakers to the UI.
+        analysersRef.current.set(myUserId, {
           source: null,
           analyser: pipeline.selfAnalyser,
           data: new Uint8Array(new ArrayBuffer(pipeline.selfAnalyser.fftSize)),
@@ -602,7 +650,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         outboundStreamRef.current = new MediaStream(
           fallbackAudio ? [fallbackAudio] : [],
         );
-        attachAnalyser('__self__', stream);
+        attachAnalyser(myUserId, stream);
       }
 
       // Wire camera + mirror state into the outbound stream before announcing
@@ -632,7 +680,8 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     localStreamRef.current = null;
     outboundStreamRef.current = null;
     micOnRef.current = false;
-    detachAnalyser('__self__');
+    prevSelfSpeakingRef.current = false;
+    for (const key of [...analysersRef.current.keys()]) detachAnalyser(key);
     setMyStream(null);
     setRemoteStreams(new Map());
     setSpeaking(new Set());

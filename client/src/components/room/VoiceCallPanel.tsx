@@ -83,7 +83,7 @@ export function VoiceCallPanel() {
               isMe={m.userId === myUserId}
               myStream={myStream}
               remoteStream={remoteStreams.get(m.userId) ?? null}
-              speaking={speaking.has(m.userId === myUserId ? '__self__' : m.userId)}
+              speaking={speaking.has(m.userId)}
             />
           ))}
         </div>

@@ -3,6 +3,7 @@ import type {
   C2SCallLeave,
   C2SCallMedia,
   C2SCallSignal,
+  C2SCallSpeaking,
 } from '@vellin/shared';
 import type { ConnectionContext } from '../connection.js';
 import type { RoomRuntime } from '../../rooms/RoomRuntime.js';
@@ -104,4 +105,26 @@ export function handleCallSignal(
     payload: msg.payload,
     serverTs: Date.now(),
   });
+}
+
+/**
+ * Broadcasts the caller's speaking state (on/off) to every other call
+ * member. No mutex / no persistence — transient indicator updated on
+ * transition only (start ↔ stop) by the client's local RMS analyser.
+ */
+export function handleCallSpeaking(
+  runtime: RoomRuntime,
+  ctx: ConnectionContext,
+  msg: C2SCallSpeaking,
+): void {
+  if (!runtime.callHas(ctx.principal.userId)) return;
+  runtime.broadcast(
+    {
+      t: 'call_peer_speaking',
+      userId: ctx.principal.userId,
+      speaking: !!msg.speaking,
+      serverTs: Date.now(),
+    },
+    ctx.principal.userId,
+  );
 }
