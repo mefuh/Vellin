@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { C2S, JoinRoomResponse, S2C } from '@vellin/shared';
+import type { AdminAccessMode, C2S, JoinRoomResponse, S2C } from '@vellin/shared';
 import { WSClient, type WSConnectionState } from '../ws/WSClient';
 import { useRoomStore } from '../stores/roomStore';
 import { roomsApi } from '../api/rooms';
+import { adminApi } from '../api/admin';
 import { ApiHttpError } from '../api/client';
 import { callSignalBus } from '../ws/callSignalBus';
 
@@ -11,7 +12,44 @@ export interface UseRoomSyncOpts {
   password?: string;
   inviteToken?: string;
   enabled: boolean;
+  /**
+   * Если установлено, тикет берётся через /api/admin/rooms/:id/access-ticket,
+   * а не через стандартный /rooms/join (минуя пароль/приватность/capacity).
+   * 'shadow' дополнительно делает сессию невидимой для участников.
+   */
+  adminMode?: AdminAccessMode;
   onError?: (message: string) => void;
+}
+
+const ADMIN_TICKET_STORAGE_PREFIX = 'vellin.admin.ticket.';
+
+interface AdminTicketCache {
+  wsTicket: string;
+  mode: AdminAccessMode;
+  room: import('@vellin/shared').RoomDetails;
+  issuedAt: number;
+}
+
+function readAdminTicketCache(slug: string, mode: AdminAccessMode): AdminTicketCache | null {
+  try {
+    const raw = sessionStorage.getItem(ADMIN_TICKET_STORAGE_PREFIX + slug);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AdminTicketCache;
+    if (parsed.mode !== mode) return null;
+    // Tickets живут 60 секунд по умолчанию — кэш протухает через 45.
+    if (Date.now() - parsed.issuedAt > 45_000) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeAdminTicketCache(slug: string, cache: AdminTicketCache): void {
+  try {
+    sessionStorage.setItem(ADMIN_TICKET_STORAGE_PREFIX + slug, JSON.stringify(cache));
+  } catch {
+    /* ignore */
+  }
 }
 
 export interface RoomSyncApi {
@@ -43,6 +81,25 @@ export function useRoomSync(opts: UseRoomSyncOpts): RoomSyncApi {
     let active = true;
 
     const getTicket = async (): Promise<string> => {
+      if (opts.adminMode) {
+        const cached = readAdminTicketCache(opts.slug, opts.adminMode);
+        if (cached) {
+          useRoomStore.getState().setRoom(cached.room);
+          return cached.wsTicket;
+        }
+        const room = await roomsApi.get(opts.slug);
+        if (!active) throw new Error('aborted');
+        const t = await adminApi.accessTicket(room.room.id, opts.adminMode);
+        if (!active) throw new Error('aborted');
+        writeAdminTicketCache(opts.slug, {
+          wsTicket: t.wsTicket,
+          mode: t.mode,
+          room: t.room,
+          issuedAt: Date.now(),
+        });
+        useRoomStore.getState().setRoom(t.room);
+        return t.wsTicket;
+      }
       const data: JoinRoomResponse = await roomsApi.join({
         slug: opts.slug,
         password: opts.password,
@@ -137,9 +194,20 @@ export function useRoomSync(opts: UseRoomSyncOpts): RoomSyncApi {
             }
             break;
           case 'error':
-            if (msg.code === 'kicked') {
+            if (msg.code === 'kicked' || msg.code === 'room_closed') {
               store.setKicked(true);
               onErrorRef.current?.(msg.message);
+            } else if (msg.code === 'blocked') {
+              store.setKicked(true);
+              onErrorRef.current?.(msg.message);
+              // Полная очистка токена + редирект на login происходит на уровне
+              // Room.tsx через эффект на store.kicked. Чтобы новый /auth/me
+              // возвращал 403, дополнительно бьём в localStorage.
+              try {
+                localStorage.removeItem('vellin.auth');
+              } catch {
+                /* ignore */
+              }
             } else {
               onErrorRef.current?.(msg.message);
             }
@@ -191,7 +259,7 @@ export function useRoomSync(opts: UseRoomSyncOpts): RoomSyncApi {
       clientRef.current = null;
       useRoomStore.getState().reset();
     };
-  }, [opts.slug, opts.password, opts.inviteToken, opts.enabled]);
+  }, [opts.slug, opts.password, opts.inviteToken, opts.enabled, opts.adminMode]);
 
   return {
     state,

@@ -48,6 +48,9 @@ export function sendError(
     | 'auth_expired'
     | 'internal'
     | 'duplicate_session'
+    | 'shadow_mode'
+    | 'blocked'
+    | 'room_closed'
     | 'resolve_failed',
   message: string,
 ): void {

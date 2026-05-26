@@ -7,10 +7,22 @@ import { Guest } from './pages/Guest';
 import { Library } from './pages/Library';
 import { Room } from './pages/Room';
 import { NotFound } from './pages/NotFound';
+import { AdminShell } from './pages/admin/AdminShell';
+import { AdminDashboard } from './pages/admin/AdminDashboard';
+import { AdminUsers } from './pages/admin/AdminUsers';
+import { AdminRooms } from './pages/admin/AdminRooms';
 
 function ProtectedRoute({ children }: { children: React.ReactElement }) {
   const token = useAuthStore((s) => s.token);
   if (!token) return <Navigate to="/login" replace />;
+  return children;
+}
+
+function AdminProtectedRoute({ children }: { children: React.ReactElement }) {
+  const token = useAuthStore((s) => s.token);
+  const user = useAuthStore((s) => s.user);
+  if (!token) return <Navigate to="/login" replace />;
+  if (!user?.isAdmin) return <Navigate to="/library" replace />;
   return children;
 }
 
@@ -37,6 +49,19 @@ export function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/admin"
+        element={
+          <AdminProtectedRoute>
+            <AdminShell />
+          </AdminProtectedRoute>
+        }
+      >
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<AdminDashboard />} />
+        <Route path="users" element={<AdminUsers />} />
+        <Route path="rooms" element={<AdminRooms />} />
+      </Route>
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

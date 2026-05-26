@@ -1,5 +1,7 @@
 import type {
+  AdminRoomSummary,
   AuthUser,
+  ParticipantInfo,
   RoomDetails,
   RoomSummary,
   ChatMessage,
@@ -103,6 +105,116 @@ export interface KickMemberResponse {
 export interface MessagesResponse {
   messages: ChatMessage[];
   nextCursor: string | null;
+}
+
+// ── Admin ───────────────────────────────────────────────────────────────
+
+export interface AdminStatsResponse {
+  users: {
+    total: number;
+    blocked: number;
+    /** Сколько уникальных userId сейчас имеют живую WS-сессию (без shadow). */
+    online: number;
+  };
+  rooms: {
+    total: number;
+    /** Сколько комнат сейчас активны в памяти (есть RoomRuntime). */
+    active: number;
+    private: number;
+  };
+  /** ISO-метка момента сбора статистики — для UI. */
+  serverTime: string;
+}
+
+export interface AdminUserSummary {
+  id: string;
+  email: string;
+  username: string;
+  avatarSeed: string;
+  createdAt: string;
+  isBlocked: boolean;
+  blockedAt: string | null;
+  blockReason: string | null;
+  /** Сколько комнат пользователь владеет. */
+  roomsOwned: number;
+}
+
+export interface AdminUserListResponse {
+  users: AdminUserSummary[];
+  nextCursor: string | null;
+}
+
+export interface AdminUserDetailResponse {
+  user: AdminUserSummary;
+  rooms: RoomSummary[];
+}
+
+export interface BlockUserRequest {
+  reason?: string;
+}
+
+export interface BlockUserResponse {
+  user: AdminUserSummary;
+}
+
+export interface AdminRoomListResponse {
+  rooms: AdminRoomSummary[];
+  nextCursor: string | null;
+}
+
+export interface AdminRoomDetailResponse {
+  room: AdminRoomSummary;
+  /** Полная информация о комнате включая видео-состояние. */
+  details: RoomDetails;
+  /** Живые участники из RoomRuntime (без shadow). Пусто если рантайма нет. */
+  participants: ParticipantInfo[];
+}
+
+export interface UpdateRoomRequest {
+  name?: string;
+  isPrivate?: boolean;
+  /**
+   * Управление паролем:
+   * - `string` (>=4 chars) — установить новый пароль (хеш на сервере)
+   * - `null` — сбросить пароль (комната становится без пароля)
+   * - не передавать поле — оставить как есть
+   */
+  password?: string | null;
+  maxParticipants?: number;
+  allowGuests?: boolean;
+  hostOnlyControl?: boolean;
+}
+
+export interface UpdateRoomResponse {
+  room: AdminRoomSummary;
+  details: RoomDetails;
+}
+
+export type AdminAccessMode = 'normal' | 'shadow';
+
+export interface AdminAccessTicketRequest {
+  mode: AdminAccessMode;
+}
+
+export interface AdminAccessTicketResponse {
+  room: RoomDetails;
+  wsTicket: string;
+  mode: AdminAccessMode;
+}
+
+export interface AdminBroadcastRequest {
+  body: string;
+}
+
+export interface AdminBroadcastResponse {
+  /** Сколько активных комнат получили сообщение. */
+  roomsDelivered: number;
+}
+
+export interface AdminCloseRoomResponse {
+  roomId: string;
+  /** Сколько участников было выкинуто. */
+  kicked: number;
 }
 
 // ── Errors ──────────────────────────────────────────────────────────────

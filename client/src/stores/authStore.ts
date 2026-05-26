@@ -30,7 +30,13 @@ function readStorage(): { token: string | null; user: AuthUser | null } {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { token: null, user: null };
     const parsed = JSON.parse(raw) as { token?: string; user?: AuthUser };
-    return { token: parsed.token ?? null, user: parsed.user ?? null };
+    // legacy storage may lack isAdmin — backfill with false. /auth/me на
+    // mount всё равно перезапишет user из сервера.
+    const rawUser = parsed.user as (AuthUser & { isAdmin?: boolean }) | undefined;
+    const user = rawUser
+      ? { ...rawUser, isAdmin: rawUser.isAdmin ?? false }
+      : null;
+    return { token: parsed.token ?? null, user };
   } catch {
     return { token: null, user: null };
   }

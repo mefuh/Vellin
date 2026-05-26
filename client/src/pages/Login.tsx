@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../shared';
 import { AuthShell, ErrorBanner, Field } from './AuthShell';
 import { useAuthStore } from '../stores/authStore';
 
 export function Login() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const blocked = searchParams.get('blocked') === '1';
   const login = useAuthStore((s) => s.login);
   const loading = useAuthStore((s) => s.loading);
   const error = useAuthStore((s) => s.error);
@@ -40,6 +42,19 @@ export function Login() {
       }
     >
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {blocked && (
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: 'var(--r-md)',
+              background: 'rgba(209,39,27,0.12)',
+              color: 'var(--accent-hi)',
+              fontSize: 13,
+            }}
+          >
+            Ваш аккаунт заблокирован администратором.
+          </div>
+        )}
         <Field
           label="Email"
           type="email"

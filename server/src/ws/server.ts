@@ -65,7 +65,11 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       ticket: true;
       roomId: string;
       principal: Principal;
+      admin?: boolean;
+      shadow?: boolean;
     };
+    const isAdminTicket = ticketPayload.admin === true;
+    const isShadowTicket = isAdminTicket && ticketPayload.shadow === true;
 
     const room = await prisma.room.findUnique({
       where: { id: ticketPayload.roomId },
@@ -76,10 +80,28 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       return;
     }
 
+    // Block-check для зарегистрированных пользователей. Заблокированному
+    // достанется 4403 даже если он каким-то образом успел получить ticket
+    // до момента блокировки.
+    if (ticketPayload.principal.kind === 'user') {
+      const u = await prisma.user.findUnique({
+        where: { id: ticketPayload.principal.userId },
+        select: { isBlocked: true },
+      });
+      if (!u || u.isBlocked) {
+        socket.close(4403, 'blocked');
+        return;
+      }
+    }
+
     const runtime = await ensureRoomRuntime(room);
 
-    // Capacity check before attach.
-    if (runtime.isAtCapacity() && !runtime.participants.has(ticketPayload.principal.userId)) {
+    // Capacity check — admin (включая shadow) её обходит.
+    if (
+      !isAdminTicket &&
+      runtime.isAtCapacity() &&
+      !runtime.participants.has(ticketPayload.principal.userId)
+    ) {
       socket.close(4413, 'room full');
       return;
     }
@@ -101,10 +123,15 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       'ws:open',
     );
 
-    // Resolve role + permissions before attach.
+    // Resolve role + permissions before attach. Admin-ticket → superadmin
+    // (полные права + возможность кикнуть владельца). Shadow только проходит
+    // через `attachSession({ shadow: true })`.
     let role: RoomRole;
     let permissions: RoomPermissions;
-    if (ticketPayload.principal.kind === 'guest') {
+    if (isAdminTicket) {
+      role = 'superadmin';
+      permissions = { ...ALL_PERMISSIONS };
+    } else if (ticketPayload.principal.kind === 'guest') {
       role = 'guest';
       permissions = { ...DEFAULT_GUEST_PERMISSIONS };
     } else if (ticketPayload.principal.userId === room.ownerId) {
@@ -116,7 +143,9 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       permissions = getEffectivePermissions(role, mem.permissionsJson);
     }
 
-    const { isReconnect } = runtime.attachSession(ctx, role, permissions);
+    const { isReconnect } = runtime.attachSession(ctx, role, permissions, {
+      shadow: isShadowTicket,
+    });
     const welcome = await runtime.buildWelcome(ctx.principal.userId);
     const welcomeMsg: S2C = {
       t: 'welcome',
@@ -133,7 +162,7 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
     };
     ctx.send(welcomeMsg);
 
-    if (!isReconnect) {
+    if (!isReconnect && !isShadowTicket) {
       runtime.broadcast(
         {
           t: 'user_join',
@@ -181,6 +210,12 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         return;
       }
       const c2sMsg = parsed as C2S;
+      // Shadow-сессия — пассивный наблюдатель. Из read-only команд разрешаем
+      // только sync_request/pong/hello (для drift-коррекции и keep-alive).
+      if (isShadowTicket && c2sMsg.t !== 'sync_request' && c2sMsg.t !== 'pong' && c2sMsg.t !== 'hello') {
+        sendError(ctx, 'shadow_mode', 'Shadow-режим: команды недоступны');
+        return;
+      }
       // WebRTC signaling spikes during peer-mesh setup — half the cost so a
       // 9-peer offer/answer/ICE storm doesn't trip the bucket.
       const cost = c2sMsg.t === 'call_signal' ? 0.5 : 1;

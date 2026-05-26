@@ -8,6 +8,7 @@ import { ZodError } from 'zod';
 import { loadEnv } from './env.js';
 import { authRoutes } from './auth/routes.js';
 import { roomRoutes } from './rooms/routes.js';
+import { adminRoutes } from './admin/routes.js';
 import { registerWebSocket } from './ws/server.js';
 import { logger } from './utils/logger.js';
 
@@ -67,12 +68,16 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.code(500).send({ error: 'InternalServerError', message: 'Internal error', statusCode: 500 });
   });
 
-  app.get('/health', async () => ({ ok: true, version: '0.3.4' }));
+  app.get('/health', async () => ({ ok: true, version: '0.4.0' }));
 
   await app.register(
     async (api) => {
+      // КАЖДЫЙ из этих register() — отдельный плагин-контекст. roomRoutes и
+      // adminRoutes навешивают свой preHandler через addHook, поэтому их
+      // нельзя объединять в один колбэк — иначе хук протечёт на auth-роуты.
       await api.register(authRoutes);
       await api.register(roomRoutes);
+      await api.register(adminRoutes);
     },
     { prefix: '/api' },
   );

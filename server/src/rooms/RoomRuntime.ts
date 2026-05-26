@@ -70,6 +70,17 @@ interface SessionEntry {
   permissions: RoomPermissions;
   /** When set, the participant is being kept alive for reconnection. */
   pendingRemovalTimer?: NodeJS.Timeout;
+  /** Admin shadow-session: получает broadcast'ы, но скрыта от участников. */
+  shadow?: boolean;
+}
+
+export interface AttachOptions {
+  /**
+   * Если true — сессия добавляется в shadowSessions, не попадает в
+   * `listParticipants()`, не генерирует `user_join`/`user_leave`,
+   * не учитывается в capacity. Любая C2S-команда отвергается.
+   */
+  shadow?: boolean;
 }
 
 export class RoomRuntime {
@@ -93,6 +104,11 @@ export class RoomRuntime {
 
   /** Sessions keyed by userId (one active session per user). */
   readonly participants = new Map<string, SessionEntry>();
+  /**
+   * Shadow-сессии главного админа. Ключ — sessionId (а не userId), потому что
+   * один и тот же админ может одновременно держать и обычную, и shadow-сессию.
+   */
+  private readonly shadowSessions = new Map<string, SessionEntry>();
   /** Active voice/video call members keyed by userId. Empty = no active call. */
   private readonly callMembers = new Map<string, CallMember>();
   private callStartedAt: number | null = null;
@@ -139,6 +155,7 @@ export class RoomRuntime {
       if (entry.pendingRemovalTimer) clearTimeout(entry.pendingRemovalTimer);
     }
     this.participants.clear();
+    this.shadowSessions.clear();
     this.callMembers.clear();
     this.callStartedAt = null;
     this.callStartedByUserId = null;
@@ -329,6 +346,8 @@ export class RoomRuntime {
   /**
    * Force-disconnect a participant. Returns true if they were online.
    * Does NOT remove Membership (kicked users retain their saved permissions on rejoin).
+   * Главный админ (`byUserId` — superadmin) может кикнуть кого угодно, включая
+   * владельца комнаты.
    */
   kickParticipant(byUserId: string, targetUserId: string): boolean {
     const entry = this.participants.get(targetUserId);
@@ -383,12 +402,27 @@ export class RoomRuntime {
    * If the user already has a session, the old one is replaced (and old socket
    * closed) — silent reconnection.
    * @returns true if the join is a fresh appearance to others, false if reconnect.
+   *
+   * При `opts.shadow=true` сессия добавляется в параллельную карту скрытых
+   * сессий: она НЕ попадает в `listParticipants()` / `user_join` / capacity,
+   * но получает все S2C-broadcast'ы.
    */
   attachSession(
     session: Session,
     role: RoomRole,
     permissions: RoomPermissions,
+    opts: AttachOptions = {},
   ): { isReconnect: boolean } {
+    if (opts.shadow) {
+      this.shadowSessions.set(session.sessionId, {
+        session,
+        joinedAt: Date.now(),
+        role,
+        permissions,
+        shadow: true,
+      });
+      return { isReconnect: false };
+    }
     const userId = session.principal.userId;
     const existing = this.participants.get(userId);
     if (existing) {
@@ -421,8 +455,15 @@ export class RoomRuntime {
   /**
    * Mark a session as disconnected. Removal is deferred to allow reconnect.
    * Owner remains owner even when offline (owner = Room.ownerId, immutable).
+   * Shadow-сессии удаляются мгновенно и не генерируют user_leave.
    */
   detachSession(session: Session): void {
+    // Shadow path: identified by sessionId.
+    const shadow = this.shadowSessions.get(session.sessionId);
+    if (shadow && shadow.session === session) {
+      this.shadowSessions.delete(session.sessionId);
+      return;
+    }
     const userId = session.principal.userId;
     const entry = this.participants.get(userId);
     if (!entry || entry.session !== session) return;
@@ -432,10 +473,125 @@ export class RoomRuntime {
       this.participants.delete(userId);
       this.evictFromCall(userId);
       this.broadcast({ t: 'user_leave', userId, serverTs: Date.now() });
-      if (this.participants.size === 0) {
+      if (this.participants.size === 0 && this.shadowSessions.size === 0) {
         this.destroy();
       }
     }, PARTICIPANT_GRACE_MS);
+  }
+
+  /** Является ли активная сессия пользователя shadow-сессией. */
+  isShadowSession(sessionId: string): boolean {
+    return this.shadowSessions.has(sessionId);
+  }
+
+  /**
+   * Принудительно завершить активный звонок. Все callMembers удаляются и
+   * рассылается `call_state` с пустым snapshot. Сами WS-сессии остаются.
+   */
+  endCall(): number {
+    const count = this.callMembers.size;
+    if (count === 0) return 0;
+    this.callMembers.clear();
+    this.callStartedAt = null;
+    this.callStartedByUserId = null;
+    this.broadcast({
+      t: 'call_state',
+      snapshot: this.snapshotCall(),
+      serverTs: Date.now(),
+    });
+    return count;
+  }
+
+  /**
+   * Принудительно закрыть комнату из админ-панели: всех участников выкидывает,
+   * runtime уничтожается. Запись `Room` в БД НЕ трогается.
+   */
+  forceClose(byAdminUserId: string): number {
+    const userIds = [...this.participants.keys()];
+    for (const userId of userIds) {
+      const entry = this.participants.get(userId);
+      if (!entry) continue;
+      try {
+        entry.session.send({
+          t: 'error',
+          code: 'room_closed',
+          message: 'Комната закрыта администратором',
+        });
+      } catch {
+        /* ignore */
+      }
+      try {
+        entry.session.send({
+          t: 'user_kicked',
+          userId,
+          byUserId: byAdminUserId,
+          serverTs: Date.now(),
+        });
+      } catch {
+        /* ignore */
+      }
+      try {
+        entry.session.close(4403, 'room closed');
+      } catch {
+        /* ignore */
+      }
+    }
+    for (const entry of this.shadowSessions.values()) {
+      try {
+        entry.session.send({
+          t: 'error',
+          code: 'room_closed',
+          message: 'Комната закрыта',
+        });
+      } catch {
+        /* ignore */
+      }
+      try {
+        entry.session.close(4403, 'room closed');
+      } catch {
+        /* ignore */
+      }
+    }
+    const kicked = userIds.length;
+    this.destroy();
+    return kicked;
+  }
+
+  /**
+   * Найти и закрыть конкретного пользователя в этой комнате (для блокировки
+   * пользователя из админ-панели). Возвращает true если сессия была активна.
+   */
+  closeUserSessions(userId: string, reason: 'blocked' | 'deleted'): boolean {
+    const entry = this.participants.get(userId);
+    if (!entry) return false;
+    try {
+      entry.session.send({
+        t: 'error',
+        code: 'blocked',
+        message:
+          reason === 'blocked'
+            ? 'Ваш аккаунт заблокирован администратором'
+            : 'Ваш аккаунт удалён',
+      });
+    } catch {
+      /* ignore */
+    }
+    if (entry.pendingRemovalTimer) {
+      clearTimeout(entry.pendingRemovalTimer);
+      entry.pendingRemovalTimer = undefined;
+    }
+    this.participants.delete(userId);
+    this.evictFromCall(userId);
+    try {
+      entry.session.close(4403, reason);
+    } catch {
+      /* ignore */
+    }
+    this.broadcast({ t: 'user_leave', userId, serverTs: Date.now() });
+    if (this.participants.size === 0 && this.shadowSessions.size === 0) {
+      this.destroy();
+    }
+    return true;
   }
 
   // ── Mutating events (serialized) ──────────────────────────────────────
@@ -829,6 +985,14 @@ export class RoomRuntime {
         logger.warn({ err, userId, roomId: this.roomId }, 'broadcast send failed');
       }
     }
+    for (const entry of this.shadowSessions.values()) {
+      try {
+        entry.session.send(msg);
+        delivered += 1;
+      } catch (err) {
+        logger.warn({ err, roomId: this.roomId, shadow: true }, 'broadcast send failed');
+      }
+    }
     if (msg.t !== 'video_sync' && msg.t !== 'ping') {
       logger.info(
         {
@@ -836,6 +1000,7 @@ export class RoomRuntime {
           roomId: this.roomId,
           delivered,
           total: this.participants.size,
+          shadow: this.shadowSessions.size,
         },
         'ws:broadcast',
       );

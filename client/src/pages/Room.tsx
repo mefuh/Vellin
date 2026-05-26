@@ -34,6 +34,10 @@ export function Room() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const inviteToken = params.get('invite') ?? undefined;
+  const adminModeRaw = params.get('adminMode');
+  const adminMode =
+    adminModeRaw === 'normal' || adminModeRaw === 'shadow' ? adminModeRaw : undefined;
+  const isShadow = adminMode === 'shadow';
   const user = useAuthStore((s) => s.user);
   const room = useRoomStore((s) => s.room);
   const participants = useRoomStore((s) => s.participants);
@@ -66,8 +70,13 @@ export function Room() {
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [permsFor, setPermsFor] = useState<string | null>(null);
 
-  // Probe access on mount/slug change.
+  // Probe access on mount/slug change. В admin-режиме probe не нужен — hook
+  // сам сходит за access-ticket'ом, минуя пароль/приватность.
   useEffect(() => {
+    if (adminMode) {
+      setAccess({ kind: 'ready' });
+      return;
+    }
     let active = true;
     setAccess({ kind: 'loading' });
     roomsApi
@@ -91,7 +100,7 @@ export function Room() {
     return () => {
       active = false;
     };
-  }, [slug, inviteToken]);
+  }, [slug, inviteToken, adminMode]);
 
   const submitPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,6 +120,7 @@ export function Room() {
     enabled,
     password: accessPassword,
     inviteToken,
+    adminMode,
     onError: setWsError,
   });
 
@@ -138,15 +148,24 @@ export function Room() {
     setMyCallStateStore(callApi.state);
   }, [callApi.state, setMyCallStateStore]);
 
-  // Redirect kicked users back to the library.
+  // Redirect kicked users back to the library. Если ошибка была 'blocked' —
+  // токен сбрасывается и редирект идёт в /login с пометкой.
   useEffect(() => {
     if (!kicked) return;
+    const blocked = wsError?.toLowerCase().includes('заблок') ?? false;
+    if (blocked) {
+      useAuthStore.getState().logout();
+      const id = window.setTimeout(() => {
+        navigate('/login?blocked=1', { replace: true });
+      }, 600);
+      return () => window.clearTimeout(id);
+    }
     setWsError('Вас удалили из комнаты');
     const id = window.setTimeout(() => {
       navigate('/library', { replace: true });
     }, 600);
     return () => window.clearTimeout(id);
-  }, [kicked, navigate]);
+  }, [kicked, navigate, wsError]);
 
   const role = you?.role ?? 'guest';
   const perms: RoomPermissions = you?.permissions ?? DEFAULT_GUEST_PERMISSIONS;
@@ -329,6 +348,41 @@ export function Room() {
       </header>
 
       <CallBanner />
+
+      {isShadow && (
+        <div
+          style={{
+            padding: isMobile ? '8px 12px' : '8px 16px',
+            background: 'var(--accent-soft)',
+            color: 'var(--accent-hi)',
+            fontSize: 13,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            borderBottom: '1px solid rgba(209,39,27,0.25)',
+          }}
+        >
+          <Icon name="eye" size={14} />
+          Режим наблюдения: вы невидимы для участников и не можете отправлять команды.
+        </div>
+      )}
+      {adminMode === 'normal' && (
+        <div
+          style={{
+            padding: isMobile ? '8px 12px' : '8px 16px',
+            background: 'rgba(74,222,128,0.1)',
+            color: 'var(--ok)',
+            fontSize: 13,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            borderBottom: '1px solid rgba(74,222,128,0.2)',
+          }}
+        >
+          <Icon name="crown" size={14} />
+          Режим администратора: полный контроль над комнатой.
+        </div>
+      )}
 
       {wsError && (
         <div

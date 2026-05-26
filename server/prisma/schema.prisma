@@ -15,9 +15,15 @@ model User {
   avatarSeed   String
   createdAt    DateTime  @default(now())
 
+  isBlocked    Boolean   @default(false)
+  blockedAt    DateTime?
+  blockReason  String?
+
   rooms        Room[]       @relation("RoomOwner")
   messages     Message[]
   memberships  Membership[]
+
+  @@index([isBlocked])
 }
 
 model Room {

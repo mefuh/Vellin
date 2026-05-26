@@ -281,6 +281,9 @@ export interface S2CError {
     | 'internal'
     | 'duplicate_session'
     | 'kicked'
+    | 'blocked'
+    | 'shadow_mode'
+    | 'room_closed'
     | 'resolve_failed';
   message: string;
 }

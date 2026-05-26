@@ -68,6 +68,16 @@ export function Library() {
               {user.username} {user.kind === 'guest' && <Chip tone="neutral">гость</Chip>}
             </span>
           )}
+          {user?.isAdmin && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon="crown"
+              onClick={() => navigate('/admin')}
+            >
+              Админ-панель
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={() => {
             logout();
             navigate('/');

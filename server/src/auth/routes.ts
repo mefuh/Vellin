@@ -13,6 +13,7 @@ import { hashPassword, verifyPassword } from './password.js';
 import { signSession, type Principal } from './jwt.js';
 import { generateAvatarSeed, generateGuestId } from '../utils/ids.js';
 import { requireAuth } from './middleware.js';
+import { isAdminEmail } from '../env.js';
 
 const registerSchema = z.object({
   email: z.string().email().max(254),
@@ -37,7 +38,13 @@ const guestSchema = z.object({
     .regex(/^[\p{L}\p{N}_\- ]+$/u, 'invalid characters'),
 }) satisfies z.ZodType<GuestRequest>;
 
-function toAuthUser(u: { id: string; email: string; username: string; avatarSeed: string; createdAt: Date }): AuthUser {
+function toAuthUser(u: {
+  id: string;
+  email: string;
+  username: string;
+  avatarSeed: string;
+  createdAt: Date;
+}): AuthUser {
   return {
     id: u.id,
     email: u.email,
@@ -45,6 +52,7 @@ function toAuthUser(u: { id: string; email: string; username: string; avatarSeed
     avatarSeed: u.avatarSeed,
     kind: 'user',
     createdAt: u.createdAt.toISOString(),
+    isAdmin: isAdminEmail(u.email),
   };
 }
 
@@ -95,6 +103,14 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         reply.code(401).send({ error: 'Unauthorized', message: 'Invalid email or password', statusCode: 401 });
         return;
       }
+      if (user.isBlocked) {
+        reply.code(403).send({
+          error: 'Forbidden',
+          message: 'Ваш аккаунт заблокирован',
+          statusCode: 403,
+        });
+        return;
+      }
       const principal: Principal = {
         kind: 'user',
         userId: user.id,
@@ -127,6 +143,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         avatarSeed,
         kind: 'guest',
         createdAt: new Date().toISOString(),
+        isAdmin: false,
       };
       reply.send({ token, user } satisfies AuthResponse);
     },
@@ -142,6 +159,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         avatarSeed: principal.avatarSeed,
         kind: 'guest',
         createdAt: new Date(0).toISOString(),
+        isAdmin: false,
       };
       reply.send({ user } satisfies MeResponse);
       return;

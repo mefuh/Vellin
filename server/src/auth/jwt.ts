@@ -8,6 +8,16 @@ export interface WsTicketPayload {
   ticket: true;
   roomId: string;
   principal: Principal;
+  /**
+   * Маркер, что тикет выдан админом из админ-панели. WS-handshake пропустит
+   * приватность/пароль/capacity, а роль в RoomRuntime будет 'superadmin'.
+   */
+  admin?: boolean;
+  /**
+   * Подрежим админа: shadow-сессия видит всё, но НЕ светится в списке
+   * участников и не может ничего изменить. Имеет смысл только при admin=true.
+   */
+  shadow?: boolean;
 }
 
 export type JwtPayload =
@@ -23,8 +33,15 @@ export function signWsTicket(
   roomId: string,
   principal: Principal,
   ttlSec: number,
+  opts: { admin?: boolean; shadow?: boolean } = {},
 ): string {
-  const payload: WsTicketPayload = { ticket: true, roomId, principal };
+  const payload: WsTicketPayload = {
+    ticket: true,
+    roomId,
+    principal,
+    ...(opts.admin ? { admin: true } : {}),
+    ...(opts.shadow ? { shadow: true } : {}),
+  };
   return app.jwt.sign(payload, { expiresIn: `${ttlSec}s` });
 }
 
