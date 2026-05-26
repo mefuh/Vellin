@@ -25,6 +25,13 @@ export interface AudioPipeline {
   outboundAudioTrack: MediaStreamTrack;
   selfAnalyser: AnalyserNode;
   setMicEnabled: (on: boolean) => void;
+  /**
+   * Swap the input MediaStream while keeping the rest of the graph (and the
+   * outbound RTC track) intact. Peers don't see a renegotiation — the
+   * MediaStreamDestination keeps producing the same track id; only what
+   * feeds into it changes.
+   */
+  replaceMicStream: (newStream: MediaStream) => void;
   teardown: () => void;
 }
 
@@ -57,7 +64,7 @@ export async function setupAudioPipeline(
 ): Promise<AudioPipeline> {
   const wasmBinary = await ensureRnnoiseReady(ctx);
 
-  const source = ctx.createMediaStreamSource(rawStream);
+  let source = ctx.createMediaStreamSource(rawStream);
   const rnnoise = new RnnoiseWorkletNode(ctx, { wasmBinary, maxChannels: 1 });
   const gain = ctx.createGain();
   gain.gain.value = 0; // start muted — toggleMic flips this on
@@ -82,6 +89,12 @@ export async function setupAudioPipeline(
     selfAnalyser: analyser,
     setMicEnabled: (on) => {
       gain.gain.value = on ? 1 : 0;
+    },
+    replaceMicStream: (newStream) => {
+      if (torn) return;
+      try { source.disconnect(); } catch { /* ignore */ }
+      source = ctx.createMediaStreamSource(newStream);
+      source.connect(rnnoise);
     },
     teardown: () => {
       if (torn) return;

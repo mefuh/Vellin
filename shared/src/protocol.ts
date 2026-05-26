@@ -32,7 +32,8 @@ export type C2S =
   | C2SCallJoin
   | C2SCallLeave
   | C2SCallMedia
-  | C2SCallSignal;
+  | C2SCallSignal
+  | C2SCallSpeaking;
 
 export interface C2SHello {
   t: 'hello';
@@ -154,6 +155,16 @@ export interface C2SCallSignal {
   payload: CallSignalPayload;
   clientTs: number;
 }
+/**
+ * Sent on transitions only (started speaking / stopped speaking) so every
+ * peer can render the same speaker indicator. Server relays to other call
+ * members without persisting.
+ */
+export interface C2SCallSpeaking {
+  t: 'call_speaking';
+  speaking: boolean;
+  clientTs: number;
+}
 
 // ── Server → Client ─────────────────────────────────────────────────────
 export type S2C =
@@ -176,6 +187,7 @@ export type S2C =
   | S2CCallPeerLeft
   | S2CCallPeerMedia
   | S2CCallSignalRelay
+  | S2CCallPeerSpeaking
   | S2CCallError;
 
 export interface S2CWelcome {
@@ -316,6 +328,12 @@ export interface S2CCallSignalRelay {
   t: 'call_signal_relay';
   fromUserId: string;
   payload: CallSignalPayload;
+  serverTs: number;
+}
+export interface S2CCallPeerSpeaking {
+  t: 'call_peer_speaking';
+  userId: string;
+  speaking: boolean;
   serverTs: number;
 }
 export interface S2CCallError {

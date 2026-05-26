@@ -31,6 +31,7 @@ import {
   handleCallLeave,
   handleCallMedia,
   handleCallSignal,
+  handleCallSpeaking,
 } from './handlers/call.js';
 import { roomMutex } from '../utils/async-mutex.js';
 import { getOrCreateMembership } from '../rooms/membership.js';
@@ -217,8 +218,9 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         return;
       }
       // WebRTC signaling spikes during peer-mesh setup — half the cost so a
-      // 9-peer offer/answer/ICE storm doesn't trip the bucket.
-      const cost = c2sMsg.t === 'call_signal' ? 0.5 : 1;
+      // 9-peer offer/answer/ICE storm doesn't trip the bucket. Speaking
+      // transitions are also chatty (a couple per second when speaking).
+      const cost = c2sMsg.t === 'call_signal' || c2sMsg.t === 'call_speaking' ? 0.5 : 1;
       if (!ctx.bucket.consume(cost)) {
         sendError(ctx, 'rate_limited', 'Slow down');
         return;
@@ -355,6 +357,11 @@ async function dispatch(msg: C2S, ctx: ConnectionContext, runtime: Awaited<Retur
     case 'call_signal':
       // Hot path — server only relays; no shared state mutation.
       handleCallSignal(runtime, ctx, msg);
+      return;
+
+    case 'call_speaking':
+      // Transient indicator — no mutex, no persistence.
+      handleCallSpeaking(runtime, ctx, msg);
       return;
 
     default: {
