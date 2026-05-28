@@ -27,7 +27,12 @@ type Listener<K extends EngineEventName> = EngineEventMap[K] extends void
   : (arg: EngineEventMap[K]) => void;
 
 export interface PlayerEngine {
-  load(url: string): Promise<void>;
+  /**
+   * @param url   Primary media URL (video or full muxed stream).
+   * @param audioUrl Companion audio-only URL — populated only for `dual` kind,
+   *                 ignored by other engines.
+   */
+  load(url: string, audioUrl?: string): Promise<void>;
   play(): Promise<void>;
   pause(): void;
   seek(sec: number): void;

@@ -191,7 +191,7 @@ export function VideoPlayer({
     // Initial sync is driven by the [video, ready] effect below once the
     // engine reports ready — that always reads the *latest* server state, so a
     // slow load (a torrent can take up to a minute) never applies stale state.
-    void engine.load(resolved.mediaUrl).catch(() => {
+    void engine.load(resolved.mediaUrl, resolved.audioUrl).catch(() => {
       /* error already emitted via engine.on('error') */
     });
 

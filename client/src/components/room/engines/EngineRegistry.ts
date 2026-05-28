@@ -3,6 +3,7 @@ import type { PlayerEngine } from './PlayerEngine';
 import { HtmlVideoEngine } from './HtmlVideoEngine';
 import { HlsEngine } from './HlsEngine';
 import { DashEngine } from './DashEngine';
+import { DualStreamEngine } from './DualStreamEngine';
 import { WebTorrentEngine } from './WebTorrentEngine';
 
 /**
@@ -23,6 +24,8 @@ export function createEngine(
       return new HlsEngine(videoEl);
     case 'dash':
       return new DashEngine(videoEl);
+    case 'dual':
+      return new DualStreamEngine(videoEl);
     case 'torrent':
       return new WebTorrentEngine(videoEl);
     case 'youtube_embed':
@@ -52,6 +55,8 @@ export function kindLabel(kind: MediaKind): string {
       return 'HLS';
     case 'dash':
       return 'DASH';
+    case 'dual':
+      return 'YouTube HD';
     case 'torrent':
       return 'Torrent';
     case 'youtube_embed':
