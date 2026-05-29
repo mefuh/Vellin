@@ -137,3 +137,9 @@ textarea {
     transform: translateX(14px);
   }
 }
+
+@keyframes vellinBufferSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}

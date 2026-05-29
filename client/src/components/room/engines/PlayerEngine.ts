@@ -18,6 +18,12 @@ export interface EngineEventMap {
   /** Emitted when play() succeeded only after the engine fell back to muted
    * autoplay (browser autoplay policy). UI should surface an "unmute" affordance. */
   autoplay_muted: void;
+  /** Playback stalled mid-stream waiting for more data. UI should show a
+   *  buffering spinner. Pairs with `playing` on resume. */
+  waiting: void;
+  /** Playback resumed after a stall (or started for the first time). UI
+   *  should hide any buffering spinner. */
+  playing: void;
 }
 
 export type EngineEventName = keyof EngineEventMap;
@@ -27,7 +33,12 @@ type Listener<K extends EngineEventName> = EngineEventMap[K] extends void
   : (arg: EngineEventMap[K]) => void;
 
 export interface PlayerEngine {
-  load(url: string): Promise<void>;
+  /**
+   * @param url   Primary media URL (video or full muxed stream).
+   * @param audioUrl Companion audio-only URL — populated only for `dual` kind,
+   *                 ignored by other engines.
+   */
+  load(url: string, audioUrl?: string): Promise<void>;
   play(): Promise<void>;
   pause(): void;
   seek(sec: number): void;

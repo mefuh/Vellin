@@ -41,6 +41,9 @@ export type VideoStatus = 'playing' | 'paused';
  * - `direct`: plain video file (mp4/webm/ogg) → native `<video>`.
  * - `hls`: m3u8 → hls.js (native in Safari).
  * - `dash`: mpd → shaka-player.
+ * - `dual`: separate muxed video-only + audio-only streams (typically YouTube
+ *   HD, where progressive caps at 360p). Player must use both `mediaUrl`
+ *   (video) and `audioUrl` (audio) and keep them in sync locally.
  * - `torrent`: magnet/.torrent → WebTorrent.
  * - `*_embed`: provider-specific iframe (used as fallback when extraction failed).
  */
@@ -48,6 +51,7 @@ export type MediaKind =
   | 'direct'
   | 'hls'
   | 'dash'
+  | 'dual'
   | 'torrent'
   | 'youtube_embed'
   | 'rutube_embed'
@@ -62,6 +66,11 @@ export interface ResolvedMedia {
   kind: MediaKind;
   /** Direct stream URL, provider embed URL, or magnet URI. */
   mediaUrl: string;
+  /**
+   * Companion audio-only URL. Populated only for `kind: 'dual'` — the client
+   * plays this through a hidden `<audio>` element synced with `<video>`.
+   */
+  audioUrl?: string;
   mime?: string;
   title?: string;
   durationSec?: number;
