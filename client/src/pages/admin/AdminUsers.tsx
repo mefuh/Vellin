@@ -4,11 +4,13 @@ import { adminApi } from '../../api/admin';
 import { ApiHttpError } from '../../api/client';
 import { Avatar, Button, Chip, Icon } from '../../shared';
 import { useAuthStore } from '../../stores/authStore';
+import { useIsNarrow } from '../../hooks/useMediaQuery';
 
 const PAGE_LIMIT = 20;
 
 export function AdminUsers() {
   const me = useAuthStore((s) => s.user);
+  const isNarrow = useIsNarrow();
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -62,14 +64,14 @@ export function AdminUsers() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
         <div>
-          <h1 style={{ fontSize: 28, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>
+          <h1 style={{ fontSize: isNarrow ? 22 : 28, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>
             Пользователи
           </h1>
           <p style={{ marginTop: 6, color: 'var(--text-1)', fontSize: 13 }}>
             Зарегистрированные пользователи. Гостевые сессии не сохраняются.
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 280px', maxWidth: 360 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 280px', maxWidth: isNarrow ? '100%' : 360, width: isNarrow ? '100%' : undefined }}>
           <Icon name="search" size={16} style={{ color: 'var(--text-2)' }} />
           <input
             value={query}
@@ -103,106 +105,126 @@ export function AdminUsers() {
           overflow: 'hidden',
         }}
       >
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(220px, 2fr) minmax(180px, 2fr) 120px 120px auto',
-            gap: 0,
-            padding: '12px 16px',
-            borderBottom: '1px solid var(--line-2)',
-            color: 'var(--text-2)',
-            fontSize: 11,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            fontWeight: 600,
-          }}
-        >
-          <span>Пользователь</span>
-          <span>Email</span>
-          <span>Регистрация</span>
-          <span>Статус</span>
-          <span style={{ textAlign: 'right' }}>Действия</span>
-        </div>
+        {!isNarrow && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(220px, 2fr) minmax(180px, 2fr) 120px 120px auto',
+              gap: 0,
+              padding: '12px 16px',
+              borderBottom: '1px solid var(--line-2)',
+              color: 'var(--text-2)',
+              fontSize: 11,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              fontWeight: 600,
+            }}
+          >
+            <span>Пользователь</span>
+            <span>Email</span>
+            <span>Регистрация</span>
+            <span>Статус</span>
+            <span style={{ textAlign: 'right' }}>Действия</span>
+          </div>
+        )}
         {users.length === 0 && !loading && (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
             Ничего не найдено
           </div>
         )}
-        {users.map((u) => (
-          <div
-            key={u.id}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(220px, 2fr) minmax(180px, 2fr) 120px 120px auto',
-              alignItems: 'center',
-              padding: '12px 16px',
-              borderBottom: '1px solid var(--line-1)',
-              fontSize: 13,
-            }}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-              <Avatar seed={u.avatarSeed} name={u.username} size={32} />
-              <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <span style={{ color: 'var(--text-0)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {u.username}
-                </span>
-                {u.roomsOwned > 0 && (
-                  <span style={{ color: 'var(--text-3)', fontSize: 11 }}>
-                    владеет {u.roomsOwned}
+        {users.map((u) =>
+          isNarrow ? (
+            <UserCard
+              key={u.id}
+              user={u}
+              isMe={u.id === me?.id}
+              onBlock={() => setBlockTarget(u)}
+              onUnblock={async () => {
+                try {
+                  const r = await adminApi.unblockUser(u.id);
+                  onUserUpdated(r.user);
+                } catch (e) {
+                  setError(e instanceof ApiHttpError ? e.payload.message : 'Ошибка');
+                }
+              }}
+              onDelete={() => setDeleteTarget(u)}
+            />
+          ) : (
+            <div
+              key={u.id}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(220px, 2fr) minmax(180px, 2fr) 120px 120px auto',
+                alignItems: 'center',
+                padding: '12px 16px',
+                borderBottom: '1px solid var(--line-1)',
+                fontSize: 13,
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <Avatar seed={u.avatarSeed} name={u.username} size={32} />
+                <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <span style={{ color: 'var(--text-0)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {u.username}
                   </span>
+                  {u.roomsOwned > 0 && (
+                    <span style={{ color: 'var(--text-3)', fontSize: 11 }}>
+                      владеет {u.roomsOwned}
+                    </span>
+                  )}
+                </span>
+              </span>
+              <span style={{ color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {u.email}
+              </span>
+              <span style={{ color: 'var(--text-2)', fontSize: 12 }}>
+                {new Date(u.createdAt).toLocaleDateString('ru-RU')}
+              </span>
+              <span>
+                {u.isBlocked ? (
+                  <Chip tone="accent" icon="lock">заблокирован</Chip>
+                ) : (
+                  <Chip tone="success">активен</Chip>
                 )}
               </span>
-            </span>
-            <span style={{ color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {u.email}
-            </span>
-            <span style={{ color: 'var(--text-2)', fontSize: 12 }}>
-              {new Date(u.createdAt).toLocaleDateString('ru-RU')}
-            </span>
-            <span>
-              {u.isBlocked ? (
-                <Chip tone="accent" icon="lock">заблокирован</Chip>
-              ) : (
-                <Chip tone="success">активен</Chip>
-              )}
-            </span>
-            <span style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-              {u.isBlocked ? (
+              <span style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                {u.isBlocked ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const r = await adminApi.unblockUser(u.id);
+                        onUserUpdated(r.user);
+                      } catch (e) {
+                        setError(e instanceof ApiHttpError ? e.payload.message : 'Ошибка');
+                      }
+                    }}
+                  >
+                    Разблокировать
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={u.id === me?.id}
+                    onClick={() => setBlockTarget(u)}
+                  >
+                    Блокировать
+                  </Button>
+                )}
                 <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={async () => {
-                    try {
-                      const r = await adminApi.unblockUser(u.id);
-                      onUserUpdated(r.user);
-                    } catch (e) {
-                      setError(e instanceof ApiHttpError ? e.payload.message : 'Ошибка');
-                    }
-                  }}
-                >
-                  Разблокировать
-                </Button>
-              ) : (
-                <Button
-                  variant="secondary"
+                  variant="danger"
                   size="sm"
                   disabled={u.id === me?.id}
-                  onClick={() => setBlockTarget(u)}
+                  onClick={() => setDeleteTarget(u)}
                 >
-                  Блокировать
+                  Удалить
                 </Button>
-              )}
-              <Button
-                variant="danger"
-                size="sm"
-                disabled={u.id === me?.id}
-                onClick={() => setDeleteTarget(u)}
-              >
-                Удалить
-              </Button>
-            </span>
-          </div>
-        ))}
+              </span>
+            </div>
+          ),
+        )}
       </div>
 
       {nextCursor && (
@@ -363,6 +385,7 @@ function DeleteUserDialog({
 }
 
 export function ConfirmShell({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+  const isNarrow = useIsNarrow();
   return (
     <div
       style={{
@@ -372,7 +395,7 @@ export function ConfirmShell({ title, children, onClose }: { title: string; chil
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 20,
+        padding: isNarrow ? 10 : 20,
         zIndex: 1000,
       }}
       onClick={onClose}
@@ -383,8 +406,10 @@ export function ConfirmShell({ title, children, onClose }: { title: string; chil
           background: 'var(--bg-1)',
           border: '1px solid var(--line-2)',
           borderRadius: 'var(--r-lg)',
-          padding: 24,
+          padding: isNarrow ? 16 : 24,
           width: 'min(520px, 100%)',
+          maxHeight: '90svh',
+          overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
           gap: 14,
@@ -407,8 +432,99 @@ export function ConfirmShell({ title, children, onClose }: { title: string; chil
 
 export function DialogActions({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4, flexWrap: 'wrap' }}>
       {children}
+    </div>
+  );
+}
+
+/**
+ * Mobile-friendly user row. Vertical card layout: avatar + username on top,
+ * email + meta below, action buttons at the bottom. Uses the same actions as
+ * the desktop row but lays them out for a 320–600px viewport.
+ */
+function UserCard({
+  user: u,
+  isMe,
+  onBlock,
+  onUnblock,
+  onDelete,
+}: {
+  user: AdminUserSummary;
+  isMe: boolean;
+  onBlock: () => void;
+  onUnblock: () => void | Promise<void>;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      style={{
+        padding: '14px 16px',
+        borderBottom: '1px solid var(--line-1)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <Avatar seed={u.avatarSeed} name={u.username} size={36} />
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+          <span
+            style={{
+              color: 'var(--text-0)',
+              fontWeight: 600,
+              fontSize: 14,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {u.username}
+          </span>
+          <span
+            style={{
+              color: 'var(--text-1)',
+              fontSize: 12,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {u.email}
+          </span>
+        </div>
+        {u.isBlocked ? (
+          <Chip tone="accent" icon="lock">блок</Chip>
+        ) : (
+          <Chip tone="success">актив</Chip>
+        )}
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          gap: 12,
+          flexWrap: 'wrap',
+          color: 'var(--text-3)',
+          fontSize: 11,
+        }}
+      >
+        <span>с {new Date(u.createdAt).toLocaleDateString('ru-RU')}</span>
+        {u.roomsOwned > 0 && <span>комнат: {u.roomsOwned}</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {u.isBlocked ? (
+          <Button variant="secondary" size="sm" onClick={() => void onUnblock()}>
+            Разблокировать
+          </Button>
+        ) : (
+          <Button variant="secondary" size="sm" disabled={isMe} onClick={onBlock}>
+            Блокировать
+          </Button>
+        )}
+        <Button variant="danger" size="sm" disabled={isMe} onClick={onDelete}>
+          Удалить
+        </Button>
+      </div>
     </div>
   );
 }

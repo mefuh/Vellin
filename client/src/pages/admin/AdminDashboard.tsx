@@ -3,10 +3,12 @@ import type { AdminStatsResponse } from '@vellin/shared';
 import { adminApi } from '../../api/admin';
 import { ApiHttpError } from '../../api/client';
 import { Button, Chip, Icon, type IconName } from '../../shared';
+import { useIsNarrow } from '../../hooks/useMediaQuery';
 
 const REFRESH_MS = 10_000;
 
 export function AdminDashboard() {
+  const isNarrow = useIsNarrow();
   const [stats, setStats] = useState<AdminStatsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showBroadcast, setShowBroadcast] = useState(false);
@@ -31,18 +33,18 @@ export function AdminDashboard() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div>
-          <h1 style={{ fontSize: 28, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>
+          <h1 style={{ fontSize: isNarrow ? 22 : 28, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>
             Обзор
           </h1>
           <p style={{ marginTop: 6, color: 'var(--text-1)', fontSize: 13 }}>
             Состояние сервиса в реальном времени. Обновляется каждые 10 секунд.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button variant="secondary" icon="refresh" onClick={() => void refresh()}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Button variant="secondary" icon="refresh" size={isNarrow ? 'sm' : undefined} onClick={() => void refresh()}>
             Обновить
           </Button>
-          <Button variant="primary" icon="bell" onClick={() => setShowBroadcast(true)}>
+          <Button variant="primary" icon="bell" size={isNarrow ? 'sm' : undefined} onClick={() => setShowBroadcast(true)}>
             Объявление
           </Button>
         </div>
@@ -65,8 +67,10 @@ export function AdminDashboard() {
       <section
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-          gap: 14,
+          // На узком экране минимум 140px — две карточки умещаются в ряд
+          // даже на 320px viewport.
+          gridTemplateColumns: `repeat(auto-fill, minmax(${isNarrow ? 140 : 220}px, 1fr))`,
+          gap: isNarrow ? 10 : 14,
         }}
       >
         <StatCard
