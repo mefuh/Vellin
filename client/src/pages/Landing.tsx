@@ -75,7 +75,7 @@ export function Landing() {
       >
         <section style={{ maxWidth: 600, display: 'flex', flexDirection: 'column', gap: 24 }}>
           <Chip tone="accent" icon="sparkles" style={{ alignSelf: 'flex-start' }}>
-            beta v 0.6.0 · создан для просмотра Универа
+            beta v 0.6.1 · создан для просмотра Универа
           </Chip>
           <h1
             style={{

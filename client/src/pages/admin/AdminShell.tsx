@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { Button, Chip, Icon, VellinLogo, type IconName } from '../../shared';
+import { useIsMobile } from '../../hooks/useMediaQuery';
 
 interface NavItem {
   to: string;
@@ -17,6 +18,85 @@ const NAV: NavItem[] = [
 export function AdminShell() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const isMobile = useIsMobile();
+
+  if (isMobile) {
+    return (
+      <div
+        style={{
+          minHeight: '100svh',
+          background: 'var(--bg-0)',
+          color: 'var(--text-0)',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+        className="admin-shell admin-shell--mobile"
+      >
+        <header
+          style={{
+            background: 'var(--bg-1)',
+            borderBottom: '1px solid var(--line-2)',
+            padding: '10px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <VellinLogo />
+            </Link>
+            <Chip tone="accent" icon="crown">админ</Chip>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="arrow"
+              onClick={() => navigate('/library')}
+              title="К библиотеке"
+            />
+          </div>
+          <nav
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${NAV.length}, 1fr)`,
+              gap: 4,
+            }}
+          >
+            {NAV.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                style={({ isActive }) => ({
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  padding: '8px 6px',
+                  borderRadius: 'var(--r-md)',
+                  color: isActive ? 'var(--text-0)' : 'var(--text-1)',
+                  background: isActive ? 'var(--bg-3)' : 'transparent',
+                  boxShadow: isActive ? 'inset 0 0 0 1px var(--line-2)' : 'none',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  textDecoration: 'none',
+                })}
+              >
+                <Icon name={item.icon} size={15} />
+                <span>{item.label}</span>
+              </NavLink>
+            ))}
+          </nav>
+        </header>
+
+        <main style={{ padding: '18px 14px 40px', minWidth: 0, flex: 1 }}>
+          <Outlet />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div

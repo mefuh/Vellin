@@ -6,6 +6,7 @@ import { ApiHttpError } from '../../api/client';
 import { Button, Chip, Icon } from '../../shared';
 import { AdminRoomEdit } from './AdminRoomEdit';
 import { ConfirmShell, DialogActions } from './AdminUsers';
+import { useIsNarrow } from '../../hooks/useMediaQuery';
 
 const PAGE_LIMIT = 20;
 
@@ -13,6 +14,7 @@ export const ADMIN_TICKET_STORAGE_PREFIX = 'vellin.admin.ticket.';
 
 export function AdminRooms() {
   const navigate = useNavigate();
+  const isNarrow = useIsNarrow();
   const [rooms, setRooms] = useState<AdminRoomSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -74,14 +76,14 @@ export function AdminRooms() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
         <div>
-          <h1 style={{ fontSize: 28, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>
+          <h1 style={{ fontSize: isNarrow ? 22 : 28, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>
             Комнаты
           </h1>
           <p style={{ marginTop: 6, color: 'var(--text-1)', fontSize: 13 }}>
             Все комнаты сервиса, включая приватные. Кнопка «Войти» обходит пароль и capacity.
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 280px', maxWidth: 360 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 280px', maxWidth: isNarrow ? '100%' : 360, width: isNarrow ? '100%' : undefined }}>
           <Icon name="search" size={16} style={{ color: 'var(--text-2)' }} />
           <input
             value={query}
