@@ -32,6 +32,15 @@ export class HtmlVideoEngine extends EmitterBase implements PlayerEngine {
   private readonly onEnded = (): void => {
     this.emit('ended');
   };
+  // Native `waiting` / `playing` events drive the buffering spinner. We
+  // simply forward them — the UI decides whether to add a debounce so quick
+  // stalls don't make the spinner flicker.
+  private readonly onWaitingMedia = (): void => {
+    this.emit('waiting');
+  };
+  private readonly onPlayingMedia = (): void => {
+    this.emit('playing');
+  };
   private readonly onErrorEvent = (): void => {
     const code = this.video.error?.code;
     const map: Record<number, EngineError> = {
@@ -52,6 +61,8 @@ export class HtmlVideoEngine extends EmitterBase implements PlayerEngine {
     video.addEventListener('loadedmetadata', this.onLoadedMetadata);
     video.addEventListener('timeupdate', this.onTimeUpdate);
     video.addEventListener('ended', this.onEnded);
+    video.addEventListener('waiting', this.onWaitingMedia);
+    video.addEventListener('playing', this.onPlayingMedia);
     video.addEventListener('error', this.onErrorEvent);
     video.preload = 'auto';
     video.playsInline = true;
@@ -174,6 +185,8 @@ export class HtmlVideoEngine extends EmitterBase implements PlayerEngine {
     this.video.removeEventListener('loadedmetadata', this.onLoadedMetadata);
     this.video.removeEventListener('timeupdate', this.onTimeUpdate);
     this.video.removeEventListener('ended', this.onEnded);
+    this.video.removeEventListener('waiting', this.onWaitingMedia);
+    this.video.removeEventListener('playing', this.onPlayingMedia);
     this.video.removeEventListener('error', this.onErrorEvent);
     if (this.remoteResetTimer) clearTimeout(this.remoteResetTimer);
     this.clearListeners();

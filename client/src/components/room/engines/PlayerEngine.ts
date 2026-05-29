@@ -18,6 +18,12 @@ export interface EngineEventMap {
   /** Emitted when play() succeeded only after the engine fell back to muted
    * autoplay (browser autoplay policy). UI should surface an "unmute" affordance. */
   autoplay_muted: void;
+  /** Playback stalled mid-stream waiting for more data. UI should show a
+   *  buffering spinner. Pairs with `playing` on resume. */
+  waiting: void;
+  /** Playback resumed after a stall (or started for the first time). UI
+   *  should hide any buffering spinner. */
+  playing: void;
 }
 
 export type EngineEventName = keyof EngineEventMap;

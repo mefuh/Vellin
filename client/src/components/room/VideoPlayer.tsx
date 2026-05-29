@@ -63,6 +63,11 @@ export function VideoPlayer({
   const [autoplayMuted, setAutoplayMuted] = useState(false);
   const [engineError, setEngineError] = useState<EngineError | null>(null);
   const [ready, setReady] = useState(false);
+  // Raw buffering signal from the engine (`waiting` → true, `playing` → false).
+  // The visible spinner is debounced via `showBufferSpinner` so brief stalls
+  // (≤200 ms) don't make it flicker on screen.
+  const [bufferingRaw, setBufferingRaw] = useState(false);
+  const [showBufferSpinner, setShowBufferSpinner] = useState(false);
 
   const isMobile = useIsMobile();
   // Fullscreen API state — drives the in-player chat overlay (desktop only).
@@ -184,6 +189,8 @@ export function VideoPlayer({
       if (!url || !isLeaderRef.current) return;
       sendRef.current({ t: 'video_ended', currentUrl: url, clientTs: Date.now() });
     });
+    const offWaiting = engine.on('waiting', () => setBufferingRaw(true));
+    const offPlaying = engine.on('playing', () => setBufferingRaw(false));
 
     controller.reset();
     controller.attach(engine);
@@ -203,6 +210,9 @@ export function VideoPlayer({
       offQualityLevels();
       offQualityChange();
       offEnded();
+      offWaiting();
+      offPlaying();
+      setBufferingRaw(false);
       setQualityLevels([]);
       setCurrentQuality('auto');
       setQualityOpen(false);
@@ -214,6 +224,18 @@ export function VideoPlayer({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolved?.kind, resolved?.mediaUrl, controller]);
+
+  // Debounced spinner visibility. Sub-200ms stalls don't render — keeps the
+  // spinner from flickering on micro-buffers and quick seek-within-buffer.
+  // Resume hides it instantly so the user sees playback unblock immediately.
+  useEffect(() => {
+    if (!bufferingRaw) {
+      setShowBufferSpinner(false);
+      return;
+    }
+    const id = window.setTimeout(() => setShowBufferSpinner(true), 200);
+    return () => window.clearTimeout(id);
+  }, [bufferingRaw]);
 
   // Torrent stats poller (1 Hz). Engine-specific — only runs when active.
   useEffect(() => {
@@ -420,6 +442,10 @@ export function VideoPlayer({
         }}
         playsInline
       />
+
+      {/* YouTube-style buffering spinner. Only visible while the engine
+          reports a sustained (>200ms) stall — not on every micro-buffer. */}
+      {showBufferSpinner && !engineError && <BufferingSpinner />}
 
       {/* Reactions live inside the player element so they keep flying in
           fullscreen — an overlay outside it would be hidden by the top-layer. */}
@@ -825,6 +851,58 @@ function ErrorOverlay({
           Сменить ссылку
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Centered circular spinner shown while playback is stalled buffering.
+ * Pointer-events:none so it never eats clicks on the controls behind it.
+ * The dasharray ratio (~70/200) and 1s rotation give the same "arc chase"
+ * cadence as YouTube's player.
+ */
+function BufferingSpinner(): JSX.Element {
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        pointerEvents: 'none',
+        zIndex: 2,
+      }}
+    >
+      <svg
+        width="64"
+        height="64"
+        viewBox="0 0 50 50"
+        style={{
+          animation: 'vellinBufferSpin 1s linear infinite',
+          filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.45))',
+        }}
+      >
+        <circle
+          cx="25"
+          cy="25"
+          r="20"
+          fill="none"
+          stroke="rgba(255,255,255,0.2)"
+          strokeWidth="4"
+        />
+        <circle
+          cx="25"
+          cy="25"
+          r="20"
+          fill="none"
+          stroke="#fff"
+          strokeWidth="4"
+          strokeLinecap="round"
+          strokeDasharray="70 200"
+        />
+      </svg>
     </div>
   );
 }
