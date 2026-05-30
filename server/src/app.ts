@@ -85,7 +85,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.code(500).send({ error: 'InternalServerError', message: 'Internal error', statusCode: 500 });
   });
 
-  app.get('/health', async () => ({ ok: true, version: '0.6.1' }));
+  app.get('/health', async () => ({ ok: true, version: '0.7.0' }));
 
   await app.register(
     async (api) => {
