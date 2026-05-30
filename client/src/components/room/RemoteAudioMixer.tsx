@@ -33,10 +33,43 @@ function RemoteAudio({ userId, stream }: { userId: string; stream: MediaStream }
         .map((t) => `${t.kind}(enabled=${t.enabled},muted=${t.muted})`)
         .join(',')}`,
     );
+
+    let cancelled = false;
+    let removeGestureRetry: (() => void) | null = null;
+
     el.play().then(
-      () => console.log(`[call] RemoteAudio: play() OK for ${stream.id}`),
-      (err) => console.warn(`[call] RemoteAudio: play() FAIL for ${stream.id}`, err),
+      () => {
+        if (!cancelled) console.log(`[call] RemoteAudio: play() OK for ${stream.id}`);
+      },
+      (err) => {
+        if (cancelled) return;
+        console.warn(`[call] RemoteAudio: play() FAIL for ${stream.id}`, err);
+        // iOS: автозапуск аудио со звуком блокируется до жеста пользователя.
+        // Пробуем снова на ближайшее касание/клик и снимаем слушатели, как
+        // только воспроизведение реально стартовало.
+        const retry = (): void => {
+          void el.play().then(
+            () => {
+              if (removeGestureRetry) removeGestureRetry();
+            },
+            () => undefined,
+          );
+        };
+        const opts: AddEventListenerOptions = { capture: true };
+        document.addEventListener('pointerdown', retry, opts);
+        document.addEventListener('touchend', retry, opts);
+        removeGestureRetry = () => {
+          document.removeEventListener('pointerdown', retry, opts);
+          document.removeEventListener('touchend', retry, opts);
+          removeGestureRetry = null;
+        };
+      },
     );
+
+    return () => {
+      cancelled = true;
+      if (removeGestureRetry) removeGestureRetry();
+    };
   }, [stream]);
 
   useEffect(() => {

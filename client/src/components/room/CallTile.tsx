@@ -82,7 +82,10 @@ export function CallTile({
           ref={videoRef}
           autoPlay
           playsInline
-          muted={isMe}
+          // Всегда muted: звук удалённых участников играет отдельно через
+          // <RemoteAudioMixer>. На iOS немутед-видео со звуком не
+          // автозапускается без жеста пользователя → чёрный кадр.
+          muted
           style={{
             width: '100%',
             height: '100%',

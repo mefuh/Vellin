@@ -13,6 +13,7 @@ import { useCallSettingsStore } from '../stores/callSettingsStore';
 import type { WSConnectionState } from '../ws/WSClient';
 import { setupAudioPipeline, type AudioPipeline } from './audioPipeline';
 import { startMirrorPipeline, type VideoMirrorPipeline } from './videoMirror';
+import { isIOS } from '../utils/platform';
 
 /**
  * WebRTC P2P-mesh call hook. One instance per room. Handles:
@@ -520,7 +521,10 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     if (!outbound || !local) return;
 
     const rawTrack = rawCameraTrackRef.current;
-    const mirrorOn = useCallSettingsStore.getState().mirrorSelfVideo;
+    // На iOS canvas.captureStream() из detached <video> часто отдаёт чёрные
+    // кадры в WebRTC — поэтому зеркало (канвас-пайплайн) там не используем,
+    // шлём сырой трек камеры.
+    const mirrorOn = useCallSettingsStore.getState().mirrorSelfVideo && !isIOS();
 
     // Ensure mirror pipeline matches desired state.
     if (mirrorOn && rawTrack) {
@@ -619,38 +623,51 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       rawCameraTrackRef.current = stream.getVideoTracks()[0] ?? null;
       setMyStream(stream);
 
-      // Build the RNNoise pipeline. If it fails (older browser, blocked WASM,
-      // wasm fetch error), fall back to the raw mic — peers still hear us,
-      // just without the extra noise suppression layer.
       const ctx = ensureAudioCtx();
-      let pipeline: AudioPipeline | null = null;
-      try {
-        pipeline = await setupAudioPipeline(ctx, stream);
-        pipelineRef.current = pipeline;
-        // Outbound starts with processed audio only. `syncOutboundVideo`
-        // adds the video track (flipped or raw depending on mirror setting)
-        // before we announce ourselves to peers.
-        const outbound = new MediaStream([pipeline.outboundAudioTrack]);
-        outboundStreamRef.current = outbound;
-        // Self-analyser reuses the pipeline's analyser tap (post-gain), so
-        // the speaking indicator goes silent the instant the mic mutes.
-        // Keyed by `myUserId` so the same Set conveys both local and remote
-        // speakers to the UI.
-        analysersRef.current.set(myUserId, {
-          source: null,
-          analyser: pipeline.selfAnalyser,
-          data: new Uint8Array(new ArrayBuffer(pipeline.selfAnalyser.fftSize)),
-        });
-        console.log('[call] RNNoise pipeline ready');
-      } catch (err) {
-        console.warn('[call] RNNoise pipeline failed, falling back to raw mic', err);
+
+      // Отправка сырого микрофона без WebAudio-обработки. Также путь по
+      // умолчанию для iOS (см. ниже) и аварийный фолбэк, если RNNoise не
+      // поднялся. Мьютим трек сразу — toggleMic включает его через .enabled.
+      const useRawMic = (): void => {
         const fallbackAudio = stream.getAudioTracks()[0];
         if (fallbackAudio) fallbackAudio.enabled = false;
-        // Audio only — `syncOutboundVideo` will add the video track next.
-        outboundStreamRef.current = new MediaStream(
-          fallbackAudio ? [fallbackAudio] : [],
-        );
+        outboundStreamRef.current = new MediaStream(fallbackAudio ? [fallbackAudio] : []);
         attachAnalyser(myUserId, stream);
+      };
+
+      // iOS/WebKit: трек из MediaStreamAudioDestinationNode уходит ТИШИНОЙ
+      // через RTCPeerConnection (давний баг WebKit) — поэтому на iOS WebAudio-
+      // пайплайн (RNNoise) в исходящем тракте обходим и шлём сырой микрофон.
+      let pipeline: AudioPipeline | null = null;
+      if (isIOS()) {
+        console.log('[call] iOS → отправляем сырой микрофон (без WebAudio-пайплайна)');
+        useRawMic();
+      } else {
+        // Build the RNNoise pipeline. If it fails (older browser, blocked WASM,
+        // wasm fetch error), fall back to the raw mic — peers still hear us,
+        // just without the extra noise suppression layer.
+        try {
+          pipeline = await setupAudioPipeline(ctx, stream);
+          pipelineRef.current = pipeline;
+          // Outbound starts with processed audio only. `syncOutboundVideo`
+          // adds the video track (flipped or raw depending on mirror setting)
+          // before we announce ourselves to peers.
+          const outbound = new MediaStream([pipeline.outboundAudioTrack]);
+          outboundStreamRef.current = outbound;
+          // Self-analyser reuses the pipeline's analyser tap (post-gain), so
+          // the speaking indicator goes silent the instant the mic mutes.
+          // Keyed by `myUserId` so the same Set conveys both local and remote
+          // speakers to the UI.
+          analysersRef.current.set(myUserId, {
+            source: null,
+            analyser: pipeline.selfAnalyser,
+            data: new Uint8Array(new ArrayBuffer(pipeline.selfAnalyser.fftSize)),
+          });
+          console.log('[call] RNNoise pipeline ready');
+        } catch (err) {
+          console.warn('[call] RNNoise pipeline failed, falling back to raw mic', err);
+          useRawMic();
+        }
       }
 
       // Wire camera + mirror state into the outbound stream before announcing
