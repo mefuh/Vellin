@@ -162,7 +162,7 @@ export function AdminUsers() {
               }}
             >
               <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                <Avatar seed={u.avatarSeed} name={u.username} size={32} />
+                <Avatar seed={u.avatarSeed} src={u.avatarUrl} name={u.username} size={32} />
                 <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                   <span style={{ color: 'var(--text-0)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {u.username}
@@ -467,7 +467,7 @@ function UserCard({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-        <Avatar seed={u.avatarSeed} name={u.username} size={36} />
+        <Avatar seed={u.avatarSeed} src={u.avatarUrl} name={u.username} size={36} />
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
           <span
             style={{

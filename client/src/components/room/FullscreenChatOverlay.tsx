@@ -292,7 +292,7 @@ function ChatLine({ message, ephemeral }: { message: ChatMessage; ephemeral: boo
         animation,
       }}
     >
-      <Avatar name={message.author.username} seed={message.author.avatarSeed} size={22} />
+      <Avatar name={message.author.username} seed={message.author.avatarSeed} src={message.author.avatarUrl} size={22} />
       <div style={{ minWidth: 0 }}>
         <div
           style={{

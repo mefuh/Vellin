@@ -9,7 +9,7 @@ import {
   type RoomRole,
   type S2C,
 } from '@vellin/shared';
-import { isWsTicket, type Principal } from '../auth/jwt.js';
+import { isWsTicket, principalAvatarUrl, type Principal } from '../auth/jwt.js';
 import { logger } from '../utils/logger.js';
 import { ensureRoomRuntime } from '../rooms/RoomRuntime.js';
 import { prisma } from '../db/prisma.js';
@@ -171,6 +171,7 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
             userId: ctx.principal.userId,
             username: ctx.principal.username,
             avatarSeed: ctx.principal.avatarSeed,
+            avatarUrl: principalAvatarUrl(ctx.principal),
             kind: ctx.principal.kind,
             isHost: ctx.principal.userId === runtime.ownerUserId,
             role,

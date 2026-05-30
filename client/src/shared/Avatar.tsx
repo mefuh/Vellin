@@ -18,6 +18,8 @@ interface AvatarProps {
   name: string;
   /** Optional deterministic seed to override hash (eg. avatarSeed from user). */
   seed?: string;
+  /** Загруженная картинка аватара. Если задана — рисуем её вместо градиента. */
+  src?: string | null;
   size?: number;
   status?: AvatarStatus;
   ring?: AvatarRing;
@@ -29,7 +31,7 @@ function colorPair(value: string): readonly [string, string] {
   return AVATAR_COLORS[hash]!;
 }
 
-export function Avatar({ name, seed, size = 32, status, ring, style }: AvatarProps) {
+export function Avatar({ name, seed, src, size = 32, status, ring, style }: AvatarProps) {
   const initials = (name || '?')
     .split(/\s+/)
     .map((s) => s[0] ?? '')
@@ -38,30 +40,47 @@ export function Avatar({ name, seed, size = 32, status, ring, style }: AvatarPro
     .toUpperCase();
   const [c1, c2] = colorPair(seed ?? name ?? '?');
 
+  const ringShadow = ring
+    ? `0 0 0 2px var(--bg-1), 0 0 0 ${2 + (ring === 'accent' ? 2 : 1)}px ${
+        ring === 'accent' ? 'var(--accent)' : 'var(--ok)'
+      }`
+    : 'inset 0 1px 0 rgba(255,255,255,0.15)';
+
   return (
     <div style={{ position: 'relative', width: size, height: size, flexShrink: 0, ...style }}>
-      <div
-        style={{
-          width: size,
-          height: size,
-          borderRadius: '50%',
-          background: `linear-gradient(135deg, ${c1}, ${c2})`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#fff',
-          fontWeight: 600,
-          fontSize: size * 0.38,
-          letterSpacing: '-0.02em',
-          boxShadow: ring
-            ? `0 0 0 2px var(--bg-1), 0 0 0 ${2 + (ring === 'accent' ? 2 : 1)}px ${
-                ring === 'accent' ? 'var(--accent)' : 'var(--ok)'
-              }`
-            : 'inset 0 1px 0 rgba(255,255,255,0.15)',
-        }}
-      >
-        {initials}
-      </div>
+      {src ? (
+        <img
+          src={src}
+          alt={name}
+          style={{
+            width: size,
+            height: size,
+            borderRadius: '50%',
+            objectFit: 'cover',
+            display: 'block',
+            boxShadow: ringShadow,
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            width: size,
+            height: size,
+            borderRadius: '50%',
+            background: `linear-gradient(135deg, ${c1}, ${c2})`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            fontWeight: 600,
+            fontSize: size * 0.38,
+            letterSpacing: '-0.02em',
+            boxShadow: ringShadow,
+          }}
+        >
+          {initials}
+        </div>
+      )}
       {status && (
         <span
           style={{

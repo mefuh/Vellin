@@ -1,12 +1,20 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type {
   AuthResponse,
   AuthUser,
+  ChangeEmailRequest,
+  ChangePasswordRequest,
   GuestRequest,
+  ListSessionsResponse,
   LoginRequest,
   MeResponse,
+  ProfileMutationResponse,
   RegisterRequest,
+  RevokeOtherSessionsResponse,
+  RevokeSessionResponse,
+  UpdateProfileRequest,
+  UploadAvatarResponse,
 } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 import { hashPassword, verifyPassword } from './password.js';
@@ -14,6 +22,13 @@ import { signSession, type Principal } from './jwt.js';
 import { generateAvatarSeed, generateGuestId } from '../utils/ids.js';
 import { requireAuth } from './middleware.js';
 import { isAdminEmail } from '../env.js';
+import { createSession, forgetTouch, toDeviceSession, type DbSession } from './sessions.js';
+import {
+  ALLOWED_AVATAR_MIME,
+  MAX_AVATAR_BYTES,
+  deleteAvatarFile,
+  processAndSaveAvatar,
+} from './avatar.js';
 
 const registerSchema = z.object({
   email: z.string().email().max(254),
@@ -38,22 +53,84 @@ const guestSchema = z.object({
     .regex(/^[\p{L}\p{N}_\- ]+$/u, 'invalid characters'),
 }) satisfies z.ZodType<GuestRequest>;
 
-function toAuthUser(u: {
+const usernameSchema = z
+  .string()
+  .min(2)
+  .max(32)
+  .regex(/^[a-zA-Z0-9_\-.]+$/u, 'username may contain letters, digits, _ - .');
+
+const updateProfileSchema = z.object({
+  username: usernameSchema.optional(),
+  bio: z.string().max(300).nullable().optional(),
+  avatarSeed: z.string().max(64).nullable().optional(),
+}) satisfies z.ZodType<UpdateProfileRequest>;
+
+const changeEmailSchema = z.object({
+  email: z.string().email().max(254),
+  currentPassword: z.string().min(1).max(128),
+}) satisfies z.ZodType<ChangeEmailRequest>;
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(128),
+  newPassword: z.string().min(8).max(128),
+}) satisfies z.ZodType<ChangePasswordRequest>;
+
+interface DbUserCore {
   id: string;
   email: string;
   username: string;
   avatarSeed: string;
+  avatarUrl: string | null;
+  bio: string | null;
   createdAt: Date;
-}): AuthUser {
+}
+
+function toAuthUser(u: DbUserCore): AuthUser {
   return {
     id: u.id,
     email: u.email,
     username: u.username,
     avatarSeed: u.avatarSeed,
+    avatarUrl: u.avatarUrl,
+    bio: u.bio,
     kind: 'user',
     createdAt: u.createdAt.toISOString(),
     isAdmin: isAdminEmail(u.email),
   };
+}
+
+function buildPrincipal(u: DbUserCore, sid: string): Principal {
+  return {
+    kind: 'user',
+    userId: u.id,
+    username: u.username,
+    avatarSeed: u.avatarSeed,
+    avatarUrl: u.avatarUrl,
+    sid,
+  };
+}
+
+/** Перевыпускает session-JWT с тем же sid и возвращает свежего пользователя. */
+function issue(app: FastifyInstance, u: DbUserCore, sid: string): ProfileMutationResponse {
+  const token = signSession(app, buildPrincipal(u, sid));
+  return { token, user: toAuthUser(u) };
+}
+
+function deny(reply: FastifyReply, status: number, error: string, message: string): void {
+  reply.code(status).send({ error, message, statusCode: status });
+}
+
+/**
+ * Гарантирует, что запрос сделан зарегистрированным пользователем (не гостем),
+ * и возвращает его принципала. Иначе отвечает 403 и возвращает null.
+ */
+function requireUser(req: FastifyRequest, reply: FastifyReply): Extract<Principal, { kind: 'user' }> | null {
+  const principal = req.principal!;
+  if (principal.kind !== 'user') {
+    deny(reply, 403, 'Forbidden', 'Доступно только зарегистрированным пользователям');
+    return null;
+  }
+  return principal;
 }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
@@ -82,13 +159,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           avatarSeed: generateAvatarSeed(),
         },
       });
-      const principal: Principal = {
-        kind: 'user',
-        userId: user.id,
-        username: user.username,
-        avatarSeed: user.avatarSeed,
-      };
-      const token = signSession(app, principal);
+      const session = await createSession(user.id, req);
+      const token = signSession(app, buildPrincipal(user, session.id));
       const response: AuthResponse = { token, user: toAuthUser(user) };
       reply.code(201).send(response);
     },
@@ -111,13 +183,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         });
         return;
       }
-      const principal: Principal = {
-        kind: 'user',
-        userId: user.id,
-        username: user.username,
-        avatarSeed: user.avatarSeed,
-      };
-      const token = signSession(app, principal);
+      const session = await createSession(user.id, req);
+      const token = signSession(app, buildPrincipal(user, session.id));
       const response: AuthResponse = { token, user: toAuthUser(user) };
       reply.send(response);
     },
@@ -141,6 +208,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         email: null,
         username: principal.username,
         avatarSeed,
+        avatarUrl: null,
+        bio: null,
         kind: 'guest',
         createdAt: new Date().toISOString(),
         isAdmin: false,
@@ -157,6 +226,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         email: null,
         username: principal.username,
         avatarSeed: principal.avatarSeed,
+        avatarUrl: null,
+        bio: null,
         kind: 'guest',
         createdAt: new Date(0).toISOString(),
         isAdmin: false,
@@ -169,6 +240,207 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       reply.code(401).send({ error: 'Unauthorized', message: 'User no longer exists', statusCode: 401 });
       return;
     }
+    // Легаси-токен без серверной сессии: создаём Session и перевыпускаем токен
+    // с sid, чтобы устройство появилось в списке без ручного перелогина.
+    if (!principal.sid) {
+      const session = await createSession(dbUser.id, req);
+      const token = signSession(app, buildPrincipal(dbUser, session.id));
+      reply.send({ user: toAuthUser(dbUser), token } satisfies MeResponse);
+      return;
+    }
     reply.send({ user: toAuthUser(dbUser) } satisfies MeResponse);
+  });
+
+  // ── Профиль: ник / bio / сброс аватара на градиент ─────────────────────
+  app.patch('/auth/profile', { preHandler: requireAuth }, async (req, reply) => {
+    const principal = requireUser(req, reply);
+    if (!principal) return;
+    const body = updateProfileSchema.parse(req.body);
+
+    const data: {
+      username?: string;
+      bio?: string | null;
+      avatarSeed?: string;
+      avatarUrl?: null;
+    } = {};
+
+    if (body.username !== undefined) {
+      const taken = await prisma.user.findFirst({
+        where: { username: body.username, id: { not: principal.userId } },
+        select: { id: true },
+      });
+      if (taken) {
+        deny(reply, 409, 'Conflict', 'Username already taken');
+        return;
+      }
+      data.username = body.username;
+    }
+    if (body.bio !== undefined) {
+      const trimmed = body.bio?.trim() ?? '';
+      data.bio = trimmed.length > 0 ? trimmed : null;
+    }
+    // avatarSeed присутствует в body → сброс на градиент: новый/указанный seed
+    // и очистка загруженной картинки (с удалением файла).
+    let oldAvatarToDelete: string | null = null;
+    if (body.avatarSeed !== undefined) {
+      const current = await prisma.user.findUnique({
+        where: { id: principal.userId },
+        select: { avatarUrl: true },
+      });
+      oldAvatarToDelete = current?.avatarUrl ?? null;
+      data.avatarSeed = body.avatarSeed && body.avatarSeed.length > 0 ? body.avatarSeed : generateAvatarSeed();
+      data.avatarUrl = null;
+    }
+
+    const updated = await prisma.user.update({ where: { id: principal.userId }, data });
+    if (oldAvatarToDelete) await deleteAvatarFile(oldAvatarToDelete);
+    reply.send(issue(app, updated, principal.sid!) satisfies ProfileMutationResponse);
+  });
+
+  // ── Смена email (подтверждение текущим паролем) ────────────────────────
+  app.post('/auth/email', { preHandler: requireAuth }, async (req, reply) => {
+    const principal = requireUser(req, reply);
+    if (!principal) return;
+    const body = changeEmailSchema.parse(req.body);
+
+    const user = await prisma.user.findUnique({ where: { id: principal.userId } });
+    if (!user) {
+      deny(reply, 401, 'Unauthorized', 'User no longer exists');
+      return;
+    }
+    if (!(await verifyPassword(body.currentPassword, user.passwordHash))) {
+      deny(reply, 401, 'Unauthorized', 'Неверный текущий пароль');
+      return;
+    }
+    if (body.email !== user.email) {
+      const taken = await prisma.user.findFirst({
+        where: { email: body.email, id: { not: principal.userId } },
+        select: { id: true },
+      });
+      if (taken) {
+        deny(reply, 409, 'Conflict', 'Email already in use');
+        return;
+      }
+    }
+    const updated = await prisma.user.update({
+      where: { id: principal.userId },
+      data: { email: body.email },
+    });
+    reply.send(issue(app, updated, principal.sid!) satisfies ProfileMutationResponse);
+  });
+
+  // ── Смена пароля (по умолчанию завершает остальные сессии) ─────────────
+  app.post('/auth/password', { preHandler: requireAuth }, async (req, reply) => {
+    const principal = requireUser(req, reply);
+    if (!principal) return;
+    const body = changePasswordSchema.parse(req.body);
+
+    const user = await prisma.user.findUnique({ where: { id: principal.userId } });
+    if (!user) {
+      deny(reply, 401, 'Unauthorized', 'User no longer exists');
+      return;
+    }
+    if (!(await verifyPassword(body.currentPassword, user.passwordHash))) {
+      deny(reply, 401, 'Unauthorized', 'Неверный текущий пароль');
+      return;
+    }
+    const passwordHash = await hashPassword(body.newPassword);
+    const updated = await prisma.user.update({
+      where: { id: principal.userId },
+      data: { passwordHash },
+    });
+    // Безопасность: завершаем все прочие сессии этого пользователя.
+    if (principal.sid) {
+      await prisma.session.deleteMany({
+        where: { userId: principal.userId, id: { not: principal.sid } },
+      });
+    }
+    reply.send(issue(app, updated, principal.sid!) satisfies ProfileMutationResponse);
+  });
+
+  // ── Загрузка аватара (multipart) ───────────────────────────────────────
+  app.post('/auth/avatar', { preHandler: requireAuth }, async (req, reply) => {
+    const principal = requireUser(req, reply);
+    if (!principal) return;
+
+    const file = await req.file({ limits: { fileSize: MAX_AVATAR_BYTES, files: 1 } });
+    if (!file) {
+      deny(reply, 400, 'BadRequest', 'Файл не получен');
+      return;
+    }
+    if (!ALLOWED_AVATAR_MIME.has(file.mimetype)) {
+      deny(reply, 400, 'BadRequest', 'Поддерживаются только JPEG, PNG и WebP');
+      return;
+    }
+    let buffer: Buffer;
+    try {
+      buffer = await file.toBuffer();
+    } catch {
+      deny(reply, 400, 'BadRequest', 'Файл слишком большой (макс. 5 МБ)');
+      return;
+    }
+    if (file.file.truncated) {
+      deny(reply, 400, 'BadRequest', 'Файл слишком большой (макс. 5 МБ)');
+      return;
+    }
+
+    let avatarUrl: string;
+    try {
+      avatarUrl = await processAndSaveAvatar(principal.userId, buffer);
+    } catch {
+      deny(reply, 400, 'BadRequest', 'Не удалось обработать изображение');
+      return;
+    }
+
+    const current = await prisma.user.findUnique({
+      where: { id: principal.userId },
+      select: { avatarUrl: true },
+    });
+    const updated = await prisma.user.update({
+      where: { id: principal.userId },
+      data: { avatarUrl },
+    });
+    if (current?.avatarUrl) await deleteAvatarFile(current.avatarUrl);
+    reply.send(issue(app, updated, principal.sid!) satisfies UploadAvatarResponse);
+  });
+
+  // ── Список устройств/сессий ────────────────────────────────────────────
+  app.get('/auth/sessions', { preHandler: requireAuth }, async (req, reply) => {
+    const principal = requireUser(req, reply);
+    if (!principal) return;
+    const sessions = (await prisma.session.findMany({
+      where: { userId: principal.userId },
+      orderBy: { lastSeenAt: 'desc' },
+    })) as DbSession[];
+    const response: ListSessionsResponse = {
+      sessions: sessions.map((s) => toDeviceSession(s, principal.sid)),
+    };
+    reply.send(response);
+  });
+
+  // ── Выход с конкретного устройства ─────────────────────────────────────
+  app.delete('/auth/sessions/:id', { preHandler: requireAuth }, async (req, reply) => {
+    const principal = requireUser(req, reply);
+    if (!principal) return;
+    const { id } = req.params as { id: string };
+    const result = await prisma.session.deleteMany({
+      where: { id, userId: principal.userId },
+    });
+    if (result.count === 0) {
+      deny(reply, 404, 'NotFound', 'Сессия не найдена');
+      return;
+    }
+    forgetTouch(id);
+    reply.send({ id } satisfies RevokeSessionResponse);
+  });
+
+  // ── Выход со всех устройств, кроме текущего ─────────────────────────────
+  app.delete('/auth/sessions', { preHandler: requireAuth }, async (req, reply) => {
+    const principal = requireUser(req, reply);
+    if (!principal) return;
+    const result = await prisma.session.deleteMany({
+      where: { userId: principal.userId, ...(principal.sid ? { id: { not: principal.sid } } : {}) },
+    });
+    reply.send({ revoked: result.count } satisfies RevokeOtherSessionsResponse);
   });
 }

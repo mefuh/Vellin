@@ -150,7 +150,7 @@ export function ParticipantMenu(props: Props) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Avatar name={participant.username} seed={participant.avatarSeed} size={36} />
+          <Avatar name={participant.username} seed={participant.avatarSeed} src={participant.avatarUrl} size={36} />
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <span style={{ fontWeight: 600, fontSize: 14 }}>{participant.username}</span>
             <span style={{ fontSize: 11, color: 'var(--text-2)', textTransform: 'capitalize' }}>

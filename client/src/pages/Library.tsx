@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { RoomSummary } from '@vellin/shared';
 import { roomsApi } from '../api/rooms';
-import { Button, Chip, Icon, MountainPoster, VellinLogo } from '../shared';
+import { Avatar, Button, Chip, Icon, MountainPoster, VellinLogo } from '../shared';
 import { useAuthStore } from '../stores/authStore';
 import { CreateRoomModal } from '../components/CreateRoomModal';
 import { ApiHttpError } from '../api/client';
@@ -63,10 +63,31 @@ export function Library() {
           <VellinLogo />
         </Link>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {user && (
+          {user && user.kind === 'guest' && (
             <span style={{ color: 'var(--text-2)', fontSize: 13 }}>
-              {user.username} {user.kind === 'guest' && <Chip tone="neutral">гость</Chip>}
+              {user.username} <Chip tone="neutral">гость</Chip>
             </span>
+          )}
+          {user && user.kind === 'user' && (
+            <button
+              onClick={() => navigate('/profile')}
+              title="Профиль и настройки"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--text-1)',
+                fontSize: 13,
+                padding: 0,
+                fontFamily: 'inherit',
+              }}
+            >
+              <Avatar name={user.username} seed={user.avatarSeed} src={user.avatarUrl} size={28} />
+              <span>{user.username}</span>
+            </button>
           )}
           {user?.isAdmin && (
             <Button

@@ -399,7 +399,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
         orderBy: { createdAt: 'desc' },
         take: limit + 1,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        include: { user: { select: { id: true, username: true, avatarSeed: true } } },
+        include: { user: { select: { id: true, username: true, avatarSeed: true, avatarUrl: true } } },
       });
       const hasMore = messages.length > limit;
       const page = hasMore ? messages.slice(0, limit) : messages;
@@ -417,12 +417,14 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
                   id: m.user.id,
                   username: m.user.username,
                   avatarSeed: m.user.avatarSeed,
+                  avatarUrl: m.user.avatarUrl,
                   kind: 'user' as const,
                 }
               : {
                   id: m.userId ?? 'guest',
                   username: m.guestName ?? 'Guest',
                   avatarSeed: m.guestAvatarSeed ?? 'guest',
+                  avatarUrl: null,
                   kind: 'guest' as const,
                 },
           }))

@@ -46,3 +46,26 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
   }
   return data as T;
 }
+
+/**
+ * Отправка multipart/form-data (загрузка файлов). Не выставляем content-type —
+ * браузер сам проставит boundary. Аутентификация — тем же Bearer-токеном.
+ */
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const token = tokenGetter();
+  const headers: Record<string, string> = {};
+  if (token) headers.authorization = `Bearer ${token}`;
+
+  const res = await fetch(BASE + path, { method: 'POST', headers, body: formData });
+  const text = await res.text();
+  const data: unknown = text ? JSON.parse(text) : null;
+
+  if (!res.ok) {
+    const payload: ApiError =
+      data && typeof data === 'object'
+        ? (data as ApiError)
+        : { error: 'Error', message: res.statusText, statusCode: res.status };
+    throw new ApiHttpError(res.status, payload);
+  }
+  return data as T;
+}

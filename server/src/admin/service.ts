@@ -21,7 +21,7 @@ function asStatus(s: string): VideoStatus {
 export function toAdminUserSummary(
   u: Pick<
     User,
-    'id' | 'email' | 'username' | 'avatarSeed' | 'createdAt' | 'isBlocked' | 'blockedAt' | 'blockReason'
+    'id' | 'email' | 'username' | 'avatarSeed' | 'avatarUrl' | 'createdAt' | 'isBlocked' | 'blockedAt' | 'blockReason'
   > & { _count?: { rooms?: number } },
 ): AdminUserSummary {
   return {
@@ -29,6 +29,7 @@ export function toAdminUserSummary(
     email: u.email,
     username: u.username,
     avatarSeed: u.avatarSeed,
+    avatarUrl: u.avatarUrl,
     createdAt: u.createdAt.toISOString(),
     isBlocked: u.isBlocked,
     blockedAt: u.blockedAt ? u.blockedAt.toISOString() : null,

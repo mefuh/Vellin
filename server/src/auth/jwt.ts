@@ -1,7 +1,20 @@
 import type { FastifyInstance } from 'fastify';
 
 export type Principal =
-  | { kind: 'user'; userId: string; username: string; avatarSeed: string }
+  | {
+      kind: 'user';
+      userId: string;
+      username: string;
+      avatarSeed: string;
+      /** URL загруженного аватара (или null/undefined — рисуем градиент). */
+      avatarUrl?: string | null;
+      /**
+       * Id серверной сессии (Session.id). Есть у токенов, выданных после
+       * внедрения управления устройствами. Старые токены его не имеют —
+       * requireAuth обрабатывает оба случая.
+       */
+      sid?: string;
+    }
   | { kind: 'guest'; userId: string; username: string; avatarSeed: string };
 
 export interface WsTicketPayload {
@@ -51,4 +64,9 @@ export function verifyToken(app: FastifyInstance, token: string): JwtPayload {
 
 export function isWsTicket(payload: JwtPayload): payload is WsTicketPayload {
   return (payload as WsTicketPayload).ticket === true;
+}
+
+/** avatarUrl принципала: есть только у зарегистрированных пользователей. */
+export function principalAvatarUrl(p: Principal): string | null {
+  return p.kind === 'user' ? p.avatarUrl ?? null : null;
 }

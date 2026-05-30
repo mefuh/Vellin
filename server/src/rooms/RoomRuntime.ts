@@ -23,7 +23,7 @@ import { prisma } from '../db/prisma.js';
 import { roomMutex } from '../utils/async-mutex.js';
 import { logger } from '../utils/logger.js';
 import { roomStore } from './store.js';
-import type { Principal } from '../auth/jwt.js';
+import { principalAvatarUrl, type Principal } from '../auth/jwt.js';
 import {
   getEffectivePermissions,
   type PermissionKey,
@@ -272,6 +272,7 @@ export class RoomRuntime {
         userId: p.userId,
         username: p.username,
         avatarSeed: p.avatarSeed,
+        avatarUrl: principalAvatarUrl(p),
         kind: p.kind,
         isHost: p.userId === this.ownerUserId,
         role: entry.role,
@@ -824,6 +825,7 @@ export class RoomRuntime {
           id: principal.userId,
           username: principal.username,
           avatarSeed: principal.avatarSeed,
+          avatarUrl: null,
           kind: 'guest',
         },
       };
@@ -849,7 +851,7 @@ export class RoomRuntime {
         kind: 'user',
         body: trimmed,
       },
-      include: { user: { select: { id: true, username: true, avatarSeed: true } } },
+      include: { user: { select: { id: true, username: true, avatarSeed: true, avatarUrl: true } } },
     });
     const msg: ChatMessage = {
       id: persisted.id,
@@ -861,6 +863,7 @@ export class RoomRuntime {
         id: persisted.user!.id,
         username: persisted.user!.username,
         avatarSeed: persisted.user!.avatarSeed,
+        avatarUrl: persisted.user!.avatarUrl,
         kind: 'user',
       },
     };
@@ -886,6 +889,7 @@ export class RoomRuntime {
         id: 'system',
         username: 'system',
         avatarSeed: 'system',
+        avatarUrl: null,
         kind: 'user',
       },
     };
@@ -922,7 +926,7 @@ export class RoomRuntime {
       where: { roomId: this.roomId },
       orderBy: { createdAt: 'desc' },
       take: 30,
-      include: { user: { select: { id: true, username: true, avatarSeed: true } } },
+      include: { user: { select: { id: true, username: true, avatarSeed: true, avatarUrl: true } } },
     });
     const recentMessages: ChatMessage[] = recent
       .map((m) => ({
@@ -936,12 +940,14 @@ export class RoomRuntime {
               id: m.user.id,
               username: m.user.username,
               avatarSeed: m.user.avatarSeed,
+              avatarUrl: m.user.avatarUrl,
               kind: 'user' as const,
             }
           : {
               id: m.userId ?? 'guest',
               username: m.guestName ?? 'Guest',
               avatarSeed: m.guestAvatarSeed ?? 'guest',
+              avatarUrl: null,
               kind: 'guest' as const,
             },
       }))
@@ -960,6 +966,7 @@ export class RoomRuntime {
           userId: forUserId,
           username: 'unknown',
           avatarSeed: 'unknown',
+          avatarUrl: null,
           kind: 'user',
           isHost: forUserId === this.ownerUserId,
           role: forUserId === this.ownerUserId ? 'owner' : 'guest',

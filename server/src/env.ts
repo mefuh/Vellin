@@ -9,6 +9,11 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   WS_TICKET_TTL_SEC: z.coerce.number().int().positive().default(60),
+  /**
+   * Каталог для загруженных файлов (аватары). В dev — локальная папка рядом с
+   * сервером; в Docker монтируется на volume, чтобы пережить рестарт.
+   */
+  UPLOADS_DIR: z.string().default('./uploads'),
   /** Optional JSON-encoded RTCIceServer[] appended to the default STUN. */
   ICE_SERVERS: z.string().optional(),
   /**

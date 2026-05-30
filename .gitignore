@@ -21,6 +21,9 @@ npm-debug.log*
 server/prisma/dev.db
 server/prisma/*.db-journal
 
+# Загруженные пользователями файлы (аватары) — runtime-данные
+server/uploads/
+
 # Vite
 client/dist
 client/.vite

@@ -14,6 +14,8 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string) => Promise<void>;
   loginAsGuest: (username: string) => Promise<void>;
+  /** Применить свежие token+user после мутаций профиля (тот же sid). */
+  applyAuthUpdate: (update: { token: string; user: AuthUser }) => void;
   logout: () => void;
 }
 
@@ -55,9 +57,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (token && user?.kind === 'user') {
       authApi
         .me()
-        .then(({ user: fresh }) => {
-          set({ user: fresh });
-          persist(get().token, fresh);
+        .then(({ user: fresh, token: upgraded }) => {
+          // Сервер мог перевыпустить токен (апгрейд легаси-токена до сессии).
+          const nextToken = upgraded ?? get().token;
+          set({ user: fresh, token: nextToken });
+          persist(nextToken, fresh);
         })
         .catch(() => {
           set({ token: null, user: null });
@@ -103,6 +107,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ loading: false, error: message });
       throw err;
     }
+  },
+
+  applyAuthUpdate: ({ token, user }) => {
+    set({ token, user });
+    persist(token, user);
   },
 
   logout: () => {

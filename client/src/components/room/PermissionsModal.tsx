@@ -63,7 +63,7 @@ export function PermissionsModal({ participant, onClose, onSave }: Props) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Avatar name={participant.username} seed={participant.avatarSeed} size={36} />
+          <Avatar name={participant.username} seed={participant.avatarSeed} src={participant.avatarUrl} size={36} />
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Права участника</h2>
             <span style={{ fontSize: 12, color: 'var(--text-2)' }}>{participant.username}</span>

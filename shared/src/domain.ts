@@ -4,14 +4,38 @@ export interface PublicUser {
   id: string;
   username: string;
   avatarSeed: string;
+  /**
+   * URL загруженного аватара (`/api/uploads/avatars/...`). Null — у пользователя
+   * нет своей картинки, аватар рисуется как градиент по `avatarSeed`.
+   */
+  avatarUrl: string | null;
   kind: UserKind;
 }
 
 export interface AuthUser extends PublicUser {
   email: string | null;
+  /** Произвольный текст «О себе». Null — не задан. */
+  bio: string | null;
   createdAt: string;
   /** True only for the single user whose email matches ADMIN_EMAIL on the server. */
   isAdmin: boolean;
+}
+
+/**
+ * Устройство/сессия пользователя для страницы профиля. Одна строка `Session`
+ * в БД = один вход (браузер/устройство). `current` — это та сессия, чьим
+ * токеном сделан текущий запрос `GET /auth/sessions`.
+ */
+export interface DeviceSession {
+  id: string;
+  /** Человекочитаемая метка, например «Chrome на Windows». */
+  deviceLabel: string;
+  browser: string;
+  os: string;
+  ip: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+  current: boolean;
 }
 
 export interface RoomSummary {
@@ -118,6 +142,7 @@ export interface ChatAuthor {
   id: string;
   username: string;
   avatarSeed: string;
+  avatarUrl: string | null;
   kind: UserKind;
 }
 
@@ -179,6 +204,7 @@ export interface ParticipantInfo {
   userId: string;
   username: string;
   avatarSeed: string;
+  avatarUrl: string | null;
   kind: UserKind;
   /** Kept for backward compatibility — equivalent to `role === 'owner'`. */
   isHost: boolean;

@@ -3,6 +3,7 @@ import type { Principal } from './jwt.js';
 import { isWsTicket } from './jwt.js';
 import { prisma } from '../db/prisma.js';
 import { isAdminEmail } from '../env.js';
+import { touchSession } from './sessions.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -33,17 +34,37 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
   }
   const principal = payload as Principal;
   if (principal.kind === 'user') {
-    const user = await prisma.user.findUnique({
-      where: { id: principal.userId },
-      select: { isBlocked: true },
-    });
-    if (!user) {
-      deny(reply, 401, 'Unauthorized', 'User no longer exists');
-      return;
-    }
-    if (user.isBlocked) {
-      deny(reply, 403, 'Forbidden', 'Ваш аккаунт заблокирован');
-      return;
+    if (principal.sid) {
+      // Токены с управлением устройствами: сессия должна быть жива. Одним
+      // запросом проверяем и существование сессии, и блокировку аккаунта.
+      const session = await prisma.session.findUnique({
+        where: { id: principal.sid },
+        select: { id: true, user: { select: { isBlocked: true } } },
+      });
+      if (!session) {
+        deny(reply, 401, 'Unauthorized', 'Session revoked');
+        return;
+      }
+      if (session.user.isBlocked) {
+        deny(reply, 403, 'Forbidden', 'Ваш аккаунт заблокирован');
+        return;
+      }
+      touchSession(principal.sid);
+    } else {
+      // Легаси-токены без sid: в списке устройств не светятся и индивидуально
+      // не отзываются, но остаются валидными до перелогина.
+      const user = await prisma.user.findUnique({
+        where: { id: principal.userId },
+        select: { isBlocked: true },
+      });
+      if (!user) {
+        deny(reply, 401, 'Unauthorized', 'User no longer exists');
+        return;
+      }
+      if (user.isBlocked) {
+        deny(reply, 403, 'Forbidden', 'Ваш аккаунт заблокирован');
+        return;
+      }
     }
   }
   request.principal = principal;

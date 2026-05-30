@@ -13,6 +13,11 @@ model User {
   username     String    @unique
   passwordHash String
   avatarSeed   String
+  /// Путь к загруженному аватару (/api/uploads/avatars/...). Null — рисуем
+  /// градиент по avatarSeed.
+  avatarUrl    String?
+  /// Произвольный текст «О себе».
+  bio          String?
   createdAt    DateTime  @default(now())
 
   isBlocked    Boolean   @default(false)
@@ -22,8 +27,23 @@ model User {
   rooms        Room[]       @relation("RoomOwner")
   messages     Message[]
   memberships  Membership[]
+  sessions     Session[]
 
   @@index([isBlocked])
+}
+
+/// Серверная запись о входе (устройство/браузер). JWT пользователя несёт
+/// claim `sid` = Session.id; удаление строки = разлогин этого устройства.
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userAgent  String?
+  ip         String?
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Room {

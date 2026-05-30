@@ -581,7 +581,7 @@ function RoomInfoCards({
   perms: RoomPermissions;
   role: string;
   ownerUsername: string;
-  participants: { userId: string; username: string; avatarSeed: string; isHost: boolean }[];
+  participants: { userId: string; username: string; avatarSeed: string; avatarUrl: string | null; isHost: boolean }[];
 }) {
   const displayName = videoTitle ?? (videoUrl ? deriveVideoName(videoUrl) : null);
   return (
@@ -613,6 +613,7 @@ function RoomInfoCards({
               <Avatar
                 name={p.username}
                 seed={p.avatarSeed}
+                src={p.avatarUrl}
                 size={28}
                 ring={p.isHost ? 'accent' : undefined}
               />

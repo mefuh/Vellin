@@ -113,7 +113,7 @@ export function RoomChat({
           <div style={{ display: 'flex', alignItems: 'center' }}>
             {participants.slice(0, 3).map((p, i) => (
               <div key={p.userId} style={{ marginLeft: i === 0 ? 0 : -6 }}>
-                <Avatar name={p.username} seed={p.avatarSeed} size={22} />
+                <Avatar name={p.username} seed={p.avatarSeed} src={p.avatarUrl} size={22} />
               </div>
             ))}
             {participants.length > 3 && (
@@ -219,6 +219,7 @@ export function RoomChat({
               key={p.userId}
               name={p.username}
               seed={p.avatarSeed}
+              src={p.avatarUrl}
               size={28}
               status={p.isHost ? 'watching' : 'online'}
             />
@@ -353,6 +354,7 @@ function ChatBody({
               <Avatar
                 name={p.username}
                 seed={p.avatarSeed}
+                src={p.avatarUrl}
                 size={18}
                 status={p.isHost ? 'watching' : 'online'}
               />
@@ -464,6 +466,7 @@ function MessageRow({ message, mine }: { message: ChatMessage; mine: boolean }) 
       <Avatar
         name={message.author.username}
         seed={message.author.avatarSeed}
+        src={message.author.avatarUrl}
         size={28}
       />
       <div

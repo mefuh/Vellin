@@ -1,14 +1,18 @@
+import path from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
+import multipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
 import { ZodError } from 'zod';
 import { loadEnv } from './env.js';
 import { authRoutes } from './auth/routes.js';
 import { roomRoutes } from './rooms/routes.js';
 import { adminRoutes } from './admin/routes.js';
+import { ensureUploadsDir, MAX_AVATAR_BYTES } from './auth/avatar.js';
 import { registerWebSocket } from './ws/server.js';
 import { logger } from './utils/logger.js';
 
@@ -43,6 +47,19 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
   await app.register(websocket, {
     options: { maxPayload: 64 * 1024 },
+  });
+  await app.register(multipart, {
+    limits: { fileSize: MAX_AVATAR_BYTES, files: 1 },
+  });
+
+  // Статика загруженных файлов (аватары). Отдаётся по /api/uploads/... —
+  // существующие прокси-правила /api/ в nginx/Caddy уже её проксируют. Каталог
+  // создаётся заранее, чтобы @fastify/static не упал на старте.
+  await ensureUploadsDir();
+  await app.register(fastifyStatic, {
+    root: path.resolve(env.UPLOADS_DIR),
+    prefix: '/api/uploads/',
+    decorateReply: false,
   });
 
   app.setErrorHandler((err, _req, reply) => {

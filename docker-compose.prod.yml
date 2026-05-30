@@ -41,9 +41,12 @@ services:
       NODE_ENV: production
       CORS_ORIGIN: https://${DOMAIN:?DOMAIN must be set in .env.production}
       WS_TICKET_TTL_SEC: '60'
+      UPLOADS_DIR: /data/uploads
       # Email главного администратора сервиса. Если переменной нет в
       # .env.production, панель /admin недоступна никому.
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+    volumes:
+      - uploads:/data/uploads
 
   caddy:
     build:
@@ -64,5 +67,6 @@ services:
 
 volumes:
   pgdata:
+  uploads:
   caddy_data:
   caddy_config:

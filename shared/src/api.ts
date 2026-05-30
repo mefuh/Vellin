@@ -1,6 +1,7 @@
 import type {
   AdminRoomSummary,
   AuthUser,
+  DeviceSession,
   ParticipantInfo,
   RoomDetails,
   RoomSummary,
@@ -30,6 +31,58 @@ export interface AuthResponse {
 }
 export interface MeResponse {
   user: AuthUser;
+  /**
+   * Присутствует только когда сервер «подхватил» легаси-токен без серверной
+   * сессии: создал Session и перевыпустил токен с `sid`. Клиент должен
+   * сохранить его вместо текущего.
+   */
+  token?: string;
+}
+
+// ── Профиль (редактирование своего аккаунта) ─────────────────────────────
+export interface UpdateProfileRequest {
+  username?: string;
+  bio?: string | null;
+  /**
+   * Управление аватаром-градиентом:
+   * - строка — установить конкретный seed (перегенерация),
+   * - `null` — сбросить на новый случайный seed,
+   * - не передавать — оставить как есть.
+   * В любом случае при заданном поле загруженная картинка (`avatarUrl`)
+   * сбрасывается в null.
+   */
+  avatarSeed?: string | null;
+}
+/** Общий ответ профильных мутаций: свежий токен (тот же `sid`) + пользователь. */
+export interface ProfileMutationResponse {
+  token: string;
+  user: AuthUser;
+}
+export type UpdateProfileResponse = ProfileMutationResponse;
+export type UploadAvatarResponse = ProfileMutationResponse;
+
+export interface ChangeEmailRequest {
+  email: string;
+  currentPassword: string;
+}
+export type ChangeEmailResponse = ProfileMutationResponse;
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+export type ChangePasswordResponse = ProfileMutationResponse;
+
+// ── Сессии/устройства ────────────────────────────────────────────────────
+export interface ListSessionsResponse {
+  sessions: DeviceSession[];
+}
+export interface RevokeSessionResponse {
+  id: string;
+}
+export interface RevokeOtherSessionsResponse {
+  /** Сколько сессий было завершено. */
+  revoked: number;
 }
 
 // ── Rooms ───────────────────────────────────────────────────────────────
@@ -131,6 +184,7 @@ export interface AdminUserSummary {
   email: string;
   username: string;
   avatarSeed: string;
+  avatarUrl: string | null;
   createdAt: string;
   isBlocked: boolean;
   blockedAt: string | null;

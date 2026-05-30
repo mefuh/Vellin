@@ -5,6 +5,7 @@ import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Guest } from './pages/Guest';
 import { Library } from './pages/Library';
+import { Profile } from './pages/Profile';
 import { Room } from './pages/Room';
 import { NotFound } from './pages/NotFound';
 import { AdminShell } from './pages/admin/AdminShell';
@@ -38,6 +39,14 @@ export function App() {
         element={
           <ProtectedRoute>
             <Library />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <Profile />
           </ProtectedRoute>
         }
       />
