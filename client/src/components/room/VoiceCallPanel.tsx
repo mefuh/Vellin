@@ -3,6 +3,8 @@ import type { CallMember, ParticipantInfo } from '@vellin/shared';
 import { CALL_MAX_VIDEO, CALL_MAX_VOICE } from '@vellin/shared';
 import { Button, Icon } from '../../shared';
 import { useRoomStore } from '../../stores/roomStore';
+import { useCallSettingsStore } from '../../stores/callSettingsStore';
+import { isIOS } from '../../utils/platform';
 import { useCallContext } from '../../hooks/CallContext';
 import { CallControls } from './CallControls';
 import { CallTile } from './CallTile';
@@ -19,6 +21,9 @@ export function VoiceCallPanel() {
   const participants = useRoomStore((s) => s.participants);
   const you = useRoomStore((s) => s.you);
   const myMedia = useRoomStore((s) => s.myMedia);
+  // Зеркало своего self-view: на iOS делаем CSS-флип (canvas-зеркало там
+  // отключено). На десктопе зеркало уже в отправляемом треке.
+  const mirrorSelf = useCallSettingsStore((s) => s.mirrorSelfVideo) && isIOS();
   const myCallState = useRoomStore((s) => s.myCallState);
   const { myStream, remoteStreams, speaking, join, leave, toggleMic, toggleCamera, permissionError } =
     useCallContext();
@@ -84,6 +89,7 @@ export function VoiceCallPanel() {
               myStream={myStream}
               remoteStream={remoteStreams.get(m.userId) ?? null}
               speaking={speaking.has(m.userId)}
+              mirror={mirrorSelf}
             />
           ))}
         </div>
@@ -148,6 +154,7 @@ function TileFor({
   myStream,
   remoteStream,
   speaking,
+  mirror,
 }: {
   member: CallMember;
   participant: ParticipantInfo | null;
@@ -155,6 +162,7 @@ function TileFor({
   myStream: MediaStream | null;
   remoteStream: MediaStream | null;
   speaking: boolean;
+  mirror: boolean;
 }) {
   const username = participant?.username ?? member.userId.slice(0, 6);
   const avatarSeed = participant?.avatarSeed ?? member.userId;
@@ -170,6 +178,7 @@ function TileFor({
       shape="rect"
       size={150}
       isMe={isMe}
+      mirror={isMe && mirror}
     />
   );
 }

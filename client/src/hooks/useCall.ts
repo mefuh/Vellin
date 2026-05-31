@@ -62,6 +62,13 @@ interface PeerRecord {
   polite: boolean;
   makingOffer: boolean;
   isSettingRemoteAnswer: boolean;
+  /**
+   * Предсогласованный отправитель видео (из sendrecv-трансивера, созданного
+   * сразу при создании PC). Камеру включаем/выключаем через его replaceTrack —
+   * без повторного SDP-согласования, иначе iOS Safari не доставляет видеотрек,
+   * добавленный после initial-negotiation.
+   */
+  videoSender: RTCRtpSender | null;
 }
 
 interface AnalyserRecord {
@@ -288,26 +295,44 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       if (!rtcConfig || !myUserId) throw new Error('useCall: missing rtcConfig / myUserId');
       const pc = new RTCPeerConnection({ iceServers: rtcConfig.iceServers as RTCIceServer[] });
       const polite = myUserId < peerUserId;
-      const rec: PeerRecord = { pc, polite, makingOffer: false, isSettingRemoteAnswer: false };
+      const rec: PeerRecord = {
+        pc,
+        polite,
+        makingOffer: false,
+        isSettingRemoteAnswer: false,
+        videoSender: null,
+      };
 
-      // addTrack is the simplest, most battle-tested pattern: it implicitly
-      // creates a transceiver with the track attached, so the initial offer
-      // SDP always correctly describes our local media. We send `outbound`
-      // (= post-RNNoise audio + raw video), not the raw mic stream.
+      // Аудио добавляем через addTrack — оно есть всегда после входа и
+      // описывается в initial-offer. Видео же выносим в ОТДЕЛЬНЫЙ
+      // предсогласованный sendrecv-трансивер: тогда включение камеры в
+      // середине звонка — это replaceTrack по уже существующему m-line, без
+      // повторного SDP-согласования (которое iOS Safari часто не доводит до
+      // доставки трека). Видео работает в рамках initial-negotiation, которое
+      // точно проходит — иначе и аудио бы не подключилось.
       const outbound = outboundStreamRef.current;
       if (outbound) {
-        for (const track of outbound.getTracks()) {
+        for (const track of outbound.getAudioTracks()) {
           try {
             pc.addTrack(track, outbound);
           } catch (err) {
-            console.warn(`[call] ${peerUserId} addTrack(${track.kind}) failed`, err);
+            console.warn(`[call] ${peerUserId} addTrack(audio) failed`, err);
           }
         }
+        const initialVideo = outbound.getVideoTracks()[0] ?? null;
+        try {
+          const videoTx = pc.addTransceiver('video', { direction: 'sendrecv', streams: [outbound] });
+          rec.videoSender = videoTx.sender;
+          if (initialVideo) {
+            void videoTx.sender
+              .replaceTrack(initialVideo)
+              .catch((err) => console.warn('[call] initial video replaceTrack failed', err));
+          }
+        } catch (err) {
+          console.warn('[call] addTransceiver(video) failed', err);
+        }
         console.log(
-          `[call] createPeer ${peerUserId} polite=${polite} tracks=${outbound
-            .getTracks()
-            .map((t) => `${t.kind}:${t.enabled}`)
-            .join(',')}`,
+          `[call] createPeer ${peerUserId} polite=${polite} audio=${!!outbound.getAudioTracks()[0]} video=${!!initialVideo}`,
         );
       } else {
         console.warn(`[call] createPeer ${peerUserId}: no outbound stream — peer will be receive-only`);
@@ -551,24 +576,18 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     const current = outbound.getVideoTracks()[0] ?? null;
     if (current === desired) return;
 
-    // Reconcile each PC's video sender to the desired track.
+    // Камеру включаем/выключаем через replaceTrack по предсогласованному
+    // sendrecv-отправителю — без addTrack/removeTrack, т.е. без второго
+    // SDP-согласования. replaceTrack(null) гасит камеру, replaceTrack(track)
+    // включает. Этот путь надёжен на iOS (фрагильный re-negotiation убран).
     for (const rec of pcsRef.current.values()) {
-      const sender = rec.pc.getSenders().find(
-        (s) => s.track === current || (current === null && s.track?.kind === 'video'),
-      );
-      if (sender) {
-        if (desired) {
-          try { await sender.replaceTrack(desired); }
-          catch (err) { console.warn('[call] sender.replaceTrack(video) failed', err); }
-        } else {
-          try { rec.pc.removeTrack(sender); }
-          catch (err) { console.warn('[call] removeTrack failed', err); }
-        }
-      } else if (desired) {
-        // No video sender yet (camera was off) → addTrack creates one and
-        // triggers onnegotiationneeded; perfect-negotiation exchanges SDP.
-        try { rec.pc.addTrack(desired, outbound); }
-        catch (err) { console.warn('[call] addTrack(video) failed', err); }
+      const sender =
+        rec.videoSender ?? rec.pc.getSenders().find((s) => s.track?.kind === 'video') ?? null;
+      if (!sender) continue;
+      try {
+        await sender.replaceTrack(desired ?? null);
+      } catch (err) {
+        console.warn('[call] replaceTrack(video) failed', err);
       }
     }
 

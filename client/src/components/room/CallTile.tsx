@@ -19,6 +19,12 @@ export interface CallTileProps {
   /** Tile diameter (circle) or width (rect, height = 9/16). */
   size: number;
   isMe: boolean;
+  /**
+   * Отзеркалить картинку через CSS. Используется только для своего self-view
+   * на iOS, где canvas-зеркало в исходящем треке отключено (даёт чёрный кадр).
+   * На десктопе зеркало уже встроено в отправляемый трек, поэтому CSS не нужен.
+   */
+  mirror?: boolean;
 }
 
 /**
@@ -36,6 +42,7 @@ export function CallTile({
   shape,
   size,
   isMe,
+  mirror = false,
 }: CallTileProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const showVideo = member.video && !!stream && stream.getVideoTracks().length > 0;
@@ -92,6 +99,7 @@ export function CallTile({
             objectFit: 'cover',
             display: 'block',
             background: '#000',
+            transform: mirror ? 'scaleX(-1)' : undefined,
           }}
         />
       ) : (

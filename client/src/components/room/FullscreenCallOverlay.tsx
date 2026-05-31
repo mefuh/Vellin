@@ -3,6 +3,7 @@ import type { CallMember, ParticipantInfo } from '@vellin/shared';
 import { useRoomStore } from '../../stores/roomStore';
 import { useCallContext } from '../../hooks/CallContext';
 import { useCallSettingsStore, type CircleSize } from '../../stores/callSettingsStore';
+import { isIOS } from '../../utils/platform';
 import { Avatar } from '../../shared';
 import { CallTile } from './CallTile';
 
@@ -39,6 +40,8 @@ export function FullscreenCallOverlay({ expanded }: FullscreenCallOverlayProps) 
   const circleSize = useCallSettingsStore((s) => s.circleSize);
   const tilePositions = useCallSettingsStore((s) => s.tilePositions);
   const setTilePosition = useCallSettingsStore((s) => s.setTilePosition);
+  // Зеркало своего self-view на iOS (CSS-флип; canvas-зеркало там отключено).
+  const mirrorSelf = useCallSettingsStore((s) => s.mirrorSelfVideo) && isIOS();
   const { myStream, remoteStreams, speaking } = useCallContext();
 
   const tilePx = CIRCLE_PX[circleSize];
@@ -145,6 +148,7 @@ export function FullscreenCallOverlay({ expanded }: FullscreenCallOverlayProps) 
               shape="circle"
               size={tilePx}
               isMe={isMe}
+              mirror={isMe && mirrorSelf}
             />
           </DraggableCircle>
         );
