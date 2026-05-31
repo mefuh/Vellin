@@ -33,6 +33,10 @@ services:
       CORS_ORIGIN: http://localhost:8080
       WS_TICKET_TTL_SEC: "60"
       UPLOADS_DIR: /data/uploads
+      # TURN опционально и для локалки обычно не нужен (звонки в одной сети
+      # работают по STUN). Пробрасываем для паритета с прод-конфигом.
+      TURN_SECRET: ${TURN_SECRET:-}
+      TURN_URLS: ${TURN_URLS:-}
     ports:
       - "3001:3001"
     volumes:

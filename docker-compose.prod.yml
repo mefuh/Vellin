@@ -45,6 +45,12 @@ services:
       # Email главного администратора сервиса. Если переменной нет в
       # .env.production, панель /admin недоступна никому.
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      # TURN (coturn) для прохождения NAT в звонках. Секрет совпадает со
+      # static-auth-secret в /etc/turnserver.conf на хосте. Без них сервер
+      # отдаёт клиенту только STUN.
+      TURN_SECRET: ${TURN_SECRET:-}
+      TURN_URLS: ${TURN_URLS:-}
+      TURN_TTL_SEC: ${TURN_TTL_SEC:-3600}
     volumes:
       - uploads:/data/uploads
 
