@@ -8,11 +8,16 @@
 	encode gzip zstd
 
 	# All routing goes through `handle` blocks so the matchers are explicit
-	# and mutually exclusive. The WebSocket endpoint must be its own handle —
+	# and mutually exclusive. The WebSocket endpoints must be their own handle —
 	# previously `reverse_proxy @ws` sat outside any handle and the catch-all
 	# `handle {}` swallowed /ws into the SPA fallback (200 text/html instead
 	# of a 101 Upgrade).
-	handle /ws {
+	#
+	# `/ws`     — комнатный сокет (видео/чат/звонок).
+	# `/ws/*`   — пользовательский realtime-канал `/ws/user` (друзья,
+	#             уведомления, presence). `handle /ws` матчит ТОЛЬКО точный
+	#             путь, поэтому `/ws/user` нужно покрыть отдельным `/ws/*`.
+	handle /ws /ws/* {
 		reverse_proxy server:3001
 	}
 
