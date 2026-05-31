@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { InviteLink, RoomDetails } from '@vellin/shared';
-import { Button } from '../../shared';
+import { Avatar, Button } from '../../shared';
 import { Icon } from '../../shared/Icon';
 import { roomsApi } from '../../api/rooms';
 import { ApiHttpError } from '../../api/client';
+import { useFriendsStore } from '../../stores/friendsStore';
 
 interface InviteModalProps {
   room: RoomDetails;
@@ -17,6 +18,30 @@ export function InviteModal({ room, canCreate, onClose }: InviteModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [creating, setCreating] = useState(false);
+
+  const friends = useFriendsStore((s) => s.friends);
+  const refreshFriends = useFriendsStore((s) => s.refresh);
+  const [invited, setInvited] = useState<Set<string>>(new Set());
+  const [invitingId, setInvitingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void refreshFriends();
+  }, [refreshFriends]);
+
+  // Онлайн-друзья выше; среди онлайн — не сидящие уже в этой комнате выше.
+  const sortedFriends = [...friends].sort((a, b) => Number(b.online) - Number(a.online));
+
+  const inviteFriend = async (friendId: string) => {
+    setInvitingId(friendId);
+    try {
+      await roomsApi.inviteFriend(room.id, friendId);
+      setInvited((prev) => new Set(prev).add(friendId));
+    } catch {
+      /* ignore */
+    } finally {
+      setInvitingId(null);
+    }
+  };
 
   useEffect(() => {
     if (canCreate && room.isPrivate && !link) {
@@ -119,6 +144,55 @@ export function InviteModal({ room, canCreate, onClose }: InviteModalProps) {
 
         {error && (
           <div style={{ color: 'var(--accent-hi)', fontSize: 13 }}>{error}</div>
+        )}
+
+        {friends.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Пригласить друзей</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+              {sortedFriends.map((f) => {
+                const isInvited = invited.has(f.id);
+                const here = f.currentRoom?.slug === room.slug;
+                return (
+                  <div
+                    key={f.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '6px 8px',
+                      borderRadius: 'var(--r-md)',
+                      background: 'var(--bg-2)',
+                    }}
+                  >
+                    <Avatar
+                      name={f.username}
+                      seed={f.avatarSeed}
+                      src={f.avatarUrl}
+                      size={30}
+                      status={f.online ? (f.currentRoom ? 'watching' : 'online') : 'offline'}
+                    />
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {f.username}
+                    </span>
+                    {here ? (
+                      <span style={{ fontSize: 12, color: 'var(--ok)' }}>уже здесь</span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant={isInvited ? 'ghost' : 'secondary'}
+                        icon={isInvited ? 'check' : 'userPlus'}
+                        disabled={isInvited || invitingId === f.id}
+                        onClick={() => void inviteFriend(f.id)}
+                      >
+                        {isInvited ? 'Приглашён' : 'Пригласить'}
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
     </div>

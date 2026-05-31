@@ -4,6 +4,7 @@ import type {
   CreateRoomRequest,
   CreateRoomResponse,
   GetRoomResponse,
+  InviteFriendResponse,
   JoinRoomRequest,
   JoinRoomResponse,
   ListRoomsResponse,
@@ -28,6 +29,8 @@ export const roomsApi = {
     apiFetch<ResolveResponse>('/rooms/resolve', { method: 'POST', body }),
   createInvite: (id: string, body: CreateInviteRequest = {}) =>
     apiFetch<CreateInviteResponse>(`/rooms/${id}/invites`, { method: 'POST', body }),
+  inviteFriend: (id: string, friendId: string) =>
+    apiFetch<InviteFriendResponse>(`/rooms/${id}/invite-friend`, { method: 'POST', body: { friendId } }),
   messages: (id: string, cursor?: string) =>
     apiFetch<MessagesResponse>(
       `/rooms/${id}/messages${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,

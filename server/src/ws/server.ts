@@ -9,10 +9,12 @@ import {
   type RoomRole,
   type S2C,
 } from '@vellin/shared';
-import { isWsTicket, principalAvatarUrl, type Principal } from '../auth/jwt.js';
+import { isUserTicket, isWsTicket, principalAvatarUrl, type Principal } from '../auth/jwt.js';
 import { logger } from '../utils/logger.js';
 import { ensureRoomRuntime } from '../rooms/RoomRuntime.js';
 import { prisma } from '../db/prisma.js';
+import { userHub, type UserConnection } from '../realtime/UserHub.js';
+import { getFriendPresenceSnapshot, getNotificationsSnapshot } from '../friends/service.js';
 import { TokenBucket } from './rateLimit.js';
 import { makeSession, sendError, type ConnectionContext } from './connection.js';
 import { handleChatMessage } from './handlers/chat.js';
@@ -43,6 +45,80 @@ import { getRtcConfig } from '../env.js';
 const MAX_MESSAGE_BYTES = 32 * 1024;
 
 export async function registerWebSocket(app: FastifyInstance): Promise<void> {
+  // ── Пользовательский realtime-канал (личные уведомления + presence) ─────
+  app.get('/ws/user', { websocket: true }, async (socket, req) => {
+    const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
+    const ticket = url.searchParams.get('ticket');
+    if (!ticket) {
+      socket.close(4001, 'missing ticket');
+      return;
+    }
+    let payload: unknown;
+    try {
+      payload = app.jwt.verify(ticket as never) as unknown;
+    } catch {
+      socket.close(4001, 'invalid ticket');
+      return;
+    }
+    if (!isUserTicket(payload) || payload.principal.kind !== 'user') {
+      socket.close(4001, 'not a user ticket');
+      return;
+    }
+    const principal = payload.principal;
+    const u = await prisma.user.findUnique({
+      where: { id: principal.userId },
+      select: { isBlocked: true },
+    });
+    if (!u || u.isBlocked) {
+      socket.close(4403, 'blocked');
+      return;
+    }
+
+    const conn: UserConnection = {
+      id: nanoid(12),
+      userId: principal.userId,
+      send(msg) {
+        if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
+      },
+      isOpen() {
+        return socket.readyState === socket.OPEN;
+      },
+    };
+    userHub.attach(conn);
+    logger.info({ userId: principal.userId, connId: conn.id }, 'ws:user:open');
+
+    try {
+      const [snapshot, presence] = await Promise.all([
+        getNotificationsSnapshot(principal.userId),
+        getFriendPresenceSnapshot(principal.userId),
+      ]);
+      conn.send({
+        t: 'hello',
+        notifications: snapshot.notifications,
+        unreadCount: snapshot.unreadCount,
+        presence,
+        serverTs: Date.now(),
+      });
+    } catch (err) {
+      logger.error({ err, userId: principal.userId }, 'ws:user hello failed');
+    }
+
+    const pingTimer = setInterval(() => {
+      if (socket.readyState === socket.OPEN) conn.send({ t: 'ping', serverTs: Date.now() });
+    }, 30000);
+
+    // Входящие сообщения — только keep-alive pong; контента нет, игнорируем.
+    socket.on('message', () => {});
+    socket.on('close', () => {
+      clearInterval(pingTimer);
+      userHub.detach(conn);
+      logger.info({ userId: principal.userId, connId: conn.id }, 'ws:user:close');
+    });
+    socket.on('error', (err) => {
+      logger.warn({ err: err.message, userId: principal.userId }, 'ws:user socket error');
+    });
+  });
+
   app.get('/ws', { websocket: true }, async (socket, req) => {
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
     const ticket = url.searchParams.get('ticket');
@@ -60,6 +136,11 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
     }
     if (!payload || typeof payload !== 'object' || !isWsTicket(payload as never)) {
       socket.close(4001, 'not a ws ticket');
+      return;
+    }
+    // Пользовательский realtime-тикет сюда не годится — у него свой эндпоинт.
+    if (isUserTicket(payload)) {
+      socket.close(4001, 'wrong ticket type');
       return;
     }
     const ticketPayload = payload as {

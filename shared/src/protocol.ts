@@ -1,7 +1,9 @@
 import type {
+  AppNotification,
   CallMember,
   CallSnapshot,
   ChatMessage,
+  FriendPresence,
   ParticipantInfo,
   PlaylistItem,
   ReactionEvent,
@@ -342,7 +344,57 @@ export interface S2CCallError {
   message: string;
 }
 
+// ── Пользовательский realtime-канал (app-wide WS `/ws/user`) ─────────────
+//
+// Полностью отдельный от комнатного протокола: подключается на всё время
+// сессии и доставляет личные уведомления + presence друзей. Не смешивать с
+// C2S/S2C — у канала свой набор сообщений.
+
+export type UserS2C =
+  | UserS2CHello
+  | UserS2CNotification
+  | UserS2CPresence
+  | UserS2CFriendsChanged
+  | UserS2CPing;
+
+/** Снапшот при подключении: непрочитанные уведомления + presence друзей. */
+export interface UserS2CHello {
+  t: 'hello';
+  notifications: AppNotification[];
+  unreadCount: number;
+  presence: FriendPresence[];
+  serverTs: number;
+}
+export interface UserS2CNotification {
+  t: 'notification';
+  notification: AppNotification;
+  unreadCount: number;
+}
+export interface UserS2CPresence {
+  t: 'presence';
+  presence: FriendPresence;
+}
+/** Сигнал «список друзей/заявок изменился — перезапроси по REST». */
+export interface UserS2CFriendsChanged {
+  t: 'friends_changed';
+}
+export interface UserS2CPing {
+  t: 'ping';
+  serverTs: number;
+}
+
+export type UserC2S = UserC2SPong;
+
+export interface UserC2SPong {
+  t: 'pong';
+  serverTs: number;
+}
+
 // ── Type guards ────────────────────────────────────────────────────────
 export function isC2S(value: unknown): value is C2S {
+  return typeof value === 'object' && value !== null && typeof (value as { t?: unknown }).t === 'string';
+}
+
+export function isUserC2S(value: unknown): value is UserC2S {
   return typeof value === 'object' && value !== null && typeof (value as { t?: unknown }).t === 'string';
 }

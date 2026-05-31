@@ -33,9 +33,20 @@ export interface WsTicketPayload {
   shadow?: boolean;
 }
 
+/**
+ * Тикет для пользовательского realtime-канала `/ws/user` — короткоживущий,
+ * без привязки к комнате. Отличается от комнатного полем `user: true`.
+ */
+export interface UserTicketPayload {
+  ticket: true;
+  user: true;
+  principal: Principal;
+}
+
 export type JwtPayload =
   | (Principal & { ticket?: false })
-  | WsTicketPayload;
+  | WsTicketPayload
+  | UserTicketPayload;
 
 export function signSession(app: FastifyInstance, principal: Principal): string {
   return app.jwt.sign(principal, { expiresIn: '30d' });
@@ -58,12 +69,29 @@ export function signWsTicket(
   return app.jwt.sign(payload, { expiresIn: `${ttlSec}s` });
 }
 
+/** Тикет для пользовательского realtime-канала. */
+export function signUserTicket(app: FastifyInstance, principal: Principal, ttlSec: number): string {
+  const payload: UserTicketPayload = { ticket: true, user: true, principal };
+  return app.jwt.sign(payload, { expiresIn: `${ttlSec}s` });
+}
+
 export function verifyToken(app: FastifyInstance, token: string): JwtPayload {
   return app.jwt.verify<JwtPayload>(token);
 }
 
-export function isWsTicket(payload: JwtPayload): payload is WsTicketPayload {
-  return (payload as WsTicketPayload).ticket === true;
+/** Любой тикет (комнатный или пользовательский) — не годится для REST. */
+export function isWsTicket(payload: JwtPayload): payload is WsTicketPayload | UserTicketPayload {
+  return (payload as { ticket?: unknown }).ticket === true;
+}
+
+/** Именно пользовательский realtime-тикет (есть `user: true`). */
+export function isUserTicket(payload: unknown): payload is UserTicketPayload {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    (payload as { ticket?: unknown }).ticket === true &&
+    (payload as { user?: unknown }).user === true
+  );
 }
 
 /** avatarUrl принципала: есть только у зарегистрированных пользователей. */

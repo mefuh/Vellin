@@ -15,6 +15,7 @@ import { useIsMobile } from '../hooks/useMediaQuery';
 import { VideoPlayer } from '../components/room/VideoPlayer';
 import { RoomChat } from '../components/room/RoomChat';
 import { InviteModal } from '../components/room/InviteModal';
+import { NotificationsBell } from '../components/notifications/NotificationsBell';
 import { CreateRoomModal } from '../components/CreateRoomModal';
 import { PlaylistPanel } from '../components/room/PlaylistPanel';
 import { ParticipantMenu } from '../components/room/ParticipantMenu';
@@ -323,6 +324,7 @@ export function Room() {
               {isMobile ? '' : callMembers.length === 0 ? 'Звонок' : 'Войти'}
             </Button>
           ))}
+        {user?.kind === 'user' && <NotificationsBell />}
         {room && (
           <Button
             variant="secondary"

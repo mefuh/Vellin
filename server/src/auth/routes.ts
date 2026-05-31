@@ -10,6 +10,7 @@ import type {
   LoginRequest,
   MeResponse,
   ProfileMutationResponse,
+  RealtimeTicketResponse,
   RegisterRequest,
   RevokeOtherSessionsResponse,
   RevokeSessionResponse,
@@ -18,7 +19,7 @@ import type {
 } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 import { hashPassword, verifyPassword } from './password.js';
-import { signSession, type Principal } from './jwt.js';
+import { signSession, signUserTicket, type Principal } from './jwt.js';
 import { generateAvatarSeed, generateGuestId } from '../utils/ids.js';
 import { requireAuth } from './middleware.js';
 import { isAdminEmail } from '../env.js';
@@ -402,6 +403,14 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     });
     if (current?.avatarUrl) await deleteAvatarFile(current.avatarUrl);
     reply.send(issue(app, updated, principal.sid!) satisfies UploadAvatarResponse);
+  });
+
+  // ── Тикет для пользовательского realtime-канала (/ws/user) ────────────
+  app.get('/auth/realtime-ticket', { preHandler: requireAuth }, async (req, reply) => {
+    const principal = requireUser(req, reply);
+    if (!principal) return;
+    const ticket = signUserTicket(app, principal, 120);
+    reply.send({ ticket } satisfies RealtimeTicketResponse);
   });
 
   // ── Список устройств/сессий ────────────────────────────────────────────

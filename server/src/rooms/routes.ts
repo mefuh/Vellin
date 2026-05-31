@@ -6,6 +6,8 @@ import type {
   CreateRoomRequest,
   CreateRoomResponse,
   GetRoomResponse,
+  InviteFriendRequest,
+  InviteFriendResponse,
   InviteLink as InviteLinkDTO,
   JoinRoomRequest,
   JoinRoomResponse,
@@ -24,6 +26,8 @@ import type {
 import { prisma } from '../db/prisma.js';
 import { requireAuth } from '../auth/middleware.js';
 import { signWsTicket } from '../auth/jwt.js';
+import { areFriends } from '../friends/service.js';
+import { createAndPush } from '../realtime/notify.js';
 import {
   authorizeJoin,
   createRoom,
@@ -71,6 +75,10 @@ const createInviteSchema = z.object({
   maxUses: z.number().int().positive().max(1000).optional(),
   expiresAt: z.string().datetime().optional(),
 }) satisfies z.ZodType<CreateInviteRequest>;
+
+const inviteFriendSchema = z.object({
+  friendId: z.string().min(1).max(64),
+}) satisfies z.ZodType<InviteFriendRequest>;
 
 const updateRoleSchema = z.object({
   role: z.enum(['admin', 'member']),
@@ -381,6 +389,40 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
         createdAt: invite.createdAt.toISOString(),
       };
       reply.code(201).send({ link } satisfies CreateInviteResponse);
+    },
+  );
+
+  // ── Пригласить друга в эту комнату (уведомление + ссылка) ──────────────
+  app.post<{ Params: { id: string }; Body: InviteFriendRequest }>(
+    '/rooms/:id/invite-friend',
+    async (req, reply) => {
+      const body = inviteFriendSchema.parse(req.body ?? {});
+      const principal = req.principal!;
+      const room = await getRoomById(req.params.id);
+      if (!room) {
+        reply.code(404).send({ error: 'NotFound', message: 'Room not found', statusCode: 404 });
+        return;
+      }
+      // Приглашать может владелец или тот, кто сейчас в комнате.
+      const runtime = roomStore.get(room.id);
+      const inRoom = room.ownerId === principal.userId || (runtime?.participants.has(principal.userId) ?? false);
+      if (!inRoom) {
+        reply.code(403).send({ error: 'Forbidden', message: 'Вы не находитесь в этой комнате', statusCode: 403 });
+        return;
+      }
+      if (!(await areFriends(principal.userId, body.friendId))) {
+        reply.code(403).send({ error: 'Forbidden', message: 'Можно приглашать только друзей', statusCode: 403 });
+        return;
+      }
+      // Ссылка с одноразовым использованием не нужна — создаём обычный токен,
+      // чтобы друг мог войти даже в приватную комнату.
+      const token = generateInviteToken();
+      await prisma.inviteLink.create({ data: { roomId: room.id, token } });
+      await createAndPush(body.friendId, 'room_invite', principal.userId, {
+        roomSlug: `${room.slug}?invite=${token}`,
+        roomName: room.name,
+      });
+      reply.send({ ok: true } satisfies InviteFriendResponse);
     },
   );
 

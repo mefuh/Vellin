@@ -23,6 +23,7 @@ import { prisma } from '../db/prisma.js';
 import { roomMutex } from '../utils/async-mutex.js';
 import { logger } from '../utils/logger.js';
 import { roomStore } from './store.js';
+import { userHub } from '../realtime/UserHub.js';
 import { principalAvatarUrl, type Principal } from '../auth/jwt.js';
 import {
   getEffectivePermissions,
@@ -86,6 +87,7 @@ export interface AttachOptions {
 export class RoomRuntime {
   readonly roomId: string;
   readonly slug: string;
+  readonly name: string;
   /** Immutable — owner is the room creator forever. */
   readonly ownerUserId: string;
   maxParticipants: number;
@@ -126,6 +128,7 @@ export class RoomRuntime {
   constructor(room: Room) {
     this.roomId = room.id;
     this.slug = room.slug;
+    this.name = room.name;
     this.ownerUserId = room.ownerId;
     this.maxParticipants = room.maxParticipants;
     this.allowGuests = room.allowGuests;
@@ -425,6 +428,10 @@ export class RoomRuntime {
       return { isReconnect: false };
     }
     const userId = session.principal.userId;
+    // Presence: отмечаем, что пользователь смотрит эту комнату (для друзей).
+    if (session.principal.kind === 'user') {
+      userHub.setRoom(userId, { slug: this.slug, name: this.name });
+    }
     const existing = this.participants.get(userId);
     if (existing) {
       if (existing.pendingRemovalTimer) {
@@ -472,6 +479,7 @@ export class RoomRuntime {
       const current = this.participants.get(userId);
       if (!current || current.session !== session) return;
       this.participants.delete(userId);
+      if (session.principal.kind === 'user') userHub.clearRoom(userId, this.slug);
       this.evictFromCall(userId);
       this.broadcast({ t: 'user_leave', userId, serverTs: Date.now() });
       if (this.participants.size === 0 && this.shadowSessions.size === 0) {

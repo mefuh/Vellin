@@ -1,8 +1,12 @@
 import type {
   AdminRoomSummary,
+  AppNotification,
   AuthUser,
   DeviceSession,
+  FriendRequest,
+  FriendUser,
   ParticipantInfo,
+  PublicProfile,
   RoomDetails,
   RoomSummary,
   ChatMessage,
@@ -131,6 +135,66 @@ export interface CreateInviteRequest {
 }
 export interface CreateInviteResponse {
   link: InviteLink;
+}
+/** Пригласить существующего друга в комнату (уведомление + ссылка). */
+export interface InviteFriendRequest {
+  friendId: string;
+}
+export interface InviteFriendResponse {
+  ok: true;
+}
+
+// ── Друзья ──────────────────────────────────────────────────────────────
+export interface ListFriendsResponse {
+  friends: FriendUser[];
+}
+export interface ListFriendRequestsResponse {
+  requests: FriendRequest[];
+}
+export interface SendFriendRequestRequest {
+  /** Один из двух способов адресации заявки. */
+  username?: string;
+  userId?: string;
+}
+export interface SendFriendRequestResponse {
+  request: FriendRequest;
+  /** Если встречная заявка существовала — она сразу принята. */
+  autoAccepted: boolean;
+}
+export interface RespondFriendRequestResponse {
+  status: 'accepted' | 'declined';
+}
+export interface RemoveFriendResponse {
+  userId: string;
+}
+export interface BlockFriendResponse {
+  userId: string;
+}
+
+// ── Пользователи (поиск + публичный профиль) ─────────────────────────────
+export interface SearchUsersResponse {
+  users: PublicProfile[];
+}
+export interface GetPublicProfileResponse {
+  profile: PublicProfile;
+}
+
+// ── Уведомления ─────────────────────────────────────────────────────────
+export interface ListNotificationsResponse {
+  notifications: AppNotification[];
+  unreadCount: number;
+}
+export interface MarkNotificationsReadRequest {
+  /** Конкретные id; без поля — отметить все. */
+  ids?: string[];
+}
+export interface MarkNotificationsReadResponse {
+  unreadCount: number;
+}
+
+// ── Realtime (пользовательский WS-канал) ─────────────────────────────────
+export interface RealtimeTicketResponse {
+  ticket: string;
 }
 
 // ── Members ─────────────────────────────────────────────────────────────

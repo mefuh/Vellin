@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
-import { Avatar, Button, Icon, VellinLogo, type IconName } from '../shared';
+import { Navigate } from 'react-router-dom';
+import { Avatar, Icon, type IconName } from '../shared';
 import { useAuthStore } from '../stores/authStore';
 import { useIsMobile } from '../hooks/useMediaQuery';
+import { AppHeader } from '../components/AppHeader';
 import { AvatarSection } from '../components/profile/AvatarSection';
 import { IdentitySection } from '../components/profile/IdentitySection';
 import { EmailSection } from '../components/profile/EmailSection';
@@ -38,9 +39,7 @@ function renderTab(tab: TabId, user: AuthUser) {
 }
 
 export function Profile() {
-  const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
   const isMobile = useIsMobile();
   const [tab, setTab] = useState<TabId>('profile');
 
@@ -48,37 +47,7 @@ export function Profile() {
   if (user && user.kind === 'guest') return <Navigate to="/library" replace />;
   if (!user) return <Navigate to="/login" replace />;
 
-  const header = (
-    <header
-      style={{
-        height: 72,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0 max(20px, 4vw)',
-        borderBottom: '1px solid var(--line-1)',
-      }}
-    >
-      <Link to="/">
-        <VellinLogo />
-      </Link>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Button variant="secondary" size="sm" icon="library" onClick={() => navigate('/library')}>
-          {isMobile ? '' : 'В библиотеку'}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            logout();
-            navigate('/');
-          }}
-        >
-          Выйти
-        </Button>
-      </div>
-    </header>
-  );
+  const header = <AppHeader active="profile" />;
 
   // ── Мобильная версия: всё стопкой (не трогаем) ─────────────────────────
   if (isMobile) {

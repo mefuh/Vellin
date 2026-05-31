@@ -29,7 +29,57 @@ model User {
   memberships  Membership[]
   sessions     Session[]
 
+  friendRequestsSent     Friendship[]   @relation("FriendRequester")
+  friendRequestsReceived Friendship[]   @relation("FriendAddressee")
+  blocksMade             Block[]        @relation("Blocker")
+  blockedBy              Block[]        @relation("Blocked")
+  notifications          Notification[]
+
   @@index([isBlocked])
+}
+
+/// Дружба/заявка между двумя пользователями. Одна строка на пару (в одном
+/// направлении requester→addressee). status: 'pending' | 'accepted'.
+model Friendship {
+  id          String    @id @default(cuid())
+  requesterId String
+  addresseeId String
+  requester   User      @relation("FriendRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee   User      @relation("FriendAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+  status      String // 'pending' | 'accepted'
+  createdAt   DateTime  @default(now())
+  respondedAt DateTime?
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId, status])
+  @@index([requesterId, status])
+}
+
+/// Блокировка пользователя. Блок удаляет дружбу/заявки и запрещает новые.
+model Block {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+/// Личное уведомление пользователя (колокольчик). Расширяемо по type.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // 'friend_request' | 'friend_accepted' | 'room_invite'
+  actorId   String? // кто инициировал
+  dataJson  String    @default("{}") // {roomSlug, roomName, friendshipId, ...}
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
 }
 
 /// Серверная запись о входе (устройство/браузер). JWT пользователя несёт

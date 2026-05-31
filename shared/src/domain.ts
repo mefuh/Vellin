@@ -245,6 +245,75 @@ export interface InviteLink {
   createdAt: string;
 }
 
+// ── Друзья / уведомления / присутствие ───────────────────────────────────
+
+/** Краткая ссылка на комнату для presence/инвайтов. */
+export interface RoomRef {
+  slug: string;
+  name: string;
+}
+
+/**
+ * Принятый друг для списка «Друзья». Помимо публичных полей несёт id записи
+ * дружбы (для удаления) и live-присутствие из UserHub.
+ */
+export interface FriendUser extends PublicUser {
+  friendshipId: string;
+  online: boolean;
+  /** Комната, которую друг смотрит прямо сейчас, либо null. */
+  currentRoom: RoomRef | null;
+}
+
+/** Pending-заявка в друзья (входящая или исходящая). */
+export interface FriendRequest {
+  id: string;
+  direction: 'incoming' | 'outgoing';
+  user: PublicUser;
+  createdAt: string;
+}
+
+/**
+ * Отношение текущего пользователя к просматриваемому профилю.
+ * - `self` — это сам пользователь,
+ * - `friends` — уже друзья,
+ * - `incoming` — он прислал заявку мне (могу принять),
+ * - `outgoing` — я прислал заявку ему,
+ * - `blocked` — я его заблокировал,
+ * - `none` — никакой связи.
+ */
+export type Relationship = 'none' | 'friends' | 'incoming' | 'outgoing' | 'blocked' | 'self';
+
+/** Публичный профиль пользователя для страницы `/u/:username`. */
+export interface PublicProfile extends PublicUser {
+  bio: string | null;
+  createdAt: string;
+  online: boolean;
+  currentRoom: RoomRef | null;
+  relationship: Relationship;
+  /** Id записи дружбы/заявки — для accept/remove. */
+  friendshipId: string | null;
+}
+
+export type NotificationType = 'friend_request' | 'friend_accepted' | 'room_invite';
+
+/** Уведомление в колокольчике. `actor` — кто инициировал. */
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  actor: PublicUser | null;
+  /** Контекст: для room_invite — куда зовут. */
+  data: { roomSlug?: string; roomName?: string };
+  read: boolean;
+  createdAt: string;
+}
+
+/** Live-присутствие друга, рассылается по пользовательскому WS-каналу. */
+export interface FriendPresence {
+  userId: string;
+  online: boolean;
+  currentRoom: RoomRef | null;
+}
+
 // ── Voice/video call ────────────────────────────────────────────────────
 
 /** Cap on simultaneous voice participants in one room's call. */

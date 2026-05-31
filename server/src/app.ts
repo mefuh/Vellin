@@ -12,8 +12,11 @@ import { loadEnv } from './env.js';
 import { authRoutes } from './auth/routes.js';
 import { roomRoutes } from './rooms/routes.js';
 import { adminRoutes } from './admin/routes.js';
+import { friendRoutes } from './friends/routes.js';
 import { ensureUploadsDir, MAX_AVATAR_BYTES } from './auth/avatar.js';
 import { registerWebSocket } from './ws/server.js';
+import { userHub } from './realtime/UserHub.js';
+import { getAcceptedFriendIds } from './friends/service.js';
 import { logger } from './utils/logger.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -85,7 +88,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.code(500).send({ error: 'InternalServerError', message: 'Internal error', statusCode: 500 });
   });
 
-  app.get('/health', async () => ({ ok: true, version: '0.7.2' }));
+  app.get('/health', async () => ({ ok: true, version: '0.8.0' }));
 
   await app.register(
     async (api) => {
@@ -95,9 +98,13 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(authRoutes);
       await api.register(roomRoutes);
       await api.register(adminRoutes);
+      await api.register(friendRoutes);
     },
     { prefix: '/api' },
   );
+
+  // Хаб presence не знает про БД — отдаём ему резолвер друзей для рассылки.
+  userHub.setFriendResolver(getAcceptedFriendIds);
 
   await registerWebSocket(app);
 

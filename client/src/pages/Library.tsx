@@ -2,15 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { RoomSummary } from '@vellin/shared';
 import { roomsApi } from '../api/rooms';
-import { Avatar, Button, Chip, Icon, MountainPoster, VellinLogo } from '../shared';
+import { Button, Chip, Icon, MountainPoster } from '../shared';
 import { useAuthStore } from '../stores/authStore';
 import { CreateRoomModal } from '../components/CreateRoomModal';
+import { AppHeader } from '../components/AppHeader';
 import { ApiHttpError } from '../api/client';
 
 export function Library() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -49,64 +49,7 @@ export function Library() {
 
   return (
     <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
-      <header
-        style={{
-          height: 72,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 max(24px, 4vw)',
-          borderBottom: '1px solid var(--line-1)',
-        }}
-      >
-        <Link to="/">
-          <VellinLogo />
-        </Link>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {user && user.kind === 'guest' && (
-            <span style={{ color: 'var(--text-2)', fontSize: 13 }}>
-              {user.username} <Chip tone="neutral">гость</Chip>
-            </span>
-          )}
-          {user && user.kind === 'user' && (
-            <button
-              onClick={() => navigate('/profile')}
-              title="Профиль и настройки"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--text-1)',
-                fontSize: 13,
-                padding: 0,
-                fontFamily: 'inherit',
-              }}
-            >
-              <Avatar name={user.username} seed={user.avatarSeed} src={user.avatarUrl} size={28} />
-              <span>{user.username}</span>
-            </button>
-          )}
-          {user?.isAdmin && (
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="crown"
-              onClick={() => navigate('/admin')}
-            >
-              Админ-панель
-            </Button>
-          )}
-          <Button variant="ghost" size="sm" onClick={() => {
-            logout();
-            navigate('/');
-          }}>
-            Выйти
-          </Button>
-        </div>
-      </header>
+      <AppHeader active="library" />
 
       <main style={{ padding: '32px max(24px, 4vw) 80px', display: 'flex', flexDirection: 'column', gap: 28 }}>
         <section

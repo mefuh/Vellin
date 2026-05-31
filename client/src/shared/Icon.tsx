@@ -12,7 +12,7 @@ export type IconName =
   | 'headphones' | 'speaker' | 'grid' | 'list' | 'filter' | 'sort'
   | 'arrowDown' | 'flame' | 'waveform' | 'refresh' | 'hash'
   | 'userMinus' | 'userPlus' | 'gripVertical'
-  | 'video' | 'videoOff' | 'phone' | 'phoneOff';
+  | 'video' | 'videoOff' | 'phone' | 'phoneOff' | 'logout';
 
 interface IconProps {
   name: IconName;
@@ -278,6 +278,13 @@ const PATHS: Record<IconName, ReactNode> = {
         d="M22 16.92v3a2 2 0 01-2.18 2 19.8 19.8 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.8 19.8 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.13.96.37 1.9.72 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.91.35 1.85.59 2.81.72A2 2 0 0122 16.92z"
       />
     </g>
+  ),
+  logout: (
+    <>
+      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+      <path d="M16 17l5-5-5-5" />
+      <path d="M21 12H9" />
+    </>
   ),
 };
 
