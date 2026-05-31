@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { z } from 'zod';
 import type { IceServerConfig, RtcConfig } from '@vellin/shared';
 
@@ -16,6 +17,18 @@ const schema = z.object({
   UPLOADS_DIR: z.string().default('./uploads'),
   /** Optional JSON-encoded RTCIceServer[] appended to the default STUN. */
   ICE_SERVERS: z.string().optional(),
+  /**
+   * TURN (coturn) для прохождения симметричного NAT/CGNAT — без него звонки
+   * между разными сетями не устанавливаются. Если оба заданы, сервер выдаёт
+   * клиенту эфемерные креды (TURN REST: username=expiry, credential=HMAC-SHA1).
+   * TURN_SECRET = static-auth-secret из turnserver.conf.
+   * TURN_URLS = список turn:-URL через запятую, напр.
+   *   turn:vellin.ru:3478?transport=udp,turn:vellin.ru:3478?transport=tcp
+   */
+  TURN_SECRET: z.string().optional(),
+  TURN_URLS: z.string().optional(),
+  /** Время жизни эфемерных TURN-кредов в секундах (по умолчанию 1 час). */
+  TURN_TTL_SEC: z.coerce.number().int().positive().default(3600),
   /**
    * Email главного администратора сервиса. Любой пользователь с таким email
    * автоматически получает isAdmin=true и доступ к /api/admin/*.
@@ -59,13 +72,12 @@ const DEFAULT_ICE_SERVERS: IceServerConfig[] = [
   { urls: 'stun:stun.l.google.com:19302' },
 ];
 
-let cachedRtc: RtcConfig | null = null;
-
-/** ICE config exposed to clients — default STUN plus any user-supplied servers. */
-export function getRtcConfig(): RtcConfig {
-  if (cachedRtc) return cachedRtc;
+// Статичные extra-серверы из ICE_SERVERS парсим один раз.
+let cachedExtra: IceServerConfig[] | null = null;
+function parseExtraIceServers(): IceServerConfig[] {
+  if (cachedExtra) return cachedExtra;
   const raw = loadEnv().ICE_SERVERS;
-  const extra: IceServerConfig[] = (() => {
+  cachedExtra = (() => {
     if (!raw) return [];
     try {
       const parsed = JSON.parse(raw) as unknown;
@@ -76,6 +88,33 @@ export function getRtcConfig(): RtcConfig {
       return [];
     }
   })();
-  cachedRtc = { iceServers: [...DEFAULT_ICE_SERVERS, ...extra] };
-  return cachedRtc;
+  return cachedExtra;
+}
+
+/**
+ * Эфемерные TURN-креды по схеме TURN REST (coturn `use-auth-secret`):
+ *   username   = <unix-время-истечения>
+ *   credential = base64(HMAC-SHA1(static-auth-secret, username))
+ * Креды короткоживущие, поэтому их нельзя «украсть» и гонять релей бесконечно.
+ */
+function buildTurnServer(): IceServerConfig | null {
+  const env = loadEnv();
+  if (!env.TURN_SECRET || !env.TURN_URLS) return null;
+  const urls = env.TURN_URLS.split(',').map((s) => s.trim()).filter(Boolean);
+  if (urls.length === 0) return null;
+  const username = String(Math.floor(Date.now() / 1000) + env.TURN_TTL_SEC);
+  const credential = createHmac('sha1', env.TURN_SECRET).update(username).digest('base64');
+  return { urls, username, credential };
+}
+
+/**
+ * ICE config exposed to clients — default STUN, any user-supplied servers, and
+ * (if configured) a TURN server with freshly-minted ephemeral credentials.
+ * NOT cached: TURN creds are time-limited and re-minted per call.
+ */
+export function getRtcConfig(): RtcConfig {
+  const turn = buildTurnServer();
+  return {
+    iceServers: [...DEFAULT_ICE_SERVERS, ...parseExtraIceServers(), ...(turn ? [turn] : [])],
+  };
 }
