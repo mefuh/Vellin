@@ -172,6 +172,7 @@ function TileFor({
       userId={member.userId}
       username={username}
       avatarSeed={avatarSeed}
+      avatarUrl={participant?.avatarUrl ?? null}
       member={member}
       stream={stream}
       speaking={speaking}

@@ -11,6 +11,8 @@ export interface CallTileProps {
   userId: string;
   username: string;
   avatarSeed: string;
+  /** URL загруженного аватара — если есть, рисуем его вместо градиента по seed. */
+  avatarUrl?: string | null;
   member: CallMember;
   /** Local or remote MediaStream — used both for video render and audio play. */
   stream: MediaStream | null;
@@ -36,6 +38,7 @@ export function CallTile({
   userId,
   username,
   avatarSeed,
+  avatarUrl,
   member,
   stream,
   speaking,
@@ -112,7 +115,7 @@ export function CallTile({
             justifyContent: 'center',
           }}
         >
-          <Avatar name={username} seed={avatarSeed} size={Math.round(fallbackHeight * 0.6)} />
+          <Avatar name={username} seed={avatarSeed} src={avatarUrl} size={Math.round(fallbackHeight * 0.6)} />
         </div>
       )}
       {!member.audio && !isCircle && (
