@@ -191,6 +191,10 @@ export interface MarkNotificationsReadRequest {
 export interface MarkNotificationsReadResponse {
   unreadCount: number;
 }
+/** Ответ на удаление одного уведомления (по id). */
+export interface DismissNotificationResponse {
+  unreadCount: number;
+}
 
 // ── Realtime (пользовательский WS-канал) ─────────────────────────────────
 export interface RealtimeTicketResponse {

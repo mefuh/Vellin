@@ -36,6 +36,11 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
           // для надёжности обновляем и здесь.
           if (msg.notification.type !== 'room_invite') void friends.refresh();
           break;
+        case 'notifications_removed':
+          // Действие отыграно (заявка принята/отклонена/отменена) — убираем
+          // отыгранные уведомления из белла, чтобы не засорялись.
+          notifications.removeMany(msg.ids, msg.unreadCount);
+          break;
         case 'presence':
           useFriendsStore.getState().applyPresence(msg.presence);
           break;

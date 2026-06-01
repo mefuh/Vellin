@@ -353,6 +353,7 @@ export interface S2CCallError {
 export type UserS2C =
   | UserS2CHello
   | UserS2CNotification
+  | UserS2CNotificationsRemoved
   | UserS2CPresence
   | UserS2CFriendsChanged
   | UserS2CPing;
@@ -368,6 +369,16 @@ export interface UserS2CHello {
 export interface UserS2CNotification {
   t: 'notification';
   notification: AppNotification;
+  unreadCount: number;
+}
+/**
+ * Уведомления удалены (действие завершено: заявка принята/отклонена/отменена,
+ * приглашение использовано). Клиент убирает их из списка по id, чтобы белл не
+ * засорялся отыгранными уведомлениями.
+ */
+export interface UserS2CNotificationsRemoved {
+  t: 'notifications_removed';
+  ids: string[];
   unreadCount: number;
 }
 export interface UserS2CPresence {

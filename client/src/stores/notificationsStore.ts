@@ -10,6 +10,10 @@ interface NotificationsState {
   setSnapshot: (notifications: AppNotification[], unreadCount: number) => void;
   /** Новое входящее уведомление (realtime). */
   add: (notification: AppNotification, unreadCount: number) => void;
+  /** Уведомления удалены сервером (заявка отыграна) — убрать по id (realtime). */
+  removeMany: (ids: string[], unreadCount: number) => void;
+  /** Удалить одно уведомление (напр. приглашение в комнату после перехода). */
+  dismiss: (id: string) => Promise<void>;
   markAllRead: () => Promise<void>;
   openPanel: () => void;
   closePanel: () => void;
@@ -29,6 +33,23 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
       notifications: [notification, ...s.notifications.filter((n) => n.id !== notification.id)].slice(0, 50),
       unreadCount,
     })),
+
+  removeMany: (ids, unreadCount) =>
+    set((s) => ({
+      notifications: s.notifications.filter((n) => !ids.includes(n.id)),
+      unreadCount,
+    })),
+
+  dismiss: async (id) => {
+    // Оптимистично убираем из списка, затем синхронизируем счётчик с сервером.
+    set((s) => ({ notifications: s.notifications.filter((n) => n.id !== id) }));
+    try {
+      const { unreadCount } = await notificationsApi.dismiss(id);
+      set({ unreadCount });
+    } catch {
+      /* следующий снапшот восстановит состояние */
+    }
+  },
 
   markAllRead: async () => {
     if (get().unreadCount === 0) return;
