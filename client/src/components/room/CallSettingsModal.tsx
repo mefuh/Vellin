@@ -347,7 +347,7 @@ function PeerVolumeRow({
   const pct = Math.round(volume * 100);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <Avatar name={username} seed={avatarSeed} size={32} />
+      <Avatar name={username} seed={avatarSeed} src={participant?.avatarUrl ?? null} size={32} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{

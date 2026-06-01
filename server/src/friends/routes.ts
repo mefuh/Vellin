@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type {
   BlockFriendResponse,
+  DismissNotificationResponse,
   GetPublicProfileResponse,
   InviteFriendResponse,
   ListFriendRequestsResponse,
@@ -30,6 +31,7 @@ import {
   sendRequest,
   unblockUser,
 } from './service.js';
+import { removeNotificationById } from '../realtime/notify.js';
 
 const sendRequestSchema = z
   .object({
@@ -146,5 +148,13 @@ export async function friendRoutes(app: FastifyInstance): Promise<void> {
     const body = markReadSchema.parse(req.body ?? {});
     const unreadCount = await markNotificationsRead(p.userId, body.ids);
     reply.send({ unreadCount } satisfies MarkNotificationsReadResponse);
+  });
+
+  // Удалить одно уведомление (напр. приглашение в комнату после перехода).
+  app.delete<{ Params: { id: string } }>('/notifications/:id', async (req, reply) => {
+    const p = requireUser(req, reply);
+    if (!p) return;
+    const unreadCount = await removeNotificationById(p.userId, req.params.id);
+    reply.send({ unreadCount } satisfies DismissNotificationResponse);
   });
 }

@@ -27,6 +27,7 @@ export function NotificationsBell() {
   const togglePanel = useNotificationsStore((s) => s.togglePanel);
   const closePanel = useNotificationsStore((s) => s.closePanel);
   const markAllRead = useNotificationsStore((s) => s.markAllRead);
+  const dismiss = useNotificationsStore((s) => s.dismiss);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Открытие панели гасит непрочитанные.
@@ -53,6 +54,8 @@ export function NotificationsBell() {
   const goRoom = (n: AppNotification): void => {
     if (!n.data.roomSlug) return;
     closePanel();
+    // Приглашение использовано — убираем уведомление, чтобы не висело.
+    void dismiss(n.id);
     navigate(`/room/${n.data.roomSlug}`);
   };
 
@@ -179,6 +182,26 @@ export function NotificationsBell() {
                 </div>
               )}
             </div>
+            <button
+              onClick={() => void dismiss(n.id)}
+              title="Убрать уведомление"
+              aria-label="Убрать уведомление"
+              style={{
+                flexShrink: 0,
+                alignSelf: 'flex-start',
+                display: 'grid',
+                placeItems: 'center',
+                width: 24,
+                height: 24,
+                borderRadius: 'var(--r-sm)',
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--text-3)',
+                cursor: 'pointer',
+              }}
+            >
+              <Icon name="close" size={14} />
+            </button>
           </div>
         ))}
       </div>

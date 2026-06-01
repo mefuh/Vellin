@@ -39,11 +39,12 @@ export function Register() {
       }
     >
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <Field label="Имя пользователя" value={username} onChange={setUsername} placeholder="vellin_fan" autoComplete="username" />
-        <Field label="Email" type="email" value={email} onChange={setEmail} placeholder="you@example.com" autoComplete="email" />
+        <Field label="Имя пользователя" name="username" value={username} onChange={setUsername} placeholder="vellin_fan" autoComplete="username" />
+        <Field label="Email" type="email" name="email" value={email} onChange={setEmail} placeholder="you@example.com" autoComplete="email" />
         <Field
           label="Пароль (от 8 символов)"
           type="password"
+          name="new-password"
           value={password}
           onChange={setPassword}
           placeholder="••••••••"

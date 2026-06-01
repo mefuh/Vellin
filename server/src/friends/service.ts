@@ -9,7 +9,7 @@ import type {
 } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 import { userHub } from '../realtime/UserHub.js';
-import { createAndPush, pushFriendsChanged } from '../realtime/notify.js';
+import { createAndPush, pushFriendsChanged, removeNotifications } from '../realtime/notify.js';
 import { PUBLIC_USER_SELECT, toAppNotifications, toPublicUser } from './mappers.js';
 
 /** Бизнес-ошибка с HTTP-кодом — глобальный errorHandler форматирует по statusCode. */
@@ -172,6 +172,9 @@ export async function sendRequest(
       data: { status: 'accepted', respondedAt: new Date() },
     });
     await createAndPush(existing.requesterId, 'friend_accepted', requesterId, {});
+    // Встречную заявку (она у нас, отправителя) приняли самим фактом отправки —
+    // убираем её уведомление «… хочет добавить вас в друзья».
+    await removeNotifications(requesterId, { type: 'friend_request', actorId: existing.requesterId });
     pushFriendsChanged(existing.requesterId);
     pushFriendsChanged(requesterId);
     return {
@@ -217,11 +220,14 @@ export async function respondRequest(
       data: { status: 'accepted', respondedAt: new Date() },
     });
     await createAndPush(fr.requesterId, 'friend_accepted', userId, {});
+    // Заявка отыграна — убираем уведомление «… хочет добавить вас в друзья».
+    await removeNotifications(userId, { type: 'friend_request', actorId: fr.requesterId });
     pushFriendsChanged(fr.requesterId);
     pushFriendsChanged(userId);
     return 'accepted';
   }
   await prisma.friendship.delete({ where: { id: fr.id } });
+  await removeNotifications(userId, { type: 'friend_request', actorId: fr.requesterId });
   pushFriendsChanged(fr.requesterId);
   pushFriendsChanged(userId);
   return 'declined';
@@ -231,6 +237,11 @@ export async function removeFriend(userId: string, otherId: string): Promise<voi
   const fr = await findFriendship(userId, otherId);
   if (!fr) throw new FriendError(404, 'Дружба не найдена');
   await prisma.friendship.delete({ where: { id: fr.id } });
+  // Отмена ещё не принятой заявки — у адресата висит «… хочет добавить вас в
+  // друзья», убираем его.
+  if (fr.status === 'pending') {
+    await removeNotifications(fr.addresseeId, { type: 'friend_request', actorId: fr.requesterId });
+  }
   pushFriendsChanged(userId);
   pushFriendsChanged(otherId);
 }
@@ -254,6 +265,9 @@ export async function blockUser(userId: string, otherId: string): Promise<void> 
       },
     }),
   ]);
+  // Блок рвёт заявки в обе стороны — чистим связанные friend_request-уведомления.
+  await removeNotifications(otherId, { type: 'friend_request', actorId: userId });
+  await removeNotifications(userId, { type: 'friend_request', actorId: otherId });
   pushFriendsChanged(userId);
   pushFriendsChanged(otherId);
 }

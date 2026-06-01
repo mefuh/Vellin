@@ -22,6 +22,17 @@ function ProtectedRoute({ children }: { children: React.ReactElement }) {
   return children;
 }
 
+/**
+ * Страницы, бесполезные для уже вошедших (лендинг, гостевой вход): любой
+ * пользователь с активной сессией — включая гостя — отправляется в библиотеку.
+ * Для авторизованных главная страница и есть библиотека.
+ */
+function PublicOnlyRoute({ children }: { children: React.ReactElement }) {
+  const token = useAuthStore((s) => s.token);
+  if (token) return <Navigate to="/library" replace />;
+  return children;
+}
+
 function AdminProtectedRoute({ children }: { children: React.ReactElement }) {
   const token = useAuthStore((s) => s.token);
   const user = useAuthStore((s) => s.user);
@@ -34,10 +45,24 @@ export function App() {
   return (
     <RealtimeProvider>
       <Routes>
-        <Route path="/" element={<Landing />} />
+        <Route
+          path="/"
+          element={
+            <PublicOnlyRoute>
+              <Landing />
+            </PublicOnlyRoute>
+          }
+        />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/guest" element={<Guest />} />
+        <Route
+          path="/guest"
+          element={
+            <PublicOnlyRoute>
+              <Guest />
+            </PublicOnlyRoute>
+          }
+        />
         <Route
           path="/library"
           element={

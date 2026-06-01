@@ -53,9 +53,27 @@ export function AppHeader({ active }: { active?: DockPage }) {
         borderBottom: '1px solid var(--line-1)',
       }}
     >
-      <Link to="/">
-        <VellinLogo />
-      </Link>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Link to="/">
+          <VellinLogo />
+        </Link>
+        <span
+          title={`Версия ${__APP_VERSION__}`}
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'var(--text-2)',
+            border: '1px solid var(--line-2)',
+            borderRadius: 999,
+            padding: '2px 8px',
+            letterSpacing: '0.02em',
+            lineHeight: 1.4,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          v{__APP_VERSION__}
+        </span>
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 6 : 8 }}>
         {user?.kind === 'guest' && (
           <span style={{ color: 'var(--text-2)', fontSize: 13 }}>

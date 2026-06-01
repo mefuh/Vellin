@@ -269,7 +269,7 @@ export function Room() {
                 {room.name}
               </h1>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-2)' }}>
-                vellin.app/r/{room.slug}
+                {window.location.host}/room/{room.slug}
               </span>
             </div>
             <Chip tone={room.isPrivate ? 'neutral' : 'success'} icon={room.isPrivate ? 'lock' : 'globe'}>

@@ -142,6 +142,7 @@ export function FullscreenCallOverlay({ expanded }: FullscreenCallOverlayProps) 
               userId={m.userId}
               username={p?.username ?? m.userId.slice(0, 6)}
               avatarSeed={p?.avatarSeed ?? m.userId}
+              avatarUrl={p?.avatarUrl ?? null}
               member={m}
               stream={isMe ? myStream : remoteStreams.get(m.userId) ?? null}
               speaking={speaking.has(m.userId)}
@@ -196,6 +197,7 @@ export function FullscreenCallOverlay({ expanded }: FullscreenCallOverlayProps) 
                 <Avatar
                   name={p?.username ?? m.userId}
                   seed={p?.avatarSeed ?? m.userId}
+                  src={p?.avatarUrl ?? null}
                   size={bubbleAvatarPx}
                 />
               </div>

@@ -38,3 +38,36 @@ export async function createAndPush(
 export function pushFriendsChanged(userId: string): void {
   userHub.pushTo(userId, { t: 'friends_changed' });
 }
+
+/**
+ * Удалить уведомления получателя по фильтру (тип/актор) и сообщить клиенту,
+ * чтобы они мгновенно пропали из белла. Вызывается, когда действие отыграно:
+ * заявку в друзья приняли/отклонили/отменили и т.п. — иначе уведомления
+ * копятся (особенно при повторных заявках после отклонения).
+ */
+export async function removeNotifications(
+  recipientId: string,
+  filter: { type?: NotificationType; actorId?: string },
+): Promise<void> {
+  const rows = await prisma.notification.findMany({
+    where: { userId: recipientId, ...filter },
+    select: { id: true },
+  });
+  if (rows.length === 0) return;
+  const ids = rows.map((r) => r.id);
+  await prisma.notification.deleteMany({ where: { id: { in: ids } } });
+  const unreadCount = await prisma.notification.count({
+    where: { userId: recipientId, readAt: null },
+  });
+  userHub.pushTo(recipientId, { t: 'notifications_removed', ids, unreadCount });
+}
+
+/**
+ * Удалить одно уведомление получателя по id (только своё). Возвращает свежий
+ * unreadCount. Live-сигнал клиенту не шлём: вызывающий (тот же пользователь)
+ * убирает его локально, а на других сессиях подхватится при следующем снапшоте.
+ */
+export async function removeNotificationById(recipientId: string, id: string): Promise<number> {
+  await prisma.notification.deleteMany({ where: { id, userId: recipientId } });
+  return prisma.notification.count({ where: { userId: recipientId, readAt: null } });
+}
