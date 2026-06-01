@@ -58,14 +58,16 @@ export function Login() {
         <Field
           label="Email"
           type="email"
+          name="email"
           value={email}
           onChange={setEmail}
           placeholder="you@example.com"
-          autoComplete="email"
+          autoComplete="username"
         />
         <Field
           label="Пароль"
           type="password"
+          name="password"
           value={password}
           onChange={setPassword}
           placeholder="••••••••"

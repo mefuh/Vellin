@@ -103,6 +103,11 @@ interface FieldProps {
   placeholder?: string;
   autoComplete?: string;
   minLength?: number;
+  /**
+   * Имя поля. Нужно браузерам/менеджерам паролей: без `name`/`id` Chrome и
+   * Safari не предлагают сохранённые email/пароль. `id` дублирует `name`.
+   */
+  name?: string;
 }
 
 export function Field({
@@ -113,6 +118,7 @@ export function Field({
   placeholder,
   autoComplete,
   minLength,
+  name,
 }: FieldProps) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -121,6 +127,8 @@ export function Field({
       </span>
       <input
         type={type}
+        name={name}
+        id={name}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
