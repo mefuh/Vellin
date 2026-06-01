@@ -157,7 +157,28 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       );
       await ensureRoomRuntime(room);
       const env = loadEnv();
-      const wsTicket = signWsTicket(app, room.id, principal, env.WS_TICKET_TTL_SEC);
+      // Принципал из session-JWT может нести устаревшие username/avatarSeed/
+      // avatarUrl: токен подписывается при логине и НЕ перевыпускается при смене
+      // профиля на другом устройстве (а /auth/me обновляет только user, не токен).
+      // В комнате участники рисуются по данным тикета, поэтому подтягиваем свежий
+      // профиль из БД — иначе у людей со старыми токенами вместо аватарок висят
+      // старые градиенты.
+      let ticketPrincipal = principal;
+      if (principal.kind === 'user') {
+        const fresh = await prisma.user.findUnique({
+          where: { id: principal.userId },
+          select: { username: true, avatarSeed: true, avatarUrl: true },
+        });
+        if (fresh) {
+          ticketPrincipal = {
+            ...principal,
+            username: fresh.username,
+            avatarSeed: fresh.avatarSeed,
+            avatarUrl: fresh.avatarUrl,
+          };
+        }
+      }
+      const wsTicket = signWsTicket(app, room.id, ticketPrincipal, env.WS_TICKET_TTL_SEC);
       reply.send({
         room: toRoomDetails(room),
         wsTicket,
