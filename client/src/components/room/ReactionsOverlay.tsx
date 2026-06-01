@@ -2,6 +2,19 @@ import { useMemo } from 'react';
 import { useRoomStore } from '../../stores/roomStore';
 
 /**
+ * Стабильный беззнаковый хеш строки → горизонтальная позиция реакции.
+ * Раньше позиция считалась как `20 + ((createdAt >> 4) % 60)`, но `>>` приводит
+ * ms-таймстамп (~1.78e12) к 32-битному ЗНАКОВОМУ int — примерно половину
+ * каждого ~49-дневного цикла он отрицательный, тогда `% 60` тоже отрицателен и
+ * реакции «уезжают» влево/за экран. Хеш id всегда положительный и стабилен.
+ */
+function spreadX(seed: string): number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (Math.imul(h, 31) + seed.charCodeAt(i)) >>> 0;
+  return 12 + (h % 72); // 12..83% ширины
+}
+
+/**
  * Flying-emoji layer. Rendered *inside* the player element so it survives the
  * Fullscreen API — an overlay placed outside the fullscreen element would be
  * hidden behind the top-layer and reactions would never show in fullscreen.
@@ -13,7 +26,7 @@ export function ReactionsOverlay() {
     () =>
       reactions.map((r) => ({
         ...r,
-        x: 20 + ((r.createdAt >> 4) % 60),
+        x: spreadX(r.id),
       })),
     [reactions],
   );
