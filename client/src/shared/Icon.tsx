@@ -12,7 +12,8 @@ export type IconName =
   | 'headphones' | 'speaker' | 'grid' | 'list' | 'filter' | 'sort'
   | 'arrowDown' | 'flame' | 'waveform' | 'refresh' | 'hash'
   | 'userMinus' | 'userPlus' | 'gripVertical'
-  | 'video' | 'videoOff' | 'phone' | 'phoneOff' | 'logout';
+  | 'video' | 'videoOff' | 'phone' | 'phoneOff' | 'logout'
+  | 'cake' | 'mapPin';
 
 interface IconProps {
   name: IconName;
@@ -284,6 +285,21 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
       <path d="M16 17l5-5-5-5" />
       <path d="M21 12H9" />
+    </>
+  ),
+  cake: (
+    <>
+      <path d="M4 21v-7a2 2 0 012-2h12a2 2 0 012 2v7" />
+      <path d="M3 21h18" />
+      <path d="M4 15c1.3 0 1.3 1.2 2.7 1.2S8 15 9.3 15s1.4 1.2 2.7 1.2S13.3 15 14.6 15s1.4 1.2 2.7 1.2S18.7 15 20 15" />
+      <path d="M12 12V8" />
+      <circle cx="12" cy="6" r="1.2" />
+    </>
+  ),
+  mapPin: (
+    <>
+      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0116 0z" />
+      <circle cx="12" cy="10" r="2.6" />
     </>
   ),
 };

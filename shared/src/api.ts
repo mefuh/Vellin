@@ -5,6 +5,7 @@ import type {
   DeviceSession,
   FriendRequest,
   FriendUser,
+  Gender,
   ParticipantInfo,
   PublicProfile,
   RoomDetails,
@@ -47,6 +48,12 @@ export interface MeResponse {
 export interface UpdateProfileRequest {
   username?: string;
   bio?: string | null;
+  /** Пол: значение — установить, `null` — очистить, не передавать — не менять. */
+  gender?: Gender | null;
+  /** Дата рождения `YYYY-MM-DD`: значение — установить, `null` — очистить. */
+  birthDate?: string | null;
+  /** Город: значение — установить, `null`/пусто — очистить. */
+  city?: string | null;
   /**
    * Управление аватаром-градиентом:
    * - строка — установить конкретный seed (перегенерация),

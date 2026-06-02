@@ -1,5 +1,8 @@
 export type UserKind = 'user' | 'guest';
 
+/** Пол пользователя для профиля. Хранится опционально (может быть null). */
+export type Gender = 'male' | 'female' | 'other';
+
 export interface PublicUser {
   id: string;
   username: string;
@@ -16,6 +19,12 @@ export interface AuthUser extends PublicUser {
   email: string | null;
   /** Произвольный текст «О себе». Null — не задан. */
   bio: string | null;
+  /** Пол. Null — не указан. */
+  gender: Gender | null;
+  /** Дата рождения в формате `YYYY-MM-DD`. Null — не указана. */
+  birthDate: string | null;
+  /** Город. Null — не указан. */
+  city: string | null;
   createdAt: string;
   /** True only for the single user whose email matches ADMIN_EMAIL on the server. */
   isAdmin: boolean;
@@ -286,6 +295,12 @@ export type Relationship = 'none' | 'friends' | 'incoming' | 'outgoing' | 'block
 /** Публичный профиль пользователя для страницы `/u/:username`. */
 export interface PublicProfile extends PublicUser {
   bio: string | null;
+  /** Пол. Null — не указан. */
+  gender: Gender | null;
+  /** Дата рождения в формате `YYYY-MM-DD`. Null — не указана. */
+  birthDate: string | null;
+  /** Город. Null — не указан. */
+  city: string | null;
   createdAt: string;
   online: boolean;
   currentRoom: RoomRef | null;

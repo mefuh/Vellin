@@ -5,6 +5,7 @@ import type {
   AuthUser,
   ChangeEmailRequest,
   ChangePasswordRequest,
+  Gender,
   GuestRequest,
   ListSessionsResponse,
   LoginRequest,
@@ -60,9 +61,22 @@ const usernameSchema = z
   .max(32)
   .regex(/^[a-zA-Z0-9_\-.]+$/u, 'username may contain letters, digits, _ - .');
 
+const birthDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/u, 'дата должна быть в формате YYYY-MM-DD')
+  .refine((s) => {
+    const d = new Date(`${s}T00:00:00.000Z`);
+    if (Number.isNaN(d.getTime())) return false;
+    const year = d.getUTCFullYear();
+    return year >= 1900 && d.getTime() <= Date.now();
+  }, 'некорректная дата рождения');
+
 const updateProfileSchema = z.object({
   username: usernameSchema.optional(),
   bio: z.string().max(300).nullable().optional(),
+  gender: z.enum(['male', 'female', 'other']).nullable().optional(),
+  birthDate: birthDateSchema.nullable().optional(),
+  city: z.string().max(80).nullable().optional(),
   avatarSeed: z.string().max(64).nullable().optional(),
 }) satisfies z.ZodType<UpdateProfileRequest>;
 
@@ -83,6 +97,9 @@ interface DbUserCore {
   avatarSeed: string;
   avatarUrl: string | null;
   bio: string | null;
+  gender: string | null;
+  birthDate: Date | null;
+  city: string | null;
   createdAt: Date;
 }
 
@@ -94,6 +111,9 @@ function toAuthUser(u: DbUserCore): AuthUser {
     avatarSeed: u.avatarSeed,
     avatarUrl: u.avatarUrl,
     bio: u.bio,
+    gender: (u.gender as Gender | null) ?? null,
+    birthDate: u.birthDate ? u.birthDate.toISOString().slice(0, 10) : null,
+    city: u.city ?? null,
     kind: 'user',
     createdAt: u.createdAt.toISOString(),
     isAdmin: isAdminEmail(u.email),
@@ -211,6 +231,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         avatarSeed,
         avatarUrl: null,
         bio: null,
+        gender: null,
+        birthDate: null,
+        city: null,
         kind: 'guest',
         createdAt: new Date().toISOString(),
         isAdmin: false,
@@ -229,6 +252,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         avatarSeed: principal.avatarSeed,
         avatarUrl: null,
         bio: null,
+        gender: null,
+        birthDate: null,
+        city: null,
         kind: 'guest',
         createdAt: new Date(0).toISOString(),
         isAdmin: false,
@@ -261,6 +287,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const data: {
       username?: string;
       bio?: string | null;
+      gender?: string | null;
+      birthDate?: Date | null;
+      city?: string | null;
       avatarSeed?: string;
       avatarUrl?: null;
     } = {};
@@ -279,6 +308,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (body.bio !== undefined) {
       const trimmed = body.bio?.trim() ?? '';
       data.bio = trimmed.length > 0 ? trimmed : null;
+    }
+    if (body.gender !== undefined) {
+      data.gender = body.gender ?? null;
+    }
+    if (body.birthDate !== undefined) {
+      data.birthDate = body.birthDate ? new Date(`${body.birthDate}T00:00:00.000Z`) : null;
+    }
+    if (body.city !== undefined) {
+      const trimmed = body.city?.trim() ?? '';
+      data.city = trimmed.length > 0 ? trimmed : null;
     }
     // avatarSeed присутствует в body → сброс на градиент: новый/указанный seed
     // и очистка загруженной картинки (с удалением файла).

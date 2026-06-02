@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import type { PublicProfile as PublicProfileDTO } from '@vellin/shared';
-import { Avatar, Button, Icon } from '../shared';
+import { Avatar, Button, Icon, type IconName } from '../shared';
 import { useAuthStore } from '../stores/authStore';
 import { useFriendsStore } from '../stores/friendsStore';
 import { useIsMobile } from '../hooks/useMediaQuery';
@@ -9,6 +9,31 @@ import { usersApi } from '../api/users';
 import { friendsApi } from '../api/friends';
 import { ApiHttpError } from '../api/client';
 import { AppHeader } from '../components/AppHeader';
+
+const GENDER_LABEL: Record<string, string> = { male: 'Мужской', female: 'Женский', other: 'Другой' };
+const MONTHS_GEN = [
+  'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+];
+
+/** `YYYY-MM-DD` → «15 мая 2000 г.» без сдвига часового пояса. */
+function formatBirthDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d || m < 1 || m > 12) return iso;
+  return `${d} ${MONTHS_GEN[m - 1]} ${y} г.`;
+}
+
+function InfoRow({ icon, label, value }: { icon: IconName; label: string; value: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14 }}>
+      <span style={{ color: 'var(--text-3)', display: 'grid', placeItems: 'center' }}>
+        <Icon name={icon} size={16} />
+      </span>
+      <span style={{ color: 'var(--text-3)', minWidth: 124 }}>{label}</span>
+      <span style={{ color: 'var(--text-1)' }}>{value}</span>
+    </div>
+  );
+}
 
 export function PublicProfile() {
   const { username = '' } = useParams();
@@ -107,6 +132,27 @@ export function PublicProfile() {
           {profile.bio ?? 'Пользователь ничего о себе не написал.'}
         </p>
       </section>
+      {(profile.gender || profile.birthDate || profile.city) && (
+        <section
+          style={{
+            padding: 24,
+            background: 'var(--bg-1)',
+            border: '1px solid var(--line-1)',
+            borderRadius: 'var(--r-lg)',
+          }}
+        >
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 14 }}>Информация</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {profile.gender && (
+              <InfoRow icon="user" label="Пол" value={GENDER_LABEL[profile.gender] ?? profile.gender} />
+            )}
+            {profile.birthDate && (
+              <InfoRow icon="cake" label="Дата рождения" value={formatBirthDate(profile.birthDate)} />
+            )}
+            {profile.city && <InfoRow icon="mapPin" label="Город" value={profile.city} />}
+          </div>
+        </section>
+      )}
       <section
         style={{
           padding: 24,

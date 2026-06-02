@@ -4,6 +4,7 @@ import type {
   FriendPresence,
   FriendRequest,
   FriendUser,
+  Gender,
   PublicProfile,
   Relationship,
 } from '@vellin/shared';
@@ -26,8 +27,24 @@ export class FriendError extends Error {
 const PROFILE_SELECT = {
   ...PUBLIC_USER_SELECT,
   bio: true,
+  gender: true,
+  birthDate: true,
+  city: true,
   createdAt: true,
 } as const;
+
+/** Общие профильные поля (пол/дата рождения/город) для DTO `PublicProfile`. */
+function profileExtras(u: { gender: string | null; birthDate: Date | null; city: string | null }): {
+  gender: Gender | null;
+  birthDate: string | null;
+  city: string | null;
+} {
+  return {
+    gender: (u.gender as Gender | null) ?? null,
+    birthDate: u.birthDate ? u.birthDate.toISOString().slice(0, 10) : null,
+    city: u.city ?? null,
+  };
+}
 
 // ── Внутренние помощники ────────────────────────────────────────────────
 
@@ -324,6 +341,7 @@ export async function searchUsers(viewerId: string, q: string): Promise<PublicPr
     return {
       ...toPublicUser(c),
       bio: c.bio ?? null,
+      ...profileExtras(c),
       createdAt: c.createdAt.toISOString(),
       online: presence.online,
       currentRoom: presence.currentRoom,
@@ -347,6 +365,7 @@ export async function getPublicProfile(viewerId: string, username: string): Prom
     return {
       ...toPublicUser(user),
       bio: user.bio ?? null,
+      ...profileExtras(user),
       createdAt: user.createdAt.toISOString(),
       online: presence.online,
       currentRoom: presence.currentRoom,
@@ -358,6 +377,7 @@ export async function getPublicProfile(viewerId: string, username: string): Prom
   return {
     ...toPublicUser(user),
     bio: user.bio ?? null,
+    ...profileExtras(user),
     createdAt: user.createdAt.toISOString(),
     online: presence.online,
     currentRoom: presence.currentRoom,
