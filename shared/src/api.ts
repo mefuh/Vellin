@@ -5,6 +5,7 @@ import type {
   DeviceSession,
   FriendRequest,
   FriendUser,
+  Gender,
   ParticipantInfo,
   PublicProfile,
   RoomDetails,
@@ -47,6 +48,12 @@ export interface MeResponse {
 export interface UpdateProfileRequest {
   username?: string;
   bio?: string | null;
+  /** Пол: значение — установить, `null` — очистить, не передавать — не менять. */
+  gender?: Gender | null;
+  /** Дата рождения `YYYY-MM-DD`: значение — установить, `null` — очистить. */
+  birthDate?: string | null;
+  /** Город: значение — установить, `null`/пусто — очистить. */
+  city?: string | null;
   /**
    * Управление аватаром-градиентом:
    * - строка — установить конкретный seed (перегенерация),
@@ -199,6 +206,16 @@ export interface DismissNotificationResponse {
 // ── Realtime (пользовательский WS-канал) ─────────────────────────────────
 export interface RealtimeTicketResponse {
   ticket: string;
+}
+
+// ── Геосправочник (города) ───────────────────────────────────────────────
+export interface SearchCitiesResponse {
+  /**
+   * Готовые подписи вида «Moscow, Россия» — клиент показывает их в выпадающем
+   * списке и сохраняет выбранную строкой в поле города. Сервер при сохранении
+   * профиля проверяет, что значение принадлежит этому справочнику.
+   */
+  cities: string[];
 }
 
 // ── Members ─────────────────────────────────────────────────────────────

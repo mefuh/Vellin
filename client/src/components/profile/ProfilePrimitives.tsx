@@ -44,14 +44,14 @@ export function Card({
   );
 }
 
-const labelStyle: CSSProperties = {
+export const labelStyle: CSSProperties = {
   fontSize: 12,
   color: 'var(--text-2)',
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
 };
 
-const inputStyle: CSSProperties = {
+export const inputStyle: CSSProperties = {
   height: 44,
   padding: '0 14px',
   borderRadius: 'var(--r-md)',
@@ -73,6 +73,8 @@ export function LabeledInput({
   placeholder,
   autoComplete,
   disabled,
+  maxLength,
+  style,
 }: {
   label: string;
   type?: string;
@@ -81,6 +83,8 @@ export function LabeledInput({
   placeholder?: string;
   autoComplete?: string;
   disabled?: boolean;
+  maxLength?: number;
+  style?: CSSProperties;
 }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -92,8 +96,42 @@ export function LabeledInput({
         placeholder={placeholder}
         autoComplete={autoComplete}
         disabled={disabled}
-        style={{ ...inputStyle, opacity: disabled ? 0.6 : 1 }}
+        maxLength={maxLength}
+        style={{ ...inputStyle, opacity: disabled ? 0.6 : 1, ...style }}
       />
+    </label>
+  );
+}
+
+/** Выпадающий список с подписью — стиль совпадает с LabeledInput. */
+export function LabeledSelect({
+  label,
+  value,
+  onChange,
+  options,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  disabled?: boolean;
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={labelStyle}>{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        style={{ ...inputStyle, cursor: 'pointer', colorScheme: 'dark', opacity: disabled ? 0.6 : 1 }}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }

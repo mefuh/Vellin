@@ -18,6 +18,12 @@ model User {
   avatarUrl    String?
   /// Произвольный текст «О себе».
   bio          String?
+  /// Пол: 'male' | 'female' | 'other'. Null — не указан.
+  gender       String?
+  /// Дата рождения (хранится как UTC-полночь, в API — строка YYYY-MM-DD).
+  birthDate    DateTime?
+  /// Город. Null — не указан.
+  city         String?
   createdAt    DateTime  @default(now())
 
   isBlocked    Boolean   @default(false)

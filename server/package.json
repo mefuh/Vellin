@@ -1,6 +1,6 @@
 {
   "name": "@vellin/server",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -24,6 +24,7 @@
     "@fastify/websocket": "^11.0.1",
     "@prisma/client": "^5.22.0",
     "@vellin/shared": "*",
+    "all-the-cities": "^3.1.0",
     "bcrypt": "^5.1.1",
     "fastify": "^5.1.0",
     "jimp": "^0.22.12",
