@@ -33,6 +33,9 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/shared/dist ./shared/dist
 COPY --from=build /app/shared/package.json ./shared/package.json
 COPY --from=build /app/server/dist ./server/dist
+# Оверлей русских названий городов — tsc не копирует .json, кладём рядом с
+# собранным модулем (server/src/geo/cities.ts → dist/geo/cities.js).
+COPY --from=build /app/server/src/geo/cities-ru.json ./server/dist/geo/cities-ru.json
 COPY --from=build /app/server/package.json ./server/package.json
 COPY --from=build /app/server/prisma ./server/prisma
 WORKDIR /app/server
