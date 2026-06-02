@@ -6,6 +6,7 @@ import { ApiHttpError } from '../../api/client';
 import { useAuthStore } from '../../stores/authStore';
 import { useIsNarrow } from '../../hooks/useMediaQuery';
 import { Card, LabeledInput, LabeledSelect, LabeledTextarea, StatusLine } from './ProfilePrimitives';
+import { CityAutocomplete } from './CityAutocomplete';
 
 const GENDER_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'Не указан' },
@@ -21,18 +22,27 @@ export function IdentitySection({ user }: { user: AuthUser }) {
   const [bio, setBio] = useState(user.bio ?? '');
   const [gender, setGender] = useState<string>(user.gender ?? '');
   const [birthDate, setBirthDate] = useState(user.birthDate ?? '');
-  const [city, setCity] = useState(user.city ?? '');
+  // Город: текст в поле + флаг «значение подтверждено выбором из списка».
+  // Исходное значение считаем подтверждённым (не отправляем, пока не тронут).
+  const [cityText, setCityText] = useState(user.city ?? '');
+  const [cityConfirmed, setCityConfirmed] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Разрешённое значение города: '' (очищено), сама подпись (подтверждено)
+  // или null (введён текст, но вариант не выбран → блокируем сохранение).
+  const cityResolved = cityText.trim() === '' ? '' : cityConfirmed ? cityText.trim() : null;
+  const cityBlocked = cityResolved === null;
+  const cityDirty = cityResolved !== null && cityResolved !== (user.city ?? '');
 
   const dirty =
     username.trim() !== user.username ||
     bio.trim() !== (user.bio ?? '') ||
     (gender || null) !== (user.gender ?? null) ||
     (birthDate || null) !== (user.birthDate ?? null) ||
-    city.trim() !== (user.city ?? '');
-  const valid = username.trim().length >= 2 && username.trim().length <= 32;
+    cityDirty;
+  const valid = username.trim().length >= 2 && username.trim().length <= 32 && !cityBlocked;
 
   const save = async () => {
     setError(null);
@@ -44,7 +54,7 @@ export function IdentitySection({ user }: { user: AuthUser }) {
         bio: bio.trim() !== (user.bio ?? '') ? bio.trim() : undefined,
         gender: (gender || null) !== (user.gender ?? null) ? ((gender || null) as Gender | null) : undefined,
         birthDate: (birthDate || null) !== (user.birthDate ?? null) ? birthDate || null : undefined,
-        city: city.trim() !== (user.city ?? '') ? city.trim() || null : undefined,
+        city: cityDirty ? cityResolved || null : undefined,
       });
       applyAuthUpdate(res);
       setSuccess('Сохранено');
@@ -69,13 +79,18 @@ export function IdentitySection({ user }: { user: AuthUser }) {
           style={{ colorScheme: 'dark' }}
         />
       </div>
-      <LabeledInput
-        label="Город"
-        value={city}
-        onChange={setCity}
-        placeholder="Например, Москва"
-        maxLength={80}
-        autoComplete="address-level2"
+      <CityAutocomplete
+        value={cityText}
+        confirmed={cityConfirmed}
+        onChange={(t) => {
+          setCityText(t);
+          setCityConfirmed(t.trim() === '');
+        }}
+        onSelect={(label) => {
+          setCityText(label);
+          setCityConfirmed(true);
+        }}
+        hint={cityBlocked ? 'Выберите город из списка' : null}
       />
       <LabeledTextarea label="О себе" value={bio} onChange={setBio} placeholder="Пара слов о себе" maxLength={300} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>

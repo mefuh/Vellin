@@ -25,6 +25,7 @@ import { generateAvatarSeed, generateGuestId } from '../utils/ids.js';
 import { requireAuth } from './middleware.js';
 import { isAdminEmail } from '../env.js';
 import { createSession, forgetTouch, toDeviceSession, type DbSession } from './sessions.js';
+import { isKnownCity } from '../geo/cities.js';
 import {
   ALLOWED_AVATAR_MIME,
   MAX_AVATAR_BYTES,
@@ -71,12 +72,17 @@ const birthDateSchema = z
     return year >= 1900 && d.getTime() <= Date.now();
   }, 'некорректная дата рождения');
 
+const citySchema = z
+  .string()
+  .max(120)
+  .refine((v) => v.trim().length === 0 || isKnownCity(v), 'выберите город из списка');
+
 const updateProfileSchema = z.object({
   username: usernameSchema.optional(),
   bio: z.string().max(300).nullable().optional(),
   gender: z.enum(['male', 'female', 'other']).nullable().optional(),
   birthDate: birthDateSchema.nullable().optional(),
-  city: z.string().max(80).nullable().optional(),
+  city: citySchema.nullable().optional(),
   avatarSeed: z.string().max(64).nullable().optional(),
 }) satisfies z.ZodType<UpdateProfileRequest>;
 

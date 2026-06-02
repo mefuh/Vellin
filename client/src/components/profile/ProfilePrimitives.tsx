@@ -44,14 +44,14 @@ export function Card({
   );
 }
 
-const labelStyle: CSSProperties = {
+export const labelStyle: CSSProperties = {
   fontSize: 12,
   color: 'var(--text-2)',
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
 };
 
-const inputStyle: CSSProperties = {
+export const inputStyle: CSSProperties = {
   height: 44,
   padding: '0 14px',
   borderRadius: 'var(--r-md)',

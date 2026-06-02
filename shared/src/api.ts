@@ -208,6 +208,16 @@ export interface RealtimeTicketResponse {
   ticket: string;
 }
 
+// ── Геосправочник (города) ───────────────────────────────────────────────
+export interface SearchCitiesResponse {
+  /**
+   * Готовые подписи вида «Moscow, Россия» — клиент показывает их в выпадающем
+   * списке и сохраняет выбранную строкой в поле города. Сервер при сохранении
+   * профиля проверяет, что значение принадлежит этому справочнику.
+   */
+  cities: string[];
+}
+
 // ── Members ─────────────────────────────────────────────────────────────
 export interface UpdateMemberRoleRequest {
   role: 'admin' | 'member';

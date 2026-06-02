@@ -13,6 +13,7 @@ import { authRoutes } from './auth/routes.js';
 import { roomRoutes } from './rooms/routes.js';
 import { adminRoutes } from './admin/routes.js';
 import { friendRoutes } from './friends/routes.js';
+import { geoRoutes } from './geo/routes.js';
 import { ensureUploadsDir, MAX_AVATAR_BYTES } from './auth/avatar.js';
 import { registerWebSocket } from './ws/server.js';
 import { userHub } from './realtime/UserHub.js';
@@ -99,6 +100,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(roomRoutes);
       await api.register(adminRoutes);
       await api.register(friendRoutes);
+      await api.register(geoRoutes);
     },
     { prefix: '/api' },
   );
