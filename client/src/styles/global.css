@@ -77,6 +77,18 @@ input[type='date']::-webkit-datetime-edit {
   text-align: left;
   padding: 0;
 }
+/* На iOS нативный date-input имеет собственную «интринсик»-ширину и игнорирует
+   width:100% — поле выезжало за рамки шире остальных. Сбрасываем нативный вид,
+   чтобы оно уважало ширину/box-sizing контейнера. Ограничено только iOS
+   (@supports c -webkit-touch-callout) — на десктопе так нельзя, иначе пропадёт
+   иконка календаря. Высота задаётся инлайн-стилем, поэтому не схлопнется. */
+@supports (-webkit-touch-callout: none) {
+  input[type='date'] {
+    -webkit-appearance: none;
+    appearance: none;
+    min-width: 0;
+  }
+}
 
 /* Mobile address-bar friendly height — falls back to 100vh on older browsers. */
 .h-screen {
