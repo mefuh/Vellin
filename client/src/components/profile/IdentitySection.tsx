@@ -29,11 +29,13 @@ export function IdentitySection({ user }: { user: AuthUser }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // Ошибка города показывается только после попытки сохранить, а не при вводе.
+  const [cityError, setCityError] = useState<string | null>(null);
 
   // Разрешённое значение города: '' (очищено), сама подпись (подтверждено)
-  // или null (введён текст, но вариант не выбран → блокируем сохранение).
+  // или null (введён текст, но вариант из списка не выбран).
   const cityResolved = cityText.trim() === '' ? '' : cityConfirmed ? cityText.trim() : null;
-  const cityBlocked = cityResolved === null;
+  const cityUnresolved = cityResolved === null;
   const cityDirty = cityResolved !== null && cityResolved !== (user.city ?? '');
 
   const dirty =
@@ -41,12 +43,19 @@ export function IdentitySection({ user }: { user: AuthUser }) {
     bio.trim() !== (user.bio ?? '') ||
     (gender || null) !== (user.gender ?? null) ||
     (birthDate || null) !== (user.birthDate ?? null) ||
-    cityDirty;
-  const valid = username.trim().length >= 2 && username.trim().length <= 32 && !cityBlocked;
+    cityDirty ||
+    cityUnresolved; // незавершённый ввод города тоже делает форму «грязной»
+  const valid = username.trim().length >= 2 && username.trim().length <= 32;
 
   const save = async () => {
     setError(null);
     setSuccess(null);
+    // Город введён, но вариант не выбран — подсказываем именно сейчас.
+    if (cityUnresolved) {
+      setCityError('Выберите город из списка');
+      return;
+    }
+    setCityError(null);
     setBusy(true);
     try {
       const res = await profileApi.updateProfile({
@@ -85,12 +94,14 @@ export function IdentitySection({ user }: { user: AuthUser }) {
         onChange={(t) => {
           setCityText(t);
           setCityConfirmed(t.trim() === '');
+          setCityError(null);
         }}
         onSelect={(label) => {
           setCityText(label);
           setCityConfirmed(true);
+          setCityError(null);
         }}
-        hint={cityBlocked ? 'Выберите город из списка' : null}
+        hint={cityError}
       />
       <LabeledTextarea label="О себе" value={bio} onChange={setBio} placeholder="Пара слов о себе" maxLength={300} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
