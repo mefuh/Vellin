@@ -66,6 +66,18 @@ textarea {
   outline: none;
 }
 
+/* iOS/WebKit рендерит <input type="date"> через теневой псевдоэлемент и по
+   умолчанию центрирует значение — из-за этого на iPhone поле даты выглядело
+   выровненным иначе, чем остальные поля. Прижимаем значение влево, как у
+   обычных текстовых полей (на других движках безвредно). */
+input[type='date']::-webkit-date-and-time-value {
+  text-align: left;
+}
+input[type='date']::-webkit-datetime-edit {
+  text-align: left;
+  padding: 0;
+}
+
 /* Mobile address-bar friendly height — falls back to 100vh on older browsers. */
 .h-screen {
   height: 100vh;
