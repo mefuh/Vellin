@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import type { PublicProfile as PublicProfileDTO } from '@vellin/shared';
 import { Avatar, Button, Icon, type IconName } from '../shared';
@@ -7,8 +7,10 @@ import { useFriendsStore } from '../stores/friendsStore';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { usersApi } from '../api/users';
 import { friendsApi } from '../api/friends';
+import { titlesApi } from '../api/titles';
 import { ApiHttpError } from '../api/client';
 import { AppHeader } from '../components/AppHeader';
+import { TitlePoster } from '../components/profile/TitlePoster';
 
 const GENDER_LABEL: Record<string, string> = { male: 'Мужской', female: 'Женский', other: 'Другой' };
 const MONTHS_GEN = [
@@ -46,6 +48,8 @@ export function PublicProfile() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Избранное самого зрителя — чтобы подсветить «общие любимые».
+  const [myFavIds, setMyFavIds] = useState<Set<number>>(new Set());
 
   const load = async () => {
     setLoading(true);
@@ -65,6 +69,20 @@ export function PublicProfile() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username]);
 
+  useEffect(() => {
+    if (user?.kind !== 'user') return;
+    let alive = true;
+    titlesApi
+      .getFavorites()
+      .then((r) => {
+        if (alive) setMyFavIds(new Set(r.titles.map((t) => t.kpId)));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [user?.kind]);
+
   if (user && user.kind === 'guest') return <Navigate to="/library" replace />;
   if (!user) return <Navigate to="/login" replace />;
   // Свой профиль — редирект на редактируемую версию.
@@ -81,6 +99,15 @@ export function PublicProfile() {
       setBusy(false);
     }
   };
+
+  // Полка избранного: десктоп — 5 равных колонок в одну строку; мобайл —
+  // горизонтальный скролл, чтобы постеры не были крошечными.
+  const favShelfStyle: CSSProperties = isMobile
+    ? { display: 'flex', flexWrap: 'nowrap', gap: 14, overflowX: 'auto', paddingBottom: 4 }
+    : { display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 14 };
+  const favItemStyle: CSSProperties = isMobile
+    ? { width: 104, flexShrink: 0, position: 'relative' }
+    : { position: 'relative' };
 
   const header = <AppHeader />;
 
@@ -153,6 +180,73 @@ export function PublicProfile() {
           </div>
         </section>
       )}
+      {(profile.favoriteTitles?.length ?? 0) > 0 && (
+        <section
+          style={{
+            padding: 24,
+            background: 'var(--bg-1)',
+            border: '1px solid var(--line-1)',
+            borderRadius: 'var(--r-lg)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>Любимое кино</div>
+            {(() => {
+              const shared = (profile.favoriteTitles ?? []).filter((t) => myFavIds.has(t.kpId)).length;
+              return shared > 0 ? (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: 'var(--accent-hi)',
+                    background: 'rgba(229,72,77,0.12)',
+                    padding: '3px 9px',
+                    borderRadius: 999,
+                  }}
+                >
+                  <Icon name="heart" size={12} /> {shared} общих
+                </span>
+              ) : null;
+            })()}
+          </div>
+          <div style={favShelfStyle}>
+            {(profile.favoriteTitles ?? []).map((t, i) => {
+              const shared = myFavIds.has(t.kpId);
+              return (
+                <div key={t.kpId} style={favItemStyle}>
+                  {/* Ранг #1..#5; для «общего» фильма — акцентный бейдж с сердечком. */}
+                  <div
+                    title={shared ? 'В вашем избранном тоже' : undefined}
+                    style={{
+                      position: 'absolute',
+                      top: 6,
+                      right: 6,
+                      zIndex: 2,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 3,
+                      background: shared ? 'var(--accent)' : 'rgba(0,0,0,0.74)',
+                      color: '#fff',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: '2px 6px',
+                      borderRadius: 6,
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    {shared && <Icon name="heart" size={10} />}#{i + 1}
+                  </div>
+                  <TitlePoster t={t} highlight={shared} />
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <section
         style={{
           padding: 24,
@@ -189,7 +283,9 @@ export function PublicProfile() {
   ) : (
     <div
       style={{
-        maxWidth: 1000,
+        // Шире, чтобы в «Любимое кино» помещались все 5 постеров в одну строку
+        // без скролла (правая колонка ≈ 760px > 5×112 + отступы).
+        maxWidth: 1120,
         margin: '0 auto',
         padding: '40px max(24px, 4vw) 80px',
         display: 'grid',

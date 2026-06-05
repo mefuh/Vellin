@@ -6,6 +6,7 @@ import { useIsMobile } from '../hooks/useMediaQuery';
 import { AppHeader } from '../components/AppHeader';
 import { AvatarSection } from '../components/profile/AvatarSection';
 import { IdentitySection } from '../components/profile/IdentitySection';
+import { FavoritesSection } from '../components/profile/FavoritesSection';
 import { EmailSection } from '../components/profile/EmailSection';
 import { PasswordSection } from '../components/profile/PasswordSection';
 import { DevicesSection } from '../components/profile/DevicesSection';
@@ -27,6 +28,7 @@ function renderTab(tab: TabId, user: AuthUser) {
         <>
           <AvatarSection user={user} />
           <IdentitySection user={user} />
+          <FavoritesSection />
         </>
       );
     case 'email':
@@ -74,6 +76,7 @@ export function Profile() {
           </div>
           <AvatarSection user={user} />
           <IdentitySection user={user} />
+          <FavoritesSection />
           <EmailSection user={user} />
           <PasswordSection />
           <DevicesSection />

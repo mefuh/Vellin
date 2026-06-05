@@ -40,8 +40,31 @@ model User {
   blocksMade             Block[]        @relation("Blocker")
   blockedBy              Block[]        @relation("Blocked")
   notifications          Notification[]
+  favoriteTitles         FavoriteTitle[]
 
   @@index([isBlocked])
+}
+
+/// До 5 любимых фильмов/сериалов пользователя (профиль). Снимок данных из
+/// kinopoisk.dev на момент выбора — чтобы профиль рисовался из своей БД без
+/// обращений к внешнему API. position 0..4 задаёт порядок (#1..#5).
+model FavoriteTitle {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position      Int // 0..4
+  kpId          Int // id фильма в Кинопоиске
+  type          String // 'movie' | 'tv-series' | 'cartoon' | 'anime' | ...
+  title         String
+  originalTitle String?
+  year          Int?
+  posterUrl     String?
+  ratingKp      Float?
+  ratingImdb    Float?
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, position])
+  @@index([userId])
 }
 
 /// Дружба/заявка между двумя пользователями. Одна строка на пару (в одном

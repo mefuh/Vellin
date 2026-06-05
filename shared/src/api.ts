@@ -3,6 +3,7 @@ import type {
   AppNotification,
   AuthUser,
   DeviceSession,
+  FavoriteTitle,
   FriendRequest,
   FriendUser,
   Gender,
@@ -206,6 +207,20 @@ export interface DismissNotificationResponse {
 // ── Realtime (пользовательский WS-канал) ─────────────────────────────────
 export interface RealtimeTicketResponse {
   ticket: string;
+}
+
+// ── Любимые фильмы/сериалы (kinopoisk.dev) ───────────────────────────────
+/** Результаты поиска по kinopoisk.dev для выбора в избранное. */
+export interface SearchTitlesResponse {
+  titles: FavoriteTitle[];
+}
+/** Текущее избранное пользователя (до 5, по порядку). */
+export interface FavoriteTitlesResponse {
+  titles: FavoriteTitle[];
+}
+/** Полная замена набора избранного (клиент шлёт снимки из поиска, ≤5). */
+export interface UpdateFavoriteTitlesRequest {
+  titles: FavoriteTitle[];
 }
 
 // ── Геосправочник (города) ───────────────────────────────────────────────

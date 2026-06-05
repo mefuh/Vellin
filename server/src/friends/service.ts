@@ -12,6 +12,7 @@ import { prisma } from '../db/prisma.js';
 import { userHub } from '../realtime/UserHub.js';
 import { createAndPush, pushFriendsChanged, removeNotifications } from '../realtime/notify.js';
 import { PUBLIC_USER_SELECT, toAppNotifications, toPublicUser } from './mappers.js';
+import { getFavorites } from '../titles/service.js';
 
 /** Бизнес-ошибка с HTTP-кодом — глобальный errorHandler форматирует по statusCode. */
 export class FriendError extends Error {
@@ -355,6 +356,8 @@ export async function getPublicProfile(viewerId: string, username: string): Prom
   const user = await prisma.user.findUnique({ where: { username }, select: { ...PROFILE_SELECT, isBlocked: true } });
   if (!user || user.isBlocked) throw new FriendError(404, 'Пользователь не найден');
 
+  const favoriteTitles = await getFavorites(user.id);
+
   if (user.id !== viewerId) {
     const blocks = await blockBetween(viewerId, user.id);
     // Если цель заблокировала зрителя — скрываем профиль целиком.
@@ -369,6 +372,7 @@ export async function getPublicProfile(viewerId: string, username: string): Prom
       createdAt: user.createdAt.toISOString(),
       online: presence.online,
       currentRoom: presence.currentRoom,
+      favoriteTitles,
       relationship: rel.relationship,
       friendshipId: rel.friendshipId,
     };
@@ -381,6 +385,7 @@ export async function getPublicProfile(viewerId: string, username: string): Prom
     createdAt: user.createdAt.toISOString(),
     online: presence.online,
     currentRoom: presence.currentRoom,
+    favoriteTitles,
     relationship: 'self',
     friendshipId: null,
   };
