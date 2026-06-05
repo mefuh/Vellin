@@ -51,6 +51,9 @@ services:
       TURN_SECRET: ${TURN_SECRET:-}
       TURN_URLS: ${TURN_URLS:-}
       TURN_TTL_SEC: ${TURN_TTL_SEC:-3600}
+      # Токен kinopoisk.dev для поиска фильмов/сериалов (избранное в профиле).
+      # Без него эндпоинт поиска отдаёт 503. Значение — в .env.production.
+      KINOPOISK_TOKEN: ${KINOPOISK_TOKEN:-}
     volumes:
       - uploads:/data/uploads
 
