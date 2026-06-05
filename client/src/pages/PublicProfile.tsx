@@ -43,6 +43,7 @@ export function PublicProfile() {
   const user = useAuthStore((s) => s.user);
   const isMobile = useIsMobile();
   const refreshFriends = useFriendsStore((s) => s.refresh);
+  const isSelf = user?.kind === 'user' && user.username.toLowerCase() === username.toLowerCase();
 
   const [profile, setProfile] = useState<PublicProfileDTO | null>(null);
   const [loading, setLoading] = useState(true);
@@ -85,8 +86,6 @@ export function PublicProfile() {
 
   if (user && user.kind === 'guest') return <Navigate to="/library" replace />;
   if (!user) return <Navigate to="/login" replace />;
-  // Свой профиль — редирект на редактируемую версию.
-  if (profile?.relationship === 'self') return <Navigate to="/profile" replace />;
 
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -109,9 +108,17 @@ export function PublicProfile() {
     ? { width: 104, flexShrink: 0, position: 'relative' }
     : { position: 'relative' };
 
-  const header = <AppHeader />;
+  const header = <AppHeader active={isSelf ? 'profile' : undefined} />;
 
-  const actions = profile && <ProfileActions profile={profile} busy={busy} act={act} navigate={navigate} />;
+  const actions =
+    profile &&
+    (isSelf ? (
+      <Button size="sm" variant="secondary" icon="settings" onClick={() => navigate('/profile')}>
+        Настройки профиля
+      </Button>
+    ) : (
+      <ProfileActions profile={profile} busy={busy} act={act} navigate={navigate} />
+    ));
 
   const identityCard = profile && (
     <div
@@ -192,7 +199,7 @@ export function PublicProfile() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
             <div style={{ fontSize: 15, fontWeight: 600 }}>Любимое кино</div>
             {(() => {
-              const shared = (profile.favoriteTitles ?? []).filter((t) => myFavIds.has(t.kpId)).length;
+              const shared = isSelf ? 0 : (profile.favoriteTitles ?? []).filter((t) => myFavIds.has(t.kpId)).length;
               return shared > 0 ? (
                 <span
                   style={{
@@ -214,7 +221,7 @@ export function PublicProfile() {
           </div>
           <div style={favShelfStyle}>
             {(profile.favoriteTitles ?? []).map((t, i) => {
-              const shared = myFavIds.has(t.kpId);
+              const shared = !isSelf && myFavIds.has(t.kpId);
               return (
                 <div key={t.kpId} style={favItemStyle}>
                   {/* Ранг #1..#5; для «общего» фильма — акцентный бейдж с сердечком. */}

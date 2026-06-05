@@ -99,9 +99,9 @@ export function AppHeader({ active }: { active?: DockPage }) {
               </Button>
             )}
             <button
-              onClick={() => navigate('/profile')}
-              title="Профиль и настройки"
-              aria-label="Профиль"
+              onClick={() => navigate(`/u/${encodeURIComponent(user.username)}`)}
+              title="Мой профиль"
+              aria-label="Мой профиль"
               style={{
                 display: 'flex',
                 alignItems: 'center',
