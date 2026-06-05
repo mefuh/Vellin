@@ -15,6 +15,28 @@ export interface PublicUser {
   kind: UserKind;
 }
 
+/**
+ * Любимый фильм/сериал в профиле — снимок данных из kinopoisk.dev на момент
+ * выбора. Одинаково используется в результатах поиска и в избранном.
+ */
+export interface FavoriteTitle {
+  /** Id в Кинопоиске. */
+  kpId: number;
+  /** Тип: 'movie' | 'tv-series' | 'cartoon' | 'anime' | ... (сырой из КП). */
+  type: string;
+  /** Русское название. */
+  title: string;
+  /** Оригинальное название. Null — совпадает/отсутствует. */
+  originalTitle: string | null;
+  year: number | null;
+  /** URL постера (CDN Кинопоиска). Null — нет постера. */
+  posterUrl: string | null;
+  /** Рейтинг Кинопоиска (0–10). Null — нет. */
+  ratingKp: number | null;
+  /** Рейтинг IMDb (0–10). Null — нет. */
+  ratingImdb: number | null;
+}
+
 export interface AuthUser extends PublicUser {
   email: string | null;
   /** Произвольный текст «О себе». Null — не задан. */
@@ -304,6 +326,11 @@ export interface PublicProfile extends PublicUser {
   createdAt: string;
   online: boolean;
   currentRoom: RoomRef | null;
+  /**
+   * До 5 любимых фильмов/сериалов (по позиции #1..#5). Заполняется только на
+   * странице профиля `/u/:username`; в результатах поиска отсутствует.
+   */
+  favoriteTitles?: FavoriteTitle[];
   relationship: Relationship;
   /** Id записи дружбы/заявки — для accept/remove. */
   friendshipId: string | null;

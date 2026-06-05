@@ -14,6 +14,7 @@ import { roomRoutes } from './rooms/routes.js';
 import { adminRoutes } from './admin/routes.js';
 import { friendRoutes } from './friends/routes.js';
 import { geoRoutes } from './geo/routes.js';
+import { titleRoutes } from './titles/routes.js';
 import { ensureUploadsDir, MAX_AVATAR_BYTES } from './auth/avatar.js';
 import { registerWebSocket } from './ws/server.js';
 import { userHub } from './realtime/UserHub.js';
@@ -89,7 +90,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.code(500).send({ error: 'InternalServerError', message: 'Internal error', statusCode: 500 });
   });
 
-  app.get('/health', async () => ({ ok: true, version: '0.10.2' }));
+  app.get('/health', async () => ({ ok: true, version: '0.11.0' }));
 
   await app.register(
     async (api) => {
@@ -101,6 +102,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(adminRoutes);
       await api.register(friendRoutes);
       await api.register(geoRoutes);
+      await api.register(titleRoutes);
     },
     { prefix: '/api' },
   );
