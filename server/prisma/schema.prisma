@@ -146,6 +146,9 @@ model Room {
   /// JSON-encoded string so the runtime can boot cold without re-resolving.
   /// Null when no video is set or for pre-resolver rooms.
   videoResolvedJson String?
+  /// JSON-encoded PlaylistItem[] — очередь плейлиста, чтобы она переживала
+  /// выход всех участников и холодный старт рантайма (не сбрасывалась в пустую).
+  playlistJson      String   @default("[]")
 
   messages    Message[]
   inviteLinks InviteLink[]

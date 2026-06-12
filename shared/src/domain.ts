@@ -160,6 +160,33 @@ export interface VideoState {
   hostUserId: string;
 }
 
+/** Один отстающий/рассинхронизированный участник (для информера синхронизации). */
+export interface SyncLaggard {
+  userId: string;
+  username: string;
+  /** Дрифт относительно общей точки, сек (положительный = отстаёт). */
+  driftSec: number;
+  buffering: boolean;
+}
+
+/**
+ * Снимок состояния синхронизации комнаты — что показывать в информере плеера.
+ * Вычисляется сервером из репортов клиентов; рассылается при смене состояния.
+ */
+export interface SyncStatus {
+  /** Есть устойчивый рассинхрон (с гистерезисом). */
+  desynced: boolean;
+  reason: 'none' | 'drift' | 'buffering';
+  laggards: SyncLaggard[];
+  /** Худший абсолютный дрифт по комнате, сек. */
+  worstDriftSec: number;
+  /** Включена ли хостом авто-синхронизация. */
+  autoSync: boolean;
+  /** Сейчас идёт «ожидание отстающих» (комната на авто-паузе). */
+  waiting: boolean;
+  serverTs: number;
+}
+
 export interface ChatMessage {
   id: string;
   roomId: string;

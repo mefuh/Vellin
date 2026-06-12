@@ -10,6 +10,7 @@ import type {
   RoomPermissions,
   RoomRole,
   RtcConfig,
+  SyncStatus,
   VideoState,
 } from '@vellin/shared';
 
@@ -27,6 +28,8 @@ interface RoomState {
   messages: ChatMessage[];
   reactions: ReactionEvent[];
   kicked: boolean;
+  /** Состояние умной синхронизации (питает информер в плеере). */
+  syncStatus: SyncStatus | null;
   /** Server-authoritative voice/video call membership in this room. */
   call: CallSnapshot;
   /** ICE servers handed to RTCPeerConnection — supplied by welcome. */
@@ -56,6 +59,7 @@ interface RoomState {
   ) => void;
   setPlaylist: (items: PlaylistItem[], historyLength: number) => void;
   setKicked: (v: boolean) => void;
+  setSyncStatus: (s: SyncStatus | null) => void;
   appendMessage: (m: ChatMessage) => void;
   appendReaction: (r: ReactionEvent) => void;
   removeReaction: (id: string) => void;
@@ -79,6 +83,7 @@ export const useRoomStore = create<RoomState>((set) => ({
   messages: [],
   reactions: [],
   kicked: false,
+  syncStatus: null,
   call: EMPTY_CALL,
   rtc: null,
   myCallState: 'idle',
@@ -97,6 +102,7 @@ export const useRoomStore = create<RoomState>((set) => ({
       messages: [],
       reactions: [],
       kicked: false,
+      syncStatus: null,
       call: EMPTY_CALL,
       rtc: null,
       myCallState: 'idle',
@@ -123,6 +129,8 @@ export const useRoomStore = create<RoomState>((set) => ({
 
   removeParticipant: (userId) =>
     set((s) => ({ participants: s.participants.filter((p) => p.userId !== userId) })),
+
+  setSyncStatus: (syncStatus) => set({ syncStatus }),
 
   applyPermissionsUpdate: (userId, role, permissions) =>
     set((s) => {

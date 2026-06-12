@@ -10,6 +10,8 @@ import type {
   RoomPermissions,
   RoomRole,
   S2C,
+  SyncLaggard,
+  SyncStatus,
   VideoState,
   VideoStatus,
 } from '@vellin/shared';
@@ -42,6 +44,20 @@ const PERSIST_INTERVAL_MS = 15000;
 const MAX_PLAYLIST_ITEMS = 100;
 const MAX_HISTORY_ITEMS = 10;
 
+// ── Умная синхронизация ────────────────────────────────────────────────
+const SYNC_EVAL_INTERVAL_MS = 2000; // как часто оцениваем рассинхрон
+const SYNC_REPORT_STALE_MS = 6000; // репорты старше — игнорируем
+const SYNC_DRIFT_THRESHOLD = 2.0; // |drift| ≥ — участник «отстаёт»
+const SYNC_DECLARE_MS = 3000; // держится столько → объявляем рассинхрон
+const SYNC_CLEAR_MS = 2000; // в синке столько → снимаем
+const SYNC_RESYNC_DRIFT = 4.0; // крупный дрифт без буфера → импульс (авто)
+const SYNC_RESYNC_COOLDOWN_MS = 5000; // не чаще одного импульса
+const SYNC_WAIT_MIN_MS = 1500; // минимум подождать перед резюмом
+const SYNC_WAIT_MAX_MS = 12000; // максимум ожидания отстающих
+const SYNC_RESUME_BUFFER_SEC = 4; // столько надо догрузить вперёд для резюма
+/** Псевдо-инициатор для системных мутаций (авто-пауза/резюм/импульс). */
+const SYNC_ACTOR = '__sync__';
+
 export interface Session {
   sessionId: string;
   principal: Principal;
@@ -73,6 +89,8 @@ interface SessionEntry {
   pendingRemovalTimer?: NodeJS.Timeout;
   /** Admin shadow-session: получает broadcast'ы, но скрыта от участников. */
   shadow?: boolean;
+  /** Последний отчёт клиента о своей позиции/буфере (для детекта рассинхрона). */
+  report?: { currentTime: number; buffering: boolean; buffered: number; atServerTs: number };
 }
 
 export interface AttachOptions {
@@ -123,7 +141,24 @@ export class RoomRuntime {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
   private persistTimer: NodeJS.Timeout | null = null;
+  private syncTimer: NodeJS.Timeout | null = null;
   private destroyed = false;
+
+  // ── Состояние умной синхронизации ─────────────────────────────────────
+  /** Авто-синхронизация (тумблер хоста). */
+  private autoSync = false;
+  /** Сейчас «ждём отстающих» (комната на авто-паузе ради буферизации). */
+  private waiting = false;
+  private waitStartedAt = 0;
+  private resumeAfterWait = false;
+  private waitLaggards: SyncLaggard[] = [];
+  /** Гистерезис: когда началось текущее «плохое»/«хорошее» состояние. */
+  private desyncSince = 0;
+  private inSyncSince = 0;
+  private desynced = false;
+  private lastResyncAt = 0;
+  /** Ключ последнего разосланного sync_status (анти-спам). */
+  private lastSyncKey = '';
 
   constructor(room: Room) {
     this.roomId = room.id;
@@ -137,6 +172,10 @@ export class RoomRuntime {
     this.status = room.videoStatus === 'playing' ? 'playing' : 'paused';
     this.anchorServerTs = Date.now();
     this.videoResolved = parseResolvedJson(room.videoResolvedJson);
+    // Восстанавливаем очередь плейлиста — она durable через playlistJson, чтобы
+    // не сбрасывалась при выходе всех участников и холодном старте рантайма.
+    const restoredPlaylist = parsePlaylistJson(room.playlistJson);
+    if (restoredPlaylist.length) this.playlist.push(...restoredPlaylist);
   }
 
   start(): void {
@@ -146,6 +185,7 @@ export class RoomRuntime {
     this.persistTimer = setInterval(() => {
       void this.persist().catch((e) => logger.error({ err: e }, 'persist failed'));
     }, PERSIST_INTERVAL_MS);
+    this.syncTimer = setInterval(() => this.evaluateSync(), SYNC_EVAL_INTERVAL_MS);
   }
 
   destroy(): void {
@@ -154,6 +194,7 @@ export class RoomRuntime {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.persistTimer) clearInterval(this.persistTimer);
+    if (this.syncTimer) clearInterval(this.syncTimer);
     for (const entry of this.participants.values()) {
       if (entry.pendingRemovalTimer) clearTimeout(entry.pendingRemovalTimer);
     }
@@ -652,6 +693,225 @@ export class RoomRuntime {
     return true;
   }
 
+  // ── Умная синхронизация ───────────────────────────────────────────────
+
+  /** Принять отчёт клиента о реальной позиции/буферизации. */
+  recordSyncReport(userId: string, currentTime: number, buffering: boolean, buffered: number): void {
+    const entry = this.participants.get(userId);
+    if (!entry || !Number.isFinite(currentTime)) return;
+    entry.report = {
+      currentTime,
+      buffering: !!buffering,
+      buffered: Number.isFinite(buffered) ? Math.max(0, buffered) : 0,
+      atServerTs: Date.now(),
+    };
+  }
+
+  /**
+   * Хост/админ: «синхронизировать всех» = откатить всех к самому отстающему
+   * (никто не пропускает контент). Если он застрял на буфере — паузим в его
+   * точке и ждём догрузки; иначе мгновенный откат-импульс.
+   */
+  syncAll(byUserId: string): void {
+    const now = Date.now();
+    if (this.status === 'playing' && !this.waiting) {
+      const laggards = this.collectLaggards(now);
+      if (laggards.some((l) => l.buffering)) {
+        this.enterWait(now, laggards);
+        this.evaluateSync(true);
+        return;
+      }
+    }
+    this.forceResyncPulse(byUserId);
+    this.evaluateSync(true);
+  }
+
+  /** Хост/админ: вкл/выкл авто-синхронизацию. */
+  setAutoSync(_byUserId: string, on: boolean): void {
+    if (this.autoSync === on) return;
+    this.autoSync = on;
+    if (!on && this.waiting) this.exitWait();
+    this.evaluateSync(true);
+  }
+
+  /**
+   * Позиция самого отстающего среди свежих репортов — цель ресинка. Откатываем
+   * всех СЮДА (а не на живую/переднюю точку), чтобы отстающий не перескакивал
+   * через непросмотренное: ушедшие вперёд отматываются назад к нему, контент не
+   * пропускает никто. Буферящий стоит на месте; играющего проецируем к now.
+   */
+  private slowestPosition(now: number): number {
+    let min = Infinity;
+    for (const entry of this.participants.values()) {
+      const r = entry.report;
+      if (!r || now - r.atServerTs > SYNC_REPORT_STALE_MS) continue;
+      const pos = r.buffering ? r.currentTime : r.currentTime + (now - r.atServerTs) / 1000;
+      if (pos < min) min = pos;
+    }
+    return Number.isFinite(min) ? Math.max(0, min) : this.effectivePosition(now);
+  }
+
+  /** Переякорить всех на позицию самого медленного (откат назад) и поднять seq. */
+  private forceResyncPulse(byUserId: string): void {
+    const now = Date.now();
+    this.positionSec = this.slowestPosition(now);
+    this.anchorServerTs = now;
+    this.lastEventSeq += 1;
+    this.lastResyncAt = now;
+    this.broadcast({
+      t: 'video_apply',
+      action: 'seek',
+      positionSec: this.positionSec,
+      anchorServerTs: this.anchorServerTs,
+      emittedServerTs: now,
+      status: this.status,
+      seq: this.lastEventSeq,
+      byUserId,
+    });
+  }
+
+  private enterWait(now: number, laggards: SyncLaggard[]): void {
+    if (this.waiting) return;
+    this.waiting = true;
+    this.waitStartedAt = now;
+    this.waitLaggards = laggards.filter((l) => l.buffering || l.driftSec <= -SYNC_DRIFT_THRESHOLD);
+    this.resumeAfterWait = this.status === 'playing';
+    if (this.status === 'playing') {
+      // Пауза в точке самого медленного: ушедшие вперёд отматываются назад к
+      // отстающему (он стоит на своём месте), затем все ждут, пока он догрузит.
+      // Так отстающий не перепрыгивает через непросмотренное.
+      this.mutate(SYNC_ACTOR, 'pause', this.slowestPosition(now), 'paused');
+    }
+  }
+
+  private exitWait(): void {
+    if (!this.waiting) return;
+    this.waiting = false;
+    this.waitLaggards = [];
+    if (this.resumeAfterWait) {
+      this.mutate(SYNC_ACTOR, 'play', this.effectivePosition(Date.now()), 'playing');
+    }
+    this.resumeAfterWait = false;
+  }
+
+  /** Достаточно ли отстающие догрузили вперёд, чтобы продолжить. */
+  private laggardsReady(now: number): boolean {
+    for (const entry of this.participants.values()) {
+      const r = entry.report;
+      if (!r || now - r.atServerTs > SYNC_REPORT_STALE_MS) continue;
+      if (r.buffering || r.buffered < SYNC_RESUME_BUFFER_SEC) return false;
+    }
+    return true;
+  }
+
+  /** Текущие отстающие (буфер или |drift|≥порог). Только пока играем. */
+  private collectLaggards(now: number): SyncLaggard[] {
+    const laggards: SyncLaggard[] = [];
+    if (this.status !== 'playing') return laggards;
+    for (const [userId, entry] of this.participants.entries()) {
+      const r = entry.report;
+      if (!r || now - r.atServerTs > SYNC_REPORT_STALE_MS) continue;
+      const drift = r.currentTime - this.effectivePosition(r.atServerTs);
+      if (r.buffering || Math.abs(drift) >= SYNC_DRIFT_THRESHOLD) {
+        laggards.push({
+          userId,
+          username: entry.session.principal.username ?? 'гость',
+          driftSec: drift,
+          buffering: r.buffering,
+        });
+      }
+    }
+    return laggards;
+  }
+
+  /** Периодическая оценка рассинхрона + авто-резолюция (умный гибрид). */
+  private evaluateSync(forceEmit = false): void {
+    const now = Date.now();
+    if (!this.videoUrl || this.participants.size === 0) {
+      this.desynced = false;
+      this.waiting = false;
+      this.desyncSince = this.inSyncSince = 0;
+      this.emitSyncStatus([], 'none', forceEmit);
+      return;
+    }
+
+    // Лаггарды считаем только пока играем (на паузе все в одной точке).
+    const laggards = this.collectLaggards(now);
+    let worst = 0;
+    let anyBuffering = false;
+    for (const l of laggards) {
+      worst = Math.max(worst, Math.abs(l.driftSec));
+      if (l.buffering) anyBuffering = true;
+    }
+
+    // Гистерезис флага `desynced`.
+    if (laggards.length > 0) {
+      this.inSyncSince = 0;
+      if (this.desyncSince === 0) this.desyncSince = now;
+    } else {
+      this.desyncSince = 0;
+      if (this.inSyncSince === 0) this.inSyncSince = now;
+    }
+    if (!this.desynced && this.desyncSince !== 0 && now - this.desyncSince >= SYNC_DECLARE_MS) {
+      this.desynced = true;
+    } else if (this.desynced && this.inSyncSince !== 0 && now - this.inSyncSince >= SYNC_CLEAR_MS) {
+      this.desynced = false;
+    }
+
+    // Прогресс ожидания идёт ВСЕГДА — в wait могли войти и вручную (sync_all),
+    // тогда комната тоже обязана сама возобновиться, когда отстающие догрузят.
+    if (this.waiting) {
+      const elapsed = now - this.waitStartedAt;
+      if (elapsed >= SYNC_WAIT_MAX_MS || (elapsed >= SYNC_WAIT_MIN_MS && this.laggardsReady(now))) {
+        this.exitWait();
+      }
+    } else if (this.autoSync && this.desynced && this.status === 'playing') {
+      // Умный гибрид. Кто-то БУФЕРИТ (застрял) → паузим всех в его точке и ждём,
+      // пока догрузит. Иначе крупный дрифт → импульс: откатываем всех к самому
+      // медленному (ушедшие вперёд отматываются назад, отстающий ничего не
+      // пропускает). Умеренный дрифт (<4с) — клиентский движок тянет скоростью.
+      if (anyBuffering) {
+        this.enterWait(now, laggards);
+      } else if (worst >= SYNC_RESYNC_DRIFT && now - this.lastResyncAt >= SYNC_RESYNC_COOLDOWN_MS) {
+        this.forceResyncPulse(SYNC_ACTOR);
+      }
+    }
+
+    const reason: SyncStatus['reason'] = this.waiting
+      ? 'buffering'
+      : this.desynced
+        ? anyBuffering
+          ? 'buffering'
+          : 'drift'
+        : 'none';
+    this.emitSyncStatus(this.waiting ? this.waitLaggards : laggards, reason, forceEmit);
+  }
+
+  /** Разослать sync_status — только при смене ключевого состояния (или force). */
+  private emitSyncStatus(laggards: SyncLaggard[], reason: SyncStatus['reason'], force: boolean): void {
+    let worst = 0;
+    for (const l of laggards) worst = Math.max(worst, Math.abs(l.driftSec));
+    const key = [
+      this.desynced ? '1' : '0',
+      this.waiting ? '1' : '0',
+      this.autoSync ? '1' : '0',
+      reason,
+      laggards.map((l) => l.userId).sort().join(','),
+    ].join('|');
+    if (!force && key === this.lastSyncKey) return;
+    this.lastSyncKey = key;
+    this.broadcast({
+      t: 'sync_status',
+      desynced: this.desynced,
+      reason,
+      laggards,
+      worstDriftSec: worst,
+      autoSync: this.autoSync,
+      waiting: this.waiting,
+      serverTs: Date.now(),
+    });
+  }
+
   /**
    * Switch the currently-playing video. If `pushPrevToHistory` is true and
    * there was a previous URL, push it into history so the "previous" button
@@ -810,6 +1070,21 @@ export class RoomRuntime {
       historyLength: this.history.length,
       serverTs: Date.now(),
     });
+    // Любое изменение очереди сразу делаем durable — чтобы плейлист не терялся,
+    // даже если комната опустеет в следующую же секунду.
+    void this.persistPlaylist();
+  }
+
+  /** Сохранить только очередь плейлиста (вызывается на каждое её изменение). */
+  private async persistPlaylist(): Promise<void> {
+    try {
+      await prisma.room.update({
+        where: { id: this.roomId },
+        data: { playlistJson: JSON.stringify(this.playlist) },
+      });
+    } catch (e) {
+      logger.error({ err: e, roomId: this.roomId }, 'persist playlist failed');
+    }
   }
 
   // ── Chat ──────────────────────────────────────────────────────────────
@@ -1048,6 +1323,7 @@ export class RoomRuntime {
         videoPositionSec: this.effectivePosition(now),
         videoStatus: this.status,
         videoUpdatedAt: new Date(now),
+        playlistJson: JSON.stringify(this.playlist),
       },
     });
   }
@@ -1063,6 +1339,24 @@ function parseResolvedJson(json: string | null): ResolvedMedia | null {
     return parsed;
   } catch {
     return null;
+  }
+}
+
+/** Распарсить сохранённую очередь плейлиста, отсеяв битые записи. */
+function parsePlaylistJson(json: string | null | undefined): PlaylistItem[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (p): p is PlaylistItem =>
+        !!p &&
+        typeof p === 'object' &&
+        typeof (p as PlaylistItem).id === 'string' &&
+        typeof (p as PlaylistItem).url === 'string',
+    );
+  } catch {
+    return [];
   }
 }
 

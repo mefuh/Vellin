@@ -10,6 +10,7 @@ import type {
   RoomPermissions,
   RoomRole,
   RtcConfig,
+  SyncStatus,
   VideoState,
   VideoStatus,
 } from './domain.js';
@@ -26,6 +27,9 @@ export type C2S =
   | C2SReaction
   | C2SPong
   | C2SSyncRequest
+  | C2SSyncReport
+  | C2SSyncAll
+  | C2SSyncConfig
   | C2SPlaylistAdd
   | C2SPlaylistRemove
   | C2SPlaylistReorder
@@ -88,6 +92,31 @@ export interface C2SPong {
 }
 export interface C2SSyncRequest {
   t: 'sync_request';
+  clientTs: number;
+}
+/**
+ * Периодический отчёт клиента о своей реальной позиции и буферизации —
+ * основа детекта рассинхрона (сервер сравнивает с авторитетной позицией).
+ */
+export interface C2SSyncReport {
+  t: 'sync_report';
+  /** Реальное `currentTime` плеера, сек. */
+  currentTime: number;
+  /** Идёт ли сейчас буферизация (затык). */
+  buffering: boolean;
+  /** Сколько секунд контента уже загружено вперёд от currentTime (для «ожидания»). */
+  buffered: number;
+  clientTs: number;
+}
+/** Хост/админ: мгновенно подтянуть всех к общей точке (импульс ресинка). */
+export interface C2SSyncAll {
+  t: 'sync_all';
+  clientTs: number;
+}
+/** Хост/админ: включить/выключить авто-синхронизацию в моменты рассинхрона. */
+export interface C2SSyncConfig {
+  t: 'sync_config';
+  autoSync: boolean;
   clientTs: number;
 }
 export interface C2SPlaylistAdd {
@@ -177,6 +206,7 @@ export type S2C =
   | S2CVideoApply
   | S2CVideoSync
   | S2CVideoSetUrl
+  | S2CSyncStatus
   | S2CReaction
   | S2CRoomStateUpdate
   | S2CPlaylistUpdate
@@ -254,6 +284,10 @@ export interface S2CVideoSetUrl {
 export interface S2CReaction {
   t: 'reaction';
   reaction: ReactionEvent;
+}
+/** Состояние синхронизации комнаты — питает информер плеера (см. SyncStatus). */
+export interface S2CSyncStatus extends SyncStatus {
+  t: 'sync_status';
 }
 export interface S2CRoomStateUpdate {
   t: 'room_state_update';

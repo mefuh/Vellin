@@ -18,6 +18,8 @@ export type LocalIntent =
 export interface VideoControllerOptions {
   getClockOffsetMs: () => number;
   onLocalIntent: (intent: LocalIntent) => void;
+  /** Идёт ли сейчас буферизация — во время неё дрифт не корректируем. */
+  isBuffering?: () => boolean;
 }
 
 /**
@@ -135,6 +137,13 @@ export class VideoController {
     target: number,
     playing: boolean,
   ): void {
+    // Во время буферизации коррекция бесполезна и провоцирует петлю «догнал →
+    // снова затык»: держим обычную скорость и ждём, пока догрузится.
+    if (this.opts.isBuffering?.()) {
+      engine.setPlaybackRate(1);
+      this.clearSoftTimer();
+      return;
+    }
     if (!playing) {
       if (Math.abs(engine.getCurrentTime() - positionSec) > HARD_BAND_SEC) {
         engine.seek(positionSec);
@@ -154,8 +163,11 @@ export class VideoController {
       this.clearSoftTimer();
       return;
     }
-    // Nudge: slow down when ahead of the room, speed up when behind it.
-    engine.setPlaybackRate(drift > 0 ? 0.94 : 1.06);
+    // Плавная пропорциональная подстройка скорости: чем больше дрифт в мягкой
+    // полосе, тем сильнее (0.85..1.15) — тише и приятнее фикс. 0.94/1.06.
+    const span = (abs - SOFT_BAND_SEC) / (HARD_BAND_SEC - SOFT_BAND_SEC); // 0..1
+    const adjust = 0.05 + Math.max(0, Math.min(1, span)) * 0.1; // 0.05..0.15
+    engine.setPlaybackRate(drift > 0 ? 1 - adjust : 1 + adjust);
     this.clearSoftTimer();
     this.softTimer = setTimeout(() => {
       this.engine?.setPlaybackRate(1);
