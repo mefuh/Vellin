@@ -177,6 +177,9 @@ export function useRoomSync(opts: UseRoomSyncOpts): RoomSyncApi {
               useRoomStore.getState().removeReaction(msg.reaction.id);
             }, 4000);
             break;
+          case 'sync_status':
+            store.setSyncStatus(msg);
+            break;
           case 'room_state_update':
             // Legacy message — host/permissions are now derived from
             // `permissions_update` and `you.role`/`you.permissions`. No-op.

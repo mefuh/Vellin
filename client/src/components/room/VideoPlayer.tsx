@@ -12,6 +12,7 @@ import { useIsMobile } from '../../hooks/useMediaQuery';
 import { FullscreenChatOverlay } from './FullscreenChatOverlay';
 import { FullscreenCallOverlay } from './FullscreenCallOverlay';
 import { ReactionsOverlay } from './ReactionsOverlay';
+import { SyncNotice } from './SyncNotice';
 
 interface VideoPlayerProps {
   video: VideoState | null;
@@ -53,6 +54,11 @@ export function VideoPlayer({
 }: VideoPlayerProps) {
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const engineRef = useRef<PlayerEngine | null>(null);
+  // Видео хоть раз реально заигрывало в этой сессии. Спасатель автоплея (большой
+  // центральный play) нужен только до первого запуска; после — блок автоплея
+  // почти всегда транзиент от программного возобновления (в т.ч. авто-синхро),
+  // который глушит muted-фоллбэк, поэтому большой оверлей не показываем.
+  const hasPlayedOnceRef = useRef(false);
 
   const [duration, setDuration] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -104,17 +110,20 @@ export function VideoPlayer({
   const videoUrlRef = useRef<string | null>(video?.url ?? null);
   const clientRef = useRef(client);
   const sendRef = useRef(send);
+  const bufferingRef = useRef(false);
   canPlayPauseRef.current = canPlayPause;
   canSeekRef.current = canSeek;
   isLeaderRef.current = isPlaylistLeader;
   videoUrlRef.current = video?.url ?? null;
   clientRef.current = client;
   sendRef.current = send;
+  bufferingRef.current = bufferingRaw;
 
   const controller = useMemo(
     () =>
       new VideoController({
         getClockOffsetMs: () => clientRef.current?.getClockOffsetMs() ?? 0,
+        isBuffering: () => bufferingRef.current,
         onLocalIntent: (intent) => {
           const allowed =
             intent.kind === 'seek' ? canSeekRef.current : canPlayPauseRef.current;
@@ -163,7 +172,14 @@ export function VideoPlayer({
     }
     engineRef.current = engine;
 
-    const offErr = engine.on('error', (e) => setEngineError(e as EngineError));
+    const offErr = engine.on('error', (e) => {
+      const err = e as EngineError;
+      // Большой play-оверлей (autoplay_blocked) показываем только пока видео ещё
+      // ни разу не играло. Иначе это возобновление (в т.ч. авто-синхронизация) —
+      // тихо отдаём muted-фоллбэку, не всплываем красной кнопкой.
+      if (err.kind === 'autoplay_blocked' && hasPlayedOnceRef.current) return;
+      setEngineError(err);
+    });
     const offReady = engine.on('ready', () => setReady(true));
     const offMutedAutoplay = engine.on('autoplay_muted', () => {
       // Engine forced mute to bypass the browser's autoplay block. Reflect it
@@ -190,7 +206,13 @@ export function VideoPlayer({
       sendRef.current({ t: 'video_ended', currentUrl: url, clientTs: Date.now() });
     });
     const offWaiting = engine.on('waiting', () => setBufferingRaw(true));
-    const offPlaying = engine.on('playing', () => setBufferingRaw(false));
+    const offPlaying = engine.on('playing', () => {
+      setBufferingRaw(false);
+      hasPlayedOnceRef.current = true;
+      // Видео реально заиграло → любой висящий блок автоплея неактуален.
+      // Фикс «оверлей не пропадает после синхронизации».
+      setEngineError((prev) => (prev?.kind === 'autoplay_blocked' ? null : prev));
+    });
 
     controller.reset();
     controller.attach(engine);
@@ -236,6 +258,37 @@ export function VideoPlayer({
     const id = window.setTimeout(() => setShowBufferSpinner(true), 200);
     return () => window.clearTimeout(id);
   }, [bufferingRaw]);
+
+  // Периодический отчёт о реальной позиции/буфере для умной синхронизации
+  // (≈2с + сразу при смене буферизации). Сервер по нему детектит рассинхрон.
+  useEffect(() => {
+    if (!video?.url) return;
+    const report = () => {
+      const eng = engineRef.current;
+      const el = videoElRef.current;
+      if (!eng || !el) return;
+      const ct = eng.getCurrentTime();
+      const cur = Number.isFinite(ct) ? ct : 0;
+      let ahead = 0;
+      const b = el.buffered;
+      for (let i = 0; i < b.length; i++) {
+        if (cur >= b.start(i) - 0.25 && cur <= b.end(i) + 0.25) {
+          ahead = Math.max(0, b.end(i) - cur);
+          break;
+        }
+      }
+      sendRef.current({
+        t: 'sync_report',
+        currentTime: cur,
+        buffering: bufferingRef.current,
+        buffered: ahead,
+        clientTs: Date.now(),
+      });
+    };
+    report();
+    const id = window.setInterval(report, 2000);
+    return () => window.clearInterval(id);
+  }, [video?.url, bufferingRaw]);
 
   // Torrent stats poller (1 Hz). Engine-specific — only runs when active.
   useEffect(() => {
@@ -450,6 +503,9 @@ export function VideoPlayer({
       {/* Reactions live inside the player element so they keep flying in
           fullscreen — an overlay outside it would be hidden by the top-layer. */}
       <ReactionsOverlay />
+
+      {/* Информер умной синхронизации (внутри плеера → виден и в фуллскрине). */}
+      <SyncNotice send={send} />
 
       {engineError && engineError.kind !== 'autoplay_blocked' && (
         <ErrorOverlay

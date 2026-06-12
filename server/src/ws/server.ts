@@ -28,6 +28,7 @@ import {
   handleVideoEnded,
 } from './handlers/playlist.js';
 import { handleReaction } from './handlers/reactions.js';
+import { handleSyncReport, handleSyncAll, handleSyncConfig } from './handlers/sync.js';
 import {
   handleCallJoin,
   handleCallLeave,
@@ -422,6 +423,19 @@ async function dispatch(msg: C2S, ctx: ConnectionContext, runtime: Awaited<Retur
 
     case 'reaction':
       handleReaction(runtime, ctx, msg);
+      return;
+
+    case 'sync_report':
+      // Горячий путь, без мьютекса — только фиксируем отчёт клиента.
+      handleSyncReport(runtime, ctx, msg);
+      return;
+
+    case 'sync_all':
+      await roomMutex.run(`video:${runtime.roomId}`, () => handleSyncAll(runtime, ctx, msg));
+      return;
+
+    case 'sync_config':
+      await roomMutex.run(`video:${runtime.roomId}`, () => handleSyncConfig(runtime, ctx, msg));
       return;
 
     case 'call_join':
