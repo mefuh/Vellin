@@ -172,6 +172,10 @@ export class RoomRuntime {
     this.status = room.videoStatus === 'playing' ? 'playing' : 'paused';
     this.anchorServerTs = Date.now();
     this.videoResolved = parseResolvedJson(room.videoResolvedJson);
+    // Восстанавливаем очередь плейлиста — она durable через playlistJson, чтобы
+    // не сбрасывалась при выходе всех участников и холодном старте рантайма.
+    const restoredPlaylist = parsePlaylistJson(room.playlistJson);
+    if (restoredPlaylist.length) this.playlist.push(...restoredPlaylist);
   }
 
   start(): void {
@@ -1066,6 +1070,21 @@ export class RoomRuntime {
       historyLength: this.history.length,
       serverTs: Date.now(),
     });
+    // Любое изменение очереди сразу делаем durable — чтобы плейлист не терялся,
+    // даже если комната опустеет в следующую же секунду.
+    void this.persistPlaylist();
+  }
+
+  /** Сохранить только очередь плейлиста (вызывается на каждое её изменение). */
+  private async persistPlaylist(): Promise<void> {
+    try {
+      await prisma.room.update({
+        where: { id: this.roomId },
+        data: { playlistJson: JSON.stringify(this.playlist) },
+      });
+    } catch (e) {
+      logger.error({ err: e, roomId: this.roomId }, 'persist playlist failed');
+    }
   }
 
   // ── Chat ──────────────────────────────────────────────────────────────
@@ -1304,6 +1323,7 @@ export class RoomRuntime {
         videoPositionSec: this.effectivePosition(now),
         videoStatus: this.status,
         videoUpdatedAt: new Date(now),
+        playlistJson: JSON.stringify(this.playlist),
       },
     });
   }
@@ -1319,6 +1339,24 @@ function parseResolvedJson(json: string | null): ResolvedMedia | null {
     return parsed;
   } catch {
     return null;
+  }
+}
+
+/** Распарсить сохранённую очередь плейлиста, отсеяв битые записи. */
+function parsePlaylistJson(json: string | null | undefined): PlaylistItem[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (p): p is PlaylistItem =>
+        !!p &&
+        typeof p === 'object' &&
+        typeof (p as PlaylistItem).id === 'string' &&
+        typeof (p as PlaylistItem).url === 'string',
+    );
+  } catch {
+    return [];
   }
 }
 
