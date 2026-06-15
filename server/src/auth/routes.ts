@@ -10,15 +10,20 @@ import type {
   ListSessionsResponse,
   LoginRequest,
   MeResponse,
+  PrivacyResponse,
   ProfileMutationResponse,
   RealtimeTicketResponse,
   RegisterRequest,
   RevokeOtherSessionsResponse,
   RevokeSessionResponse,
+  UpdatePrivacyRequest,
+  UpdatePrivacyResponse,
   UpdateProfileRequest,
   UploadAvatarResponse,
 } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
+import { parsePrivacy, serializePrivacy } from '../privacy/privacy.js';
+import { userHub } from '../realtime/UserHub.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { signSession, signUserTicket, type Principal } from './jwt.js';
 import { generateAvatarSeed, generateGuestId } from '../utils/ids.js';
@@ -95,6 +100,20 @@ const changePasswordSchema = z.object({
   currentPassword: z.string().min(1).max(128),
   newPassword: z.string().min(8).max(128),
 }) satisfies z.ZodType<ChangePasswordRequest>;
+
+const privacyRuleSchema = z.object({
+  visibility: z.enum(['everyone', 'friends', 'nobody']),
+  allow: z.array(z.string().max(64)).max(200),
+  deny: z.array(z.string().max(64)).max(200),
+});
+const updatePrivacySchema = z.object({
+  privacy: z.object({
+    online: privacyRuleSchema,
+    friends: privacyRuleSchema,
+    personalInfo: privacyRuleSchema,
+    favorites: privacyRuleSchema,
+  }),
+}) satisfies z.ZodType<UpdatePrivacyRequest>;
 
 interface DbUserCore {
   id: string;
@@ -341,6 +360,29 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const updated = await prisma.user.update({ where: { id: principal.userId }, data });
     if (oldAvatarToDelete) await deleteAvatarFile(oldAvatarToDelete);
     reply.send(issue(app, updated, principal.sid!) satisfies ProfileMutationResponse);
+  });
+
+  // ── Настройки приватности ──────────────────────────────────────────────
+  app.get('/auth/privacy', { preHandler: requireAuth }, async (req, reply) => {
+    const principal = requireUser(req, reply);
+    if (!principal) return;
+    const u = await prisma.user.findUnique({
+      where: { id: principal.userId },
+      select: { privacyJson: true },
+    });
+    reply.send({ privacy: parsePrivacy(u?.privacyJson) } satisfies PrivacyResponse);
+  });
+
+  app.patch('/auth/privacy', { preHandler: requireAuth }, async (req, reply) => {
+    const principal = requireUser(req, reply);
+    if (!principal) return;
+    const body = updatePrivacySchema.parse(req.body);
+    const json = serializePrivacy(body.privacy);
+    await prisma.user.update({ where: { id: principal.userId }, data: { privacyJson: json } });
+    // Онлайн-статус мог стать видимым/скрытым для части людей — переразошлём
+    // гейтнутый презенс, чтобы изменения применились без перезахода.
+    userHub.republishPresence(principal.userId);
+    reply.send({ privacy: parsePrivacy(json) } satisfies UpdatePrivacyResponse);
   });
 
   // ── Смена email (подтверждение текущим паролем) ────────────────────────

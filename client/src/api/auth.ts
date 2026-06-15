@@ -3,7 +3,10 @@ import type {
   GuestRequest,
   LoginRequest,
   MeResponse,
+  PrivacyResponse,
   RegisterRequest,
+  UpdatePrivacyRequest,
+  UpdatePrivacyResponse,
 } from '@vellin/shared';
 import { apiFetch } from './client';
 
@@ -15,4 +18,7 @@ export const authApi = {
   guest: (body: GuestRequest) =>
     apiFetch<AuthResponse>('/auth/guest', { method: 'POST', body }),
   me: () => apiFetch<MeResponse>('/auth/me'),
+  privacy: () => apiFetch<PrivacyResponse>('/auth/privacy'),
+  updatePrivacy: (body: UpdatePrivacyRequest) =>
+    apiFetch<UpdatePrivacyResponse>('/auth/privacy', { method: 'PATCH', body }),
 };

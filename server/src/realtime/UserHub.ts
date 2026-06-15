@@ -1,5 +1,7 @@
-import type { FriendPresence, RoomRef, UserS2C } from '@vellin/shared';
+import type { FriendPresence, PrivacyRule, RoomRef, UserS2C } from '@vellin/shared';
+import { DEFAULT_PRIVACY_RULE } from '@vellin/shared';
 import { logger } from '../utils/logger.js';
+import { canSee } from '../privacy/privacy.js';
 
 /**
  * Одно живое соединение пользовательского realtime-канала (`/ws/user`).
@@ -16,6 +18,8 @@ export interface UserConnection {
 type FriendResolver = (userId: string) => Promise<string[]>;
 /** Персистит «был в сети» в БД при уходе пользователя в офлайн. */
 type LastSeenWriter = (userId: string, at: Date) => void;
+/** Возвращает правило приватности категории «online» для пользователя. */
+type OnlinePrivacyResolver = (userId: string) => Promise<PrivacyRule>;
 
 /**
  * Глобальный реестр пользовательских соединений + live-присутствие.
@@ -38,12 +42,16 @@ class UserHub {
   private readonly librarySubs = new Set<UserConnection>();
   private friendResolver: FriendResolver | null = null;
   private lastSeenWriter: LastSeenWriter | null = null;
+  private onlinePrivacyResolver: OnlinePrivacyResolver | null = null;
 
   setFriendResolver(fn: FriendResolver): void {
     this.friendResolver = fn;
   }
   setLastSeenWriter(fn: LastSeenWriter): void {
     this.lastSeenWriter = fn;
+  }
+  setOnlinePrivacyResolver(fn: OnlinePrivacyResolver): void {
+    this.onlinePrivacyResolver = fn;
   }
 
   attach(conn: UserConnection): void {
@@ -119,8 +127,9 @@ class UserHub {
       this.watchersOf.set(targetId, set);
     }
     set.add(conn);
-    // Сразу отдать текущее состояние, чтобы подписчик синхронизировался.
-    if (conn.isOpen()) conn.send({ t: 'presence', presence: this.presenceOf(targetId) });
+    // Сразу отдать текущее состояние (с учётом приватности), чтобы подписчик
+    // синхронизировался — иначе скрытый онлайн «протёк» бы мимо REST-гейтинга.
+    void this.sendGatedPresence(conn, targetId);
   }
 
   unwatch(conn: UserConnection, targetId: string): void {
@@ -175,26 +184,82 @@ class UserHub {
     }
   }
 
+  /** Принудительно переразослать презенс (после смены настроек приватности). */
+  republishPresence(userId: string): void {
+    void this.broadcastPresence(userId);
+  }
+
+  /** Загрузить online-правило приватности (дефолт — видно всем). */
+  private async onlineRule(userId: string): Promise<PrivacyRule> {
+    if (!this.onlinePrivacyResolver) return DEFAULT_PRIVACY_RULE;
+    try {
+      return await this.onlinePrivacyResolver(userId);
+    } catch (err) {
+      logger.error({ err, userId }, 'presence: privacy resolver failed');
+      return DEFAULT_PRIVACY_RULE;
+    }
+  }
+
+  /** Презенс владельца глазами зрителя: скрытый онлайн отдаём как «офлайн». */
+  private gate(
+    ownerId: string,
+    raw: FriendPresence,
+    rule: PrivacyRule,
+    viewerId: string,
+    isFriend: boolean,
+  ): FriendPresence {
+    const visible = canSee(rule, { isSelf: viewerId === ownerId, isFriend, viewerId });
+    if (visible) return raw;
+    return { userId: ownerId, online: false, currentRoom: null, lastSeenAt: null };
+  }
+
+  /** Отдать одному подписчику текущий презенс цели с учётом приватности. */
+  private async sendGatedPresence(conn: UserConnection, targetId: string): Promise<void> {
+    if (!conn.isOpen()) return;
+    const raw = this.presenceOf(targetId);
+    const rule = await this.onlineRule(targetId);
+    let isFriend = false;
+    if (conn.userId !== targetId && this.friendResolver) {
+      try {
+        const ids = await this.friendResolver(targetId);
+        isFriend = ids.includes(conn.userId);
+      } catch {
+        /* при ошибке считаем не-другом — безопаснее скрыть */
+      }
+    }
+    if (!conn.isOpen()) return;
+    conn.send({ t: 'presence', presence: this.gate(targetId, raw, rule, conn.userId, isFriend) });
+  }
+
   /** Разослать обновлённое присутствие его онлайн-друзьям и подписчикам. */
   private async broadcastPresence(userId: string): Promise<void> {
-    const presence = this.presenceOf(userId);
-    const msg: UserS2C = { t: 'presence', presence };
+    const raw = this.presenceOf(userId);
+    const rule = await this.onlineRule(userId);
 
-    // Подписчики на профиль (открытая страница /u/:username).
+    let friendIds: string[] = [];
+    if (this.friendResolver) {
+      try {
+        friendIds = await this.friendResolver(userId);
+      } catch (err) {
+        logger.error({ err, userId }, 'presence: friend resolver failed');
+      }
+    }
+    const friendSet = new Set(friendIds);
+
+    // Друзья: видят гейтнутый презенс (isFriend = true).
+    for (const fid of friendIds) {
+      this.pushTo(fid, { t: 'presence', presence: this.gate(userId, raw, rule, fid, true) });
+    }
+
+    // Подписчики на профиль (/u/:username), не являющиеся друзьями: гейтим как
+    // посторонних. Друзей среди них уже оповестил pushTo выше — не дублируем.
     const watchers = this.watchersOf.get(userId);
     if (watchers) {
-      for (const c of watchers) if (c.isOpen()) c.send(msg);
+      for (const c of watchers) {
+        if (!c.isOpen() || friendSet.has(c.userId)) continue;
+        c.send({ t: 'presence', presence: this.gate(userId, raw, rule, c.userId, false) });
+      }
     }
-
-    if (!this.friendResolver) return;
-    let friendIds: string[];
-    try {
-      friendIds = await this.friendResolver(userId);
-    } catch (err) {
-      logger.error({ err, userId }, 'presence: friend resolver failed');
-      return;
-    }
-    for (const fid of friendIds) this.pushTo(fid, msg);
   }
 }
 

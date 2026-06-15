@@ -19,6 +19,7 @@ import { ensureUploadsDir, MAX_AVATAR_BYTES } from './auth/avatar.js';
 import { registerWebSocket } from './ws/server.js';
 import { userHub } from './realtime/UserHub.js';
 import { getAcceptedFriendIds } from './friends/service.js';
+import { parsePrivacy } from './privacy/privacy.js';
 import { logger } from './utils/logger.js';
 import { prisma } from './db/prisma.js';
 
@@ -115,6 +116,14 @@ export async function buildApp(): Promise<FastifyInstance> {
     void prisma.user
       .update({ where: { id: userId }, data: { lastSeenAt: at } })
       .catch((err: unknown) => logger.error({ err, userId }, 'lastSeen write failed'));
+  });
+  // Презенс «online/был в сети» уважает настройку приватности владельца.
+  userHub.setOnlinePrivacyResolver(async (userId) => {
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { privacyJson: true },
+    });
+    return parsePrivacy(u?.privacyJson).online;
   });
 
   await registerWebSocket(app);

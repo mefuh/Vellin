@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import type { PublicProfile as PublicProfileDTO } from '@vellin/shared';
 import { Avatar, Button, Icon, type IconName } from '../shared';
 import { useAuthStore } from '../stores/authStore';
@@ -308,6 +308,56 @@ export function PublicProfile() {
     </div>
   );
 
+  // Секция «Друзья» — на десктопе живёт в левой колонке под карточкой профиля,
+  // на мобайле добавляется в общую стопку.
+  const friendsCard = profile && profile.friends && (
+    <section
+      style={{
+        padding: 24,
+        background: 'var(--bg-1)',
+        border: '1px solid var(--line-1)',
+        borderRadius: 'var(--r-lg)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 600 }}>Друзья</div>
+        <span style={{ fontSize: 13, color: 'var(--text-3)' }}>{profile.friends.length}</span>
+      </div>
+      {profile.friends.length === 0 ? (
+        <div style={{ color: 'var(--text-3)', fontSize: 14 }}>Пока нет друзей.</div>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+          {profile.friends.slice(0, 24).map((f) => (
+            <Link
+              key={f.id}
+              to={`/u/${f.username}`}
+              title={f.username}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 6,
+                width: 72,
+                textDecoration: 'none',
+                color: 'var(--text-1)',
+              }}
+            >
+              <Avatar name={f.username} seed={f.avatarSeed} src={f.avatarUrl} size={52} />
+              <span style={{ fontSize: 12, maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {f.username}
+              </span>
+            </Link>
+          ))}
+          {profile.friends.length > 24 && (
+            <div style={{ display: 'flex', alignItems: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+              +{profile.friends.length - 24}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+
   const body = loading ? (
     <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-3)' }}>Загрузка…</div>
   ) : error ? (
@@ -321,6 +371,7 @@ export function PublicProfile() {
     <main style={{ padding: '20px 14px 64px', maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
       {identityCard}
       {details}
+      {friendsCard}
     </main>
   ) : (
     <div
@@ -336,7 +387,10 @@ export function PublicProfile() {
         alignItems: 'start',
       }}
     >
-      <aside style={{ position: 'sticky', top: 24 }}>{identityCard}</aside>
+      <aside style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        {identityCard}
+        {friendsCard}
+      </aside>
       <main style={{ minWidth: 0 }}>{details}</main>
     </div>
   );

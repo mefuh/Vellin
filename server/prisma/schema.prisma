@@ -27,6 +27,9 @@ model User {
   createdAt    DateTime  @default(now())
   /// Момент последнего ухода в офлайн (для «был в сети …»). Null — ещё не уходил.
   lastSeenAt   DateTime?
+  /// JSON настроек приватности (PrivacySettings). Пусто/невалидно → всё видно
+  /// всем (текущее поведение). Категории: online, friends, personalInfo, favorites.
+  privacyJson  String    @default("{}")
 
   isBlocked    Boolean   @default(false)
   blockedAt    DateTime?
