@@ -7,6 +7,7 @@ import { useFriendsStore } from '../stores/friendsStore';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { friendsApi } from '../api/friends';
 import { usersApi } from '../api/users';
+import { lastSeenShort } from '../utils/lastSeen';
 import { AppHeader } from '../components/AppHeader';
 
 type TabId = 'friends' | 'incoming' | 'outgoing' | 'search';
@@ -198,6 +199,15 @@ function FriendsList({ friends, onChanged }: { friends: FriendUser[]; onChanged:
   const navigate = useNavigate();
   const [busy, setBusy] = useState<string | null>(null);
 
+  // Пока есть офлайн-друзья с известным временем — раз в 30с форсим ре-рендер,
+  // чтобы относительное «N минут назад» дотикивало само, без обновления.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!friends.some((f) => !f.online && f.lastSeenAt)) return;
+    const id = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, [friends]);
+
   const act = async (fn: () => Promise<unknown>, id: string) => {
     setBusy(id);
     try {
@@ -229,7 +239,7 @@ function FriendsList({ friends, onChanged }: { friends: FriendUser[]; onChanged:
                 'в сети'
               )
             ) : (
-              'не в сети'
+              lastSeenShort(f.lastSeenAt)
             )
           }
           actions={

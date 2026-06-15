@@ -389,6 +389,7 @@ export type UserS2C =
   | UserS2CNotification
   | UserS2CNotificationsRemoved
   | UserS2CPresence
+  | UserS2CRoomVideo
   | UserS2CFriendsChanged
   | UserS2CPing;
 
@@ -419,6 +420,17 @@ export interface UserS2CPresence {
   t: 'presence';
   presence: FriendPresence;
 }
+/**
+ * Сменилось играющее видео в комнате — для живого обновления превью/названия в
+ * открытой библиотеке. Шлётся только подписчикам (`watch_library`).
+ */
+export interface UserS2CRoomVideo {
+  t: 'room_video';
+  roomId: string;
+  slug: string;
+  videoPoster: string | null;
+  videoTitle: string | null;
+}
 /** Сигнал «список друзей/заявок изменился — перезапроси по REST». */
 export interface UserS2CFriendsChanged {
   t: 'friends_changed';
@@ -428,11 +440,34 @@ export interface UserS2CPing {
   serverTs: number;
 }
 
-export type UserC2S = UserC2SPong;
+export type UserC2S =
+  | UserC2SPong
+  | UserC2SWatchPresence
+  | UserC2SUnwatchPresence
+  | UserC2SWatchLibrary
+  | UserC2SUnwatchLibrary;
 
 export interface UserC2SPong {
   t: 'pong';
   serverTs: number;
+}
+/** Подписаться на live-присутствие пользователя (открыта его страница профиля). */
+export interface UserC2SWatchPresence {
+  t: 'watch_presence';
+  userId: string;
+}
+/** Отписаться от live-присутствия пользователя (ушли со страницы). */
+export interface UserC2SUnwatchPresence {
+  t: 'unwatch_presence';
+  userId: string;
+}
+/** Подписаться на live-обновления превью комнат (открыта библиотека). */
+export interface UserC2SWatchLibrary {
+  t: 'watch_library';
+}
+/** Отписаться от обновлений библиотеки (ушли со страницы). */
+export interface UserC2SUnwatchLibrary {
+  t: 'unwatch_library';
 }
 
 // ── Type guards ────────────────────────────────────────────────────────

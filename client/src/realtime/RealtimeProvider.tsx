@@ -3,6 +3,8 @@ import type { UserS2C } from '@vellin/shared';
 import { useAuthStore } from '../stores/authStore';
 import { useNotificationsStore } from '../stores/notificationsStore';
 import { useFriendsStore } from '../stores/friendsStore';
+import { usePresenceStore } from '../stores/presenceStore';
+import { useLibraryStore } from '../stores/libraryStore';
 import { realtimeApi } from '../api/realtime';
 import { UserSocket } from '../ws/UserSocket';
 
@@ -25,6 +27,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
       switch (msg.t) {
         case 'hello':
           notifications.setSnapshot(msg.notifications, msg.unreadCount);
+          for (const p of msg.presence) usePresenceStore.getState().apply(p);
           // Подтягиваем список друзей; presence из снапшота применится после.
           void friends.refresh().then(() => {
             for (const p of msg.presence) useFriendsStore.getState().applyPresence(p);
@@ -42,7 +45,11 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
           notifications.removeMany(msg.ids, msg.unreadCount);
           break;
         case 'presence':
+          usePresenceStore.getState().apply(msg.presence);
           useFriendsStore.getState().applyPresence(msg.presence);
+          break;
+        case 'room_video':
+          useLibraryStore.getState().apply(msg.roomId, msg.videoPoster, msg.videoTitle);
           break;
         case 'friends_changed':
           void friends.refresh();
@@ -55,13 +62,25 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
     const socket = new UserSocket({
       getTicket: async () => (await realtimeApi.ticket()).ticket,
       onMessage,
+      // После каждого (ре)коннекта переподписываемся на открытый профиль. Небольшая
+      // задержка — чтобы сервер успел навесить слушатель сообщений (иначе ранний
+      // watch может потеряться в гонке сразу после open).
+      onOpen: () =>
+        setTimeout(() => {
+          usePresenceStore.getState().rewatch();
+          useLibraryStore.getState().rewatch();
+        }, 250),
     });
+    usePresenceStore.getState().setSender((m) => socket.send(m));
+    useLibraryStore.getState().setSender((m) => socket.send(m));
     void socket.connect();
 
     return () => {
       socket.close();
       useNotificationsStore.getState().reset();
       useFriendsStore.getState().reset();
+      usePresenceStore.getState().reset();
+      useLibraryStore.getState().reset();
     };
   }, [token, isUser]);
 

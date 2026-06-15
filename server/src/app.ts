@@ -19,7 +19,9 @@ import { ensureUploadsDir, MAX_AVATAR_BYTES } from './auth/avatar.js';
 import { registerWebSocket } from './ws/server.js';
 import { userHub } from './realtime/UserHub.js';
 import { getAcceptedFriendIds } from './friends/service.js';
+import { parsePrivacy } from './privacy/privacy.js';
 import { logger } from './utils/logger.js';
+import { prisma } from './db/prisma.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const env = loadEnv();
@@ -90,7 +92,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.code(500).send({ error: 'InternalServerError', message: 'Internal error', statusCode: 500 });
   });
 
-  app.get('/health', async () => ({ ok: true, version: '0.12.0' }));
+  app.get('/health', async () => ({ ok: true, version: '0.13.0' }));
 
   await app.register(
     async (api) => {
@@ -107,8 +109,22 @@ export async function buildApp(): Promise<FastifyInstance> {
     { prefix: '/api' },
   );
 
-  // Хаб presence не знает про БД — отдаём ему резолвер друзей для рассылки.
+  // Хаб presence не знает про БД — отдаём ему резолвер друзей для рассылки и
+  // writer «был в сети» (персистится при уходе пользователя в офлайн).
   userHub.setFriendResolver(getAcceptedFriendIds);
+  userHub.setLastSeenWriter((userId, at) => {
+    void prisma.user
+      .update({ where: { id: userId }, data: { lastSeenAt: at } })
+      .catch((err: unknown) => logger.error({ err, userId }, 'lastSeen write failed'));
+  });
+  // Презенс «online/был в сети» уважает настройку приватности владельца.
+  userHub.setOnlinePrivacyResolver(async (userId) => {
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { privacyJson: true },
+    });
+    return parsePrivacy(u?.privacyJson).online;
+  });
 
   await registerWebSocket(app);
 

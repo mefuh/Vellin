@@ -37,6 +37,49 @@ export interface FavoriteTitle {
   ratingImdb: number | null;
 }
 
+// ── Приватность (телеграм-стиль) ─────────────────────────────────────────
+
+/** Кому доступна категория данных профиля. */
+export type PrivacyVisibility = 'everyone' | 'friends' | 'nobody';
+
+/** Категории приватности профиля. */
+export type PrivacyCategory = 'online' | 'friends' | 'personalInfo' | 'favorites';
+
+/**
+ * Правило видимости одной категории. `allow`/`deny` — точечные исключения по
+ * userId поверх базового правила: `deny` перекрывает всё, `allow` перекрывает
+ * 'friends'/'nobody'.
+ */
+export interface PrivacyRule {
+  visibility: PrivacyVisibility;
+  /** Кому видно ВСЕГДА (даже при 'nobody'/'friends'). */
+  allow: string[];
+  /** Кому скрыто ВСЕГДА (перекрывает всё остальное). */
+  deny: string[];
+}
+
+export type PrivacySettings = Record<PrivacyCategory, PrivacyRule>;
+
+export const PRIVACY_CATEGORIES: readonly PrivacyCategory[] = [
+  'online',
+  'friends',
+  'personalInfo',
+  'favorites',
+];
+
+/** Базовое правило по умолчанию — всё видно всем (текущее поведение сервиса). */
+export const DEFAULT_PRIVACY_RULE: PrivacyRule = { visibility: 'everyone', allow: [], deny: [] };
+
+/** Дефолтные настройки приватности (каждая категория — «видно всем»). */
+export function defaultPrivacySettings(): PrivacySettings {
+  return {
+    online: { visibility: 'everyone', allow: [], deny: [] },
+    friends: { visibility: 'everyone', allow: [], deny: [] },
+    personalInfo: { visibility: 'everyone', allow: [], deny: [] },
+    favorites: { visibility: 'everyone', allow: [], deny: [] },
+  };
+}
+
 export interface AuthUser extends PublicUser {
   email: string | null;
   /** Произвольный текст «О себе». Null — не задан. */
@@ -80,6 +123,13 @@ export interface RoomSummary {
   ownerId: string;
   ownerUsername: string;
   participantCount: number;
+  /**
+   * Постер/превью играющего сейчас видео — для карточки в библиотеке. Null,
+   * если видео не задано или у источника нет обложки (тогда рисуем пейзаж).
+   */
+  videoPoster: string | null;
+  /** Название играющего видео для карточки. Null — нет видео/без имени. */
+  videoTitle: string | null;
   createdAt: string;
 }
 
@@ -320,6 +370,8 @@ export interface FriendUser extends PublicUser {
   online: boolean;
   /** Комната, которую друг смотрит прямо сейчас, либо null. */
   currentRoom: RoomRef | null;
+  /** ISO-время последнего захода. Null, если онлайн или неизвестно. */
+  lastSeenAt: string | null;
 }
 
 /** Pending-заявка в друзья (входящая или исходящая). */
@@ -353,11 +405,18 @@ export interface PublicProfile extends PublicUser {
   createdAt: string;
   online: boolean;
   currentRoom: RoomRef | null;
+  /** ISO-время последнего захода (когда офлайн). Null, если онлайн или неизвестно. */
+  lastSeenAt: string | null;
   /**
    * До 5 любимых фильмов/сериалов (по позиции #1..#5). Заполняется только на
    * странице профиля `/u/:username`; в результатах поиска отсутствует.
    */
   favoriteTitles?: FavoriteTitle[];
+  /**
+   * Друзья пользователя (публичные карточки) для секции «Друзья» в профиле.
+   * `undefined` — список скрыт настройками приватности; `[]` — друзей нет.
+   */
+  friends?: PublicUser[];
   relationship: Relationship;
   /** Id записи дружбы/заявки — для accept/remove. */
   friendshipId: string | null;
@@ -381,6 +440,8 @@ export interface FriendPresence {
   userId: string;
   online: boolean;
   currentRoom: RoomRef | null;
+  /** ISO-время последнего захода (момент ухода в офлайн). Null, если онлайн или неизвестно. */
+  lastSeenAt: string | null;
 }
 
 // ── Voice/video call ────────────────────────────────────────────────────

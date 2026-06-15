@@ -7,15 +7,17 @@ import { AppHeader } from '../components/AppHeader';
 import { AvatarSection } from '../components/profile/AvatarSection';
 import { IdentitySection } from '../components/profile/IdentitySection';
 import { FavoritesSection } from '../components/profile/FavoritesSection';
+import { PrivacySection } from '../components/profile/PrivacySection';
 import { EmailSection } from '../components/profile/EmailSection';
 import { PasswordSection } from '../components/profile/PasswordSection';
 import { DevicesSection } from '../components/profile/DevicesSection';
 import type { AuthUser } from '@vellin/shared';
 
-type TabId = 'profile' | 'email' | 'password' | 'devices';
+type TabId = 'profile' | 'privacy' | 'email' | 'password' | 'devices';
 
 const NAV: { id: TabId; icon: IconName; label: string }[] = [
   { id: 'profile', icon: 'user', label: 'Профиль' },
+  { id: 'privacy', icon: 'eye', label: 'Приватность' },
   { id: 'email', icon: 'globe', label: 'Email' },
   { id: 'password', icon: 'lock', label: 'Пароль' },
   { id: 'devices', icon: 'cast', label: 'Устройства' },
@@ -31,6 +33,8 @@ function renderTab(tab: TabId, user: AuthUser) {
           <FavoritesSection />
         </>
       );
+    case 'privacy':
+      return <PrivacySection />;
     case 'email':
       return <EmailSection user={user} />;
     case 'password':
@@ -77,6 +81,7 @@ export function Profile() {
           <AvatarSection user={user} />
           <IdentitySection user={user} />
           <FavoritesSection />
+          <PrivacySection />
           <EmailSection user={user} />
           <PasswordSection />
           <DevicesSection />
@@ -178,6 +183,7 @@ export function Profile() {
             <h1 style={{ fontSize: 28, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>{active.label}</h1>
             <p style={{ marginTop: 6, color: 'var(--text-2)', fontSize: 14 }}>
               {tab === 'profile' && 'Аватар, имя пользователя и информация о себе.'}
+              {tab === 'privacy' && 'Кто видит ваш онлайн, друзей, личные данные и любимое кино.'}
               {tab === 'email' && 'Смена адреса электронной почты.'}
               {tab === 'password' && 'Обновление пароля и безопасность входа.'}
               {tab === 'devices' && 'Активные сессии и выход с устройств.'}

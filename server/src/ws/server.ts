@@ -88,6 +88,41 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
     userHub.attach(conn);
     logger.info({ userId: principal.userId, connId: conn.id }, 'ws:user:open');
 
+    const pingTimer = setInterval(() => {
+      if (socket.readyState === socket.OPEN) conn.send({ t: 'ping', serverTs: Date.now() });
+    }, 30000);
+
+    // Слушатели навешиваем СИНХРОННО, до любого await — иначе сообщение,
+    // присланное сразу после open (watch_presence), теряется (ws роняет события
+    // без слушателя). Входящие: подписка на присутствие + keep-alive (pong).
+    socket.on('message', (raw) => {
+      let msg: unknown;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+      const m = msg as { t?: string; userId?: string };
+      if (m.t === 'watch_presence' && typeof m.userId === 'string') {
+        userHub.watch(conn, m.userId);
+      } else if (m.t === 'unwatch_presence' && typeof m.userId === 'string') {
+        userHub.unwatch(conn, m.userId);
+      } else if (m.t === 'watch_library') {
+        userHub.watchLibrary(conn);
+      } else if (m.t === 'unwatch_library') {
+        userHub.unwatchLibrary(conn);
+      }
+    });
+    socket.on('close', () => {
+      clearInterval(pingTimer);
+      userHub.detach(conn);
+      logger.info({ userId: principal.userId, connId: conn.id }, 'ws:user:close');
+    });
+    socket.on('error', (err) => {
+      logger.warn({ err: err.message, userId: principal.userId }, 'ws:user socket error');
+    });
+
+    // hello-снапшот — после навешивания слушателей.
     try {
       const [snapshot, presence] = await Promise.all([
         getNotificationsSnapshot(principal.userId),
@@ -103,21 +138,6 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
     } catch (err) {
       logger.error({ err, userId: principal.userId }, 'ws:user hello failed');
     }
-
-    const pingTimer = setInterval(() => {
-      if (socket.readyState === socket.OPEN) conn.send({ t: 'ping', serverTs: Date.now() });
-    }, 30000);
-
-    // Входящие сообщения — только keep-alive pong; контента нет, игнорируем.
-    socket.on('message', () => {});
-    socket.on('close', () => {
-      clearInterval(pingTimer);
-      userHub.detach(conn);
-      logger.info({ userId: principal.userId, connId: conn.id }, 'ws:user:close');
-    });
-    socket.on('error', (err) => {
-      logger.warn({ err: err.message, userId: principal.userId }, 'ws:user socket error');
-    });
   });
 
   app.get('/ws', { websocket: true }, async (socket, req) => {

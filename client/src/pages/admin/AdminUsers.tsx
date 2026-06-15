@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { AdminUserSummary } from '@vellin/shared';
 import { adminApi } from '../../api/admin';
 import { ApiHttpError } from '../../api/client';
@@ -7,6 +8,11 @@ import { useAuthStore } from '../../stores/authStore';
 import { useIsNarrow } from '../../hooks/useMediaQuery';
 
 const PAGE_LIMIT = 20;
+
+// Один шаблон колонок для шапки и строк. Последняя колонка — фиксированная
+// (а не auto): иначе её ширина в шапке («ДЕЙСТВИЯ») и в строках (две кнопки)
+// различается, и колонки перестают совпадать между собой.
+const USER_GRID_COLUMNS = 'minmax(200px, 2fr) minmax(160px, 2fr) 120px 110px 230px';
 
 export function AdminUsers() {
   const me = useAuthStore((s) => s.user);
@@ -109,7 +115,7 @@ export function AdminUsers() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'minmax(220px, 2fr) minmax(180px, 2fr) 120px 120px auto',
+              gridTemplateColumns: USER_GRID_COLUMNS,
               gap: 0,
               padding: '12px 16px',
               borderBottom: '1px solid var(--line-2)',
@@ -154,14 +160,25 @@ export function AdminUsers() {
               key={u.id}
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'minmax(220px, 2fr) minmax(180px, 2fr) 120px 120px auto',
+                gridTemplateColumns: USER_GRID_COLUMNS,
                 alignItems: 'center',
                 padding: '12px 16px',
                 borderBottom: '1px solid var(--line-1)',
                 fontSize: 13,
               }}
             >
-              <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <Link
+                to={`/u/${u.username}`}
+                title="Открыть профиль"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  minWidth: 0,
+                  textDecoration: 'none',
+                  color: 'inherit',
+                }}
+              >
                 <Avatar seed={u.avatarSeed} src={u.avatarUrl} name={u.username} size={32} />
                 <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                   <span style={{ color: 'var(--text-0)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -173,7 +190,7 @@ export function AdminUsers() {
                     </span>
                   )}
                 </span>
-              </span>
+              </Link>
               <span style={{ color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {u.email}
               </span>
@@ -467,32 +484,46 @@ function UserCard({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-        <Avatar seed={u.avatarSeed} src={u.avatarUrl} name={u.username} size={36} />
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-          <span
-            style={{
-              color: 'var(--text-0)',
-              fontWeight: 600,
-              fontSize: 14,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {u.username}
-          </span>
-          <span
-            style={{
-              color: 'var(--text-1)',
-              fontSize: 12,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {u.email}
-          </span>
-        </div>
+        <Link
+          to={`/u/${u.username}`}
+          title="Открыть профиль"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            minWidth: 0,
+            flex: 1,
+            textDecoration: 'none',
+            color: 'inherit',
+          }}
+        >
+          <Avatar seed={u.avatarSeed} src={u.avatarUrl} name={u.username} size={36} />
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+            <span
+              style={{
+                color: 'var(--text-0)',
+                fontWeight: 600,
+                fontSize: 14,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {u.username}
+            </span>
+            <span
+              style={{
+                color: 'var(--text-1)',
+                fontSize: 12,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {u.email}
+            </span>
+          </div>
+        </Link>
         {u.isBlocked ? (
           <Chip tone="accent" icon="lock">блок</Chip>
         ) : (

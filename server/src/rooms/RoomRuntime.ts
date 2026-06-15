@@ -966,6 +966,13 @@ export class RoomRuntime {
       serverTs: this.anchorServerTs,
       video: this.snapshotVideo(),
     });
+    // Живое обновление карточки в открытой библиотеке (превью + название).
+    userHub.broadcastRoomVideo({
+      roomId: this.roomId,
+      slug: this.slug,
+      videoPoster: resolved?.poster ?? null,
+      videoTitle: title ?? resolved?.title ?? null,
+    });
     this.broadcastPlaylist(); // history length may have changed
   }
 

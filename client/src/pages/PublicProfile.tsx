@@ -1,9 +1,11 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import type { PublicProfile as PublicProfileDTO } from '@vellin/shared';
 import { Avatar, Button, Icon, type IconName } from '../shared';
 import { useAuthStore } from '../stores/authStore';
 import { useFriendsStore } from '../stores/friendsStore';
+import { usePresenceStore } from '../stores/presenceStore';
+import { lastSeenLabel } from '../utils/lastSeen';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { usersApi } from '../api/users';
 import { friendsApi } from '../api/friends';
@@ -52,12 +54,35 @@ export function PublicProfile() {
   // Избранное самого зрителя — чтобы подсветить «общие любимые».
   const [myFavIds, setMyFavIds] = useState<Set<number>>(new Set());
 
+  // Live-присутствие из стора (обновляется в реальном времени по WS); до первого
+  // пуша используем то, что пришло в REST-ответе профиля.
+  const livePresence = usePresenceStore((s) => (profile ? s.byId[profile.id] : undefined));
+  const online = livePresence?.online ?? profile?.online ?? false;
+  const liveRoom = livePresence?.currentRoom ?? profile?.currentRoom ?? null;
+  const lastSeenAt = livePresence?.lastSeenAt ?? profile?.lastSeenAt ?? null;
+
+  // Пока пользователь офлайн — раз в 30с форсим ре-рендер, чтобы относительное
+  // «был в сети N минут назад» дотикивало само, без обновления страницы.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (online || !lastSeenAt) return;
+    const id = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, [online, lastSeenAt]);
+
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await usersApi.profile(username);
       setProfile(res.profile);
+      // Засеять стор присутствия начальным состоянием из REST-ответа.
+      usePresenceStore.getState().apply({
+        userId: res.profile.id,
+        online: res.profile.online,
+        currentRoom: res.profile.currentRoom,
+        lastSeenAt: res.profile.lastSeenAt,
+      });
     } catch (e) {
       setError(e instanceof ApiHttpError ? e.payload.message : 'Не удалось загрузить профиль');
     } finally {
@@ -83,6 +108,16 @@ export function PublicProfile() {
       alive = false;
     };
   }, [user?.kind]);
+
+  // Подписка на live-присутствие открытого профиля — статус обновляется в
+  // реальном времени, пока страница открыта.
+  useEffect(() => {
+    const id = profile?.id;
+    if (!id) return;
+    const presence = usePresenceStore.getState();
+    presence.watch(id);
+    return () => presence.unwatch(id);
+  }, [profile?.id]);
 
   if (user && user.kind === 'guest') return <Navigate to="/library" replace />;
   if (!user) return <Navigate to="/login" replace />;
@@ -139,12 +174,12 @@ export function PublicProfile() {
         seed={profile.avatarSeed}
         src={profile.avatarUrl}
         size={96}
-        status={profile.online ? (profile.currentRoom ? 'watching' : 'online') : 'offline'}
+        status={online ? (liveRoom ? 'watching' : 'online') : 'offline'}
       />
       <div>
         <div style={{ fontSize: 20, fontWeight: 600 }}>{profile.username}</div>
-        <div style={{ fontSize: 13, color: profile.online ? 'var(--ok)' : 'var(--text-3)', marginTop: 4 }}>
-          {profile.online ? (profile.currentRoom ? `смотрит «${profile.currentRoom.name}»` : 'в сети') : 'не в сети'}
+        <div style={{ fontSize: 13, color: online ? 'var(--ok)' : 'var(--text-3)', marginTop: 4 }}>
+          {online ? (liveRoom ? `смотрит «${liveRoom.name}»` : 'в сети') : lastSeenLabel(lastSeenAt, profile.gender)}
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>{actions}</div>
@@ -273,6 +308,56 @@ export function PublicProfile() {
     </div>
   );
 
+  // Секция «Друзья» — на десктопе живёт в левой колонке под карточкой профиля,
+  // на мобайле добавляется в общую стопку.
+  const friendsCard = profile && profile.friends && (
+    <section
+      style={{
+        padding: 24,
+        background: 'var(--bg-1)',
+        border: '1px solid var(--line-1)',
+        borderRadius: 'var(--r-lg)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 600 }}>Друзья</div>
+        <span style={{ fontSize: 13, color: 'var(--text-3)' }}>{profile.friends.length}</span>
+      </div>
+      {profile.friends.length === 0 ? (
+        <div style={{ color: 'var(--text-3)', fontSize: 14 }}>Пока нет друзей.</div>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+          {profile.friends.slice(0, 24).map((f) => (
+            <Link
+              key={f.id}
+              to={`/u/${f.username}`}
+              title={f.username}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 6,
+                width: 72,
+                textDecoration: 'none',
+                color: 'var(--text-1)',
+              }}
+            >
+              <Avatar name={f.username} seed={f.avatarSeed} src={f.avatarUrl} size={52} />
+              <span style={{ fontSize: 12, maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {f.username}
+              </span>
+            </Link>
+          ))}
+          {profile.friends.length > 24 && (
+            <div style={{ display: 'flex', alignItems: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+              +{profile.friends.length - 24}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+
   const body = loading ? (
     <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-3)' }}>Загрузка…</div>
   ) : error ? (
@@ -286,6 +371,7 @@ export function PublicProfile() {
     <main style={{ padding: '20px 14px 64px', maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
       {identityCard}
       {details}
+      {friendsCard}
     </main>
   ) : (
     <div
@@ -301,7 +387,10 @@ export function PublicProfile() {
         alignItems: 'start',
       }}
     >
-      <aside style={{ position: 'sticky', top: 24 }}>{identityCard}</aside>
+      <aside style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        {identityCard}
+        {friendsCard}
+      </aside>
       <main style={{ minWidth: 0 }}>{details}</main>
     </div>
   );

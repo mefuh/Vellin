@@ -8,6 +8,7 @@ import type {
   FriendUser,
   Gender,
   ParticipantInfo,
+  PrivacySettings,
   PublicProfile,
   RoomDetails,
   RoomSummary,
@@ -84,6 +85,15 @@ export interface ChangePasswordRequest {
   newPassword: string;
 }
 export type ChangePasswordResponse = ProfileMutationResponse;
+
+// ── Приватность ───────────────────────────────────────────────────────────
+export interface PrivacyResponse {
+  privacy: PrivacySettings;
+}
+export interface UpdatePrivacyRequest {
+  privacy: PrivacySettings;
+}
+export type UpdatePrivacyResponse = PrivacyResponse;
 
 // ── Сессии/устройства ────────────────────────────────────────────────────
 export interface ListSessionsResponse {

@@ -4,6 +4,7 @@ import type { RoomSummary } from '@vellin/shared';
 import { roomsApi } from '../api/rooms';
 import { Button, Chip, Icon, MountainPoster } from '../shared';
 import { useAuthStore } from '../stores/authStore';
+import { useLibraryStore } from '../stores/libraryStore';
 import { CreateRoomModal } from '../components/CreateRoomModal';
 import { AppHeader } from '../components/AppHeader';
 import { ApiHttpError } from '../api/client';
@@ -34,6 +35,13 @@ export function Library() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Пока открыта библиотека — подписаны на live-смену превью/названия комнат.
+  const videoOverrides = useLibraryStore((s) => s.overrides);
+  useEffect(() => {
+    useLibraryStore.getState().watch();
+    return () => useLibraryStore.getState().unwatch();
+  }, []);
 
   const join = async (slug: string) => {
     setJoinError(null);
@@ -142,11 +150,18 @@ export function Library() {
         >
           {loading && Array.from({ length: 4 }).map((_, i) => <RoomCardSkeleton key={i} />)}
           {!loading &&
-            rooms.map((room, idx) => (
-              <Link key={room.id} to={`/room/${room.slug}`}>
-                <RoomCard room={room} idx={idx} />
-              </Link>
-            ))}
+            rooms.map((room, idx) => {
+              // Живой оверрайд (room_video по WS) имеет приоритет над REST-снимком;
+              // null-постер в оверрайде = видео сняли → возвращаемся к пейзажу.
+              const ov = videoOverrides[room.id];
+              const poster = ov ? ov.videoPoster : room.videoPoster;
+              const title = ov ? ov.videoTitle : room.videoTitle;
+              return (
+                <Link key={room.id} to={`/room/${room.slug}`}>
+                  <RoomCard room={room} idx={idx} poster={poster} title={title} />
+                </Link>
+              );
+            })}
           {!loading && rooms.length === 0 && (
             <div
               style={{
@@ -172,23 +187,86 @@ export function Library() {
   );
 }
 
-function RoomCard({ room, idx }: { room: RoomSummary; idx: number }) {
+function RoomCard({
+  room,
+  idx,
+  poster,
+  title,
+}: {
+  room: RoomSummary;
+  idx: number;
+  poster: string | null;
+  title: string | null;
+}) {
+  // Постер с внешнего CDN может не загрузиться — тогда откатываемся к пейзажу.
+  const [imgFailed, setImgFailed] = useState(false);
+  const [hover, setHover] = useState(false);
+  useEffect(() => setImgFailed(false), [poster]);
+  const showPoster = !!poster && !imgFailed;
+
   return (
     <article
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
         background: 'var(--bg-1)',
-        border: '1px solid var(--line-2)',
+        border: `1px solid ${hover ? 'var(--accent)' : 'var(--line-2)'}`,
         borderRadius: 'var(--r-lg)',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
         cursor: 'pointer',
-        transition: 'transform .12s, border-color .12s',
+        // Без transform: «приподнятость» на ховере передаём только тенью и
+        // акцентной рамкой — никакого геометрического смещения, значит нижней
+        // плашке физически нечему «отставать».
+        boxShadow: hover ? '0 14px 30px rgba(0,0,0,0.4)' : '0 0 0 rgba(0,0,0,0)',
+        transition: 'border-color .2s ease, box-shadow .2s ease',
       }}
     >
-      <div style={{ aspectRatio: '16 / 9', position: 'relative' }}>
-        <MountainPoster seed={idx} />
-        <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', gap: 6 }}>
+      <div style={{ aspectRatio: '16 / 9', position: 'relative', overflow: 'hidden', background: 'var(--bg-2)' }}>
+        {showPoster ? (
+          <img
+            src={poster!}
+            alt={title ?? room.name}
+            loading="lazy"
+            onError={() => setImgFailed(true)}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+            }}
+          />
+        ) : (
+          <MountainPoster seed={idx} />
+        )}
+
+        {/* Мягкая вуаль на ховере — статична (без смещений), даёт «медийность» и
+            контраст кнопке play, при этом ничего относительно неё не «едет». */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'rgba(0,0,0,0.16)',
+            opacity: hover ? 1 : 0,
+            transition: 'opacity .2s ease',
+            pointerEvents: 'none',
+          }}
+        />
+
+        {/* Верхний скрим: воссоздаёт тёмную подложку, под которую рассчитаны
+            чипы, — индикаторы остаются читаемыми на любом (в т.ч. светлом) кадре. */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: '0 0 auto 0',
+            height: '48%',
+            background: 'linear-gradient(to bottom, rgba(0,0,0,0.55), rgba(0,0,0,0))',
+            pointerEvents: 'none',
+          }}
+        />
+
+        <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', gap: 6, zIndex: 1 }}>
           {room.isPrivate ? (
             <Chip tone="neutral" icon="lock">приватная</Chip>
           ) : (
@@ -198,6 +276,71 @@ function RoomCard({ room, idx }: { room: RoomSummary; idx: number }) {
             <Chip tone="live">LIVE · {room.participantCount}</Chip>
           )}
         </div>
+
+        {/* Кнопка play проявляется на ховере — карточка читается как «плитка к просмотру». */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+            opacity: hover ? 1 : 0,
+            transition: 'opacity .2s ease',
+          }}
+        >
+          <span
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(0,0,0,0.55)',
+              boxShadow: '0 0 0 1px rgba(255,255,255,0.25)',
+              transform: hover ? 'scale(1)' : 'scale(0.8)',
+              transition: 'transform .2s ease',
+            }}
+          >
+            <Icon name="play" size={20} style={{ color: '#fff', marginLeft: 2 }} />
+          </span>
+        </div>
+
+        {title && (
+          // Название играющего видео — плашкой с градиентом внизу превью.
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              padding: '26px 12px 10px',
+              background: 'linear-gradient(to top, rgba(0,0,0,0.82), rgba(0,0,0,0))',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              zIndex: 1,
+            }}
+          >
+            <Icon name="play" size={12} style={{ color: 'var(--accent-hi)', flexShrink: 0 }} />
+            <span
+              style={{
+                color: '#fff',
+                fontSize: 13,
+                fontWeight: 500,
+                lineHeight: 1.25,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                textShadow: '0 1px 3px rgba(0,0,0,0.5)',
+              }}
+            >
+              {title}
+            </span>
+          </div>
+        )}
       </div>
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{room.name}</h3>

@@ -6,6 +6,7 @@ import type {
   FriendUser,
   Gender,
   PublicProfile,
+  PublicUser,
   Relationship,
 } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
@@ -13,6 +14,7 @@ import { userHub } from '../realtime/UserHub.js';
 import { createAndPush, pushFriendsChanged, removeNotifications } from '../realtime/notify.js';
 import { PUBLIC_USER_SELECT, toAppNotifications, toPublicUser } from './mappers.js';
 import { getFavorites } from '../titles/service.js';
+import { canSee, parsePrivacy, type ViewerContext } from '../privacy/privacy.js';
 
 /** Бизнес-ошибка с HTTP-кодом — глобальный errorHandler форматирует по statusCode. */
 export class FriendError extends Error {
@@ -32,7 +34,37 @@ const PROFILE_SELECT = {
   birthDate: true,
   city: true,
   createdAt: true,
+  lastSeenAt: true,
+  privacyJson: true,
 } as const;
+
+/** Презенс «как будто офлайн» — для скрытого настройками онлайна. */
+function hiddenPresence(userId: string): FriendPresence {
+  return { userId, online: false, currentRoom: null, lastSeenAt: null };
+}
+
+/** Принятые друзья пользователя как публичные карточки (для секции «Друзья»). */
+async function listFriendPublicUsers(userId: string): Promise<PublicUser[]> {
+  const rows = await prisma.friendship.findMany({
+    where: { status: 'accepted', OR: [{ requesterId: userId }, { addresseeId: userId }] },
+    include: {
+      requester: { select: PUBLIC_USER_SELECT },
+      addressee: { select: PUBLIC_USER_SELECT },
+    },
+    orderBy: { respondedAt: 'desc' },
+    take: 100,
+  });
+  return rows.map((r) => toPublicUser(r.requesterId === userId ? r.addressee : r.requester));
+}
+
+/**
+ * «Был в сети» для DTO: онлайн → null; иначе берём свежее из presence хаба, а
+ * если хаб не знает (после рестарта) — фолбэк на сохранённое в БД.
+ */
+function lastSeenIso(presence: FriendPresence, dbLastSeen?: Date | null): string | null {
+  if (presence.online) return null;
+  return presence.lastSeenAt ?? (dbLastSeen ? dbLastSeen.toISOString() : null);
+}
 
 /** Общие профильные поля (пол/дата рождения/город) для DTO `PublicProfile`. */
 function profileExtras(u: { gender: string | null; birthDate: Date | null; city: string | null }): {
@@ -116,19 +148,26 @@ export async function listFriends(userId: string): Promise<FriendUser[]> {
       OR: [{ requesterId: userId }, { addresseeId: userId }],
     },
     include: {
-      requester: { select: PUBLIC_USER_SELECT },
-      addressee: { select: PUBLIC_USER_SELECT },
+      requester: { select: { ...PUBLIC_USER_SELECT, privacyJson: true } },
+      addressee: { select: { ...PUBLIC_USER_SELECT, privacyJson: true } },
     },
     orderBy: { respondedAt: 'desc' },
   });
   return rows.map((r) => {
     const other = r.requesterId === userId ? r.addressee : r.requester;
-    const presence = userHub.presenceOf(other.id);
+    // Зритель — принятый друг, но владелец мог скрыть онлайн и от друзей.
+    const showOnline = canSee(parsePrivacy(other.privacyJson).online, {
+      isSelf: false,
+      isFriend: true,
+      viewerId: userId,
+    });
+    const presence = showOnline ? userHub.presenceOf(other.id) : hiddenPresence(other.id);
     return {
       ...toPublicUser(other),
       friendshipId: r.id,
       online: presence.online,
       currentRoom: presence.currentRoom,
+      lastSeenAt: lastSeenIso(presence),
     };
   });
 }
@@ -159,7 +198,20 @@ export async function listRequests(userId: string): Promise<FriendRequest[]> {
 
 export async function getFriendPresenceSnapshot(userId: string): Promise<FriendPresence[]> {
   const ids = await getAcceptedFriendIds(userId);
-  return ids.map((id) => userHub.presenceOf(id));
+  if (ids.length === 0) return [];
+  const users = await prisma.user.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, privacyJson: true },
+  });
+  const privacyById = new Map(users.map((u) => [u.id, u.privacyJson]));
+  return ids.map((id) => {
+    const showOnline = canSee(parsePrivacy(privacyById.get(id)).online, {
+      isSelf: false,
+      isFriend: true,
+      viewerId: userId,
+    });
+    return showOnline ? userHub.presenceOf(id) : hiddenPresence(id);
+  });
 }
 
 // ── Заявки ──────────────────────────────────────────────────────────────
@@ -338,14 +390,21 @@ export async function searchUsers(viewerId: string, q: string): Promise<PublicPr
 
   return candidates.map((c) => {
     const rel = relationshipFrom(viewerId, c.id, frByOther.get(c.id) ?? null, blockedSet.has(c.id));
-    const presence = userHub.presenceOf(c.id);
+    const privacy = parsePrivacy(c.privacyJson);
+    const ctx: ViewerContext = { isSelf: false, isFriend: rel.relationship === 'friends', viewerId };
+    const showOnline = canSee(privacy.online, ctx);
+    const presence = showOnline ? userHub.presenceOf(c.id) : hiddenPresence(c.id);
+    const extras = canSee(privacy.personalInfo, ctx)
+      ? profileExtras(c)
+      : { gender: null, birthDate: null, city: null };
     return {
       ...toPublicUser(c),
       bio: c.bio ?? null,
-      ...profileExtras(c),
+      ...extras,
       createdAt: c.createdAt.toISOString(),
       online: presence.online,
       currentRoom: presence.currentRoom,
+      lastSeenAt: lastSeenIso(presence, showOnline ? c.lastSeenAt : null),
       relationship: rel.relationship,
       friendshipId: rel.friendshipId,
     };
@@ -356,38 +415,48 @@ export async function getPublicProfile(viewerId: string, username: string): Prom
   const user = await prisma.user.findUnique({ where: { username }, select: { ...PROFILE_SELECT, isBlocked: true } });
   if (!user || user.isBlocked) throw new FriendError(404, 'Пользователь не найден');
 
-  const favoriteTitles = await getFavorites(user.id);
-
-  if (user.id !== viewerId) {
+  const isSelf = user.id === viewerId;
+  let relationship: Relationship = 'self';
+  let friendshipId: string | null = null;
+  let isFriend = false;
+  if (!isSelf) {
     const blocks = await blockBetween(viewerId, user.id);
     // Если цель заблокировала зрителя — скрываем профиль целиком.
     if (blocks.bBlockedA) throw new FriendError(404, 'Пользователь не найден');
     const fr = await findFriendship(viewerId, user.id);
     const rel = relationshipFrom(viewerId, user.id, fr, blocks.aBlockedB);
-    const presence = userHub.presenceOf(user.id);
-    return {
-      ...toPublicUser(user),
-      bio: user.bio ?? null,
-      ...profileExtras(user),
-      createdAt: user.createdAt.toISOString(),
-      online: presence.online,
-      currentRoom: presence.currentRoom,
-      favoriteTitles,
-      relationship: rel.relationship,
-      friendshipId: rel.friendshipId,
-    };
+    relationship = rel.relationship;
+    friendshipId = rel.friendshipId;
+    isFriend = rel.relationship === 'friends';
   }
-  const presence = userHub.presenceOf(user.id);
+
+  // Применяем приватность владельца профиля к каждой категории.
+  const privacy = parsePrivacy(user.privacyJson);
+  const ctx: ViewerContext = { isSelf, isFriend, viewerId };
+
+  const rawPresence = userHub.presenceOf(user.id);
+  const presence = canSee(privacy.online, ctx) ? rawPresence : hiddenPresence(user.id);
+
+  const extras = canSee(privacy.personalInfo, ctx)
+    ? profileExtras(user)
+    : { gender: null, birthDate: null, city: null };
+
+  const favoriteTitles = canSee(privacy.favorites, ctx) ? await getFavorites(user.id) : [];
+
+  const friends = canSee(privacy.friends, ctx) ? await listFriendPublicUsers(user.id) : undefined;
+
   return {
     ...toPublicUser(user),
     bio: user.bio ?? null,
-    ...profileExtras(user),
+    ...extras,
     createdAt: user.createdAt.toISOString(),
     online: presence.online,
     currentRoom: presence.currentRoom,
+    lastSeenAt: lastSeenIso(presence, canSee(privacy.online, ctx) ? user.lastSeenAt : null),
     favoriteTitles,
-    relationship: 'self',
-    friendshipId: null,
+    friends,
+    relationship,
+    friendshipId,
   };
 }
 

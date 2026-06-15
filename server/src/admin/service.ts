@@ -9,6 +9,7 @@ import type {
 } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 import { roomStore } from '../rooms/store.js';
+import { toRoomSummary } from '../rooms/service.js';
 import { roomMutex } from '../utils/async-mutex.js';
 import { hashPassword } from '../auth/password.js';
 import { ensureRoomRuntime } from '../rooms/RoomRuntime.js';
@@ -63,19 +64,8 @@ export function toAdminRoomSummary(
 export function toRoomDetailsFromDb(
   room: Room & { owner: Pick<User, 'username'> },
 ): RoomDetails {
-  const live = roomStore.get(room.id);
   return {
-    id: room.id,
-    slug: room.slug,
-    name: room.name,
-    isPrivate: room.isPrivate,
-    allowGuests: room.allowGuests,
-    hostOnlyControl: room.hostOnlyControl,
-    maxParticipants: room.maxParticipants,
-    ownerId: room.ownerId,
-    ownerUsername: room.owner.username,
-    participantCount: live?.participants.size ?? 0,
-    createdAt: room.createdAt.toISOString(),
+    ...toRoomSummary(room),
     videoUrl: room.videoUrl,
     videoPositionSec: room.videoPositionSec,
     videoStatus: asStatus(room.videoStatus),
