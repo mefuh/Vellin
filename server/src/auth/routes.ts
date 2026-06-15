@@ -44,7 +44,7 @@ const registerSchema = z.object({
     .string()
     .min(2)
     .max(32)
-    .regex(/^[a-zA-Z0-9_\-.]+$/u, 'username may contain letters, digits, _ - .'),
+    .regex(/^[\p{L}\p{N}_\-.]+$/u, 'имя может содержать буквы (в т.ч. кириллицу), цифры, _ - .'),
   password: z.string().min(8).max(128),
 }) satisfies z.ZodType<RegisterRequest>;
 
@@ -65,7 +65,7 @@ const usernameSchema = z
   .string()
   .min(2)
   .max(32)
-  .regex(/^[a-zA-Z0-9_\-.]+$/u, 'username may contain letters, digits, _ - .');
+  .regex(/^[\p{L}\p{N}_\-.]+$/u, 'имя может содержать буквы (в т.ч. кириллицу), цифры, _ - .');
 
 const birthDateSchema = z
   .string()
