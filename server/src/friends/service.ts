@@ -32,7 +32,17 @@ const PROFILE_SELECT = {
   birthDate: true,
   city: true,
   createdAt: true,
+  lastSeenAt: true,
 } as const;
+
+/**
+ * «Был в сети» для DTO: онлайн → null; иначе берём свежее из presence хаба, а
+ * если хаб не знает (после рестарта) — фолбэк на сохранённое в БД.
+ */
+function lastSeenIso(presence: FriendPresence, dbLastSeen?: Date | null): string | null {
+  if (presence.online) return null;
+  return presence.lastSeenAt ?? (dbLastSeen ? dbLastSeen.toISOString() : null);
+}
 
 /** Общие профильные поля (пол/дата рождения/город) для DTO `PublicProfile`. */
 function profileExtras(u: { gender: string | null; birthDate: Date | null; city: string | null }): {
@@ -129,6 +139,7 @@ export async function listFriends(userId: string): Promise<FriendUser[]> {
       friendshipId: r.id,
       online: presence.online,
       currentRoom: presence.currentRoom,
+      lastSeenAt: lastSeenIso(presence),
     };
   });
 }
@@ -346,6 +357,7 @@ export async function searchUsers(viewerId: string, q: string): Promise<PublicPr
       createdAt: c.createdAt.toISOString(),
       online: presence.online,
       currentRoom: presence.currentRoom,
+      lastSeenAt: lastSeenIso(presence, c.lastSeenAt),
       relationship: rel.relationship,
       friendshipId: rel.friendshipId,
     };
@@ -372,6 +384,7 @@ export async function getPublicProfile(viewerId: string, username: string): Prom
       createdAt: user.createdAt.toISOString(),
       online: presence.online,
       currentRoom: presence.currentRoom,
+      lastSeenAt: lastSeenIso(presence, user.lastSeenAt),
       favoriteTitles,
       relationship: rel.relationship,
       friendshipId: rel.friendshipId,
@@ -385,6 +398,7 @@ export async function getPublicProfile(viewerId: string, username: string): Prom
     createdAt: user.createdAt.toISOString(),
     online: presence.online,
     currentRoom: presence.currentRoom,
+    lastSeenAt: lastSeenIso(presence, user.lastSeenAt),
     favoriteTitles,
     relationship: 'self',
     friendshipId: null,

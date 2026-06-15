@@ -4,6 +4,8 @@ import type { PublicProfile as PublicProfileDTO } from '@vellin/shared';
 import { Avatar, Button, Icon, type IconName } from '../shared';
 import { useAuthStore } from '../stores/authStore';
 import { useFriendsStore } from '../stores/friendsStore';
+import { usePresenceStore } from '../stores/presenceStore';
+import { lastSeenLabel } from '../utils/lastSeen';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { usersApi } from '../api/users';
 import { friendsApi } from '../api/friends';
@@ -52,12 +54,35 @@ export function PublicProfile() {
   // Избранное самого зрителя — чтобы подсветить «общие любимые».
   const [myFavIds, setMyFavIds] = useState<Set<number>>(new Set());
 
+  // Live-присутствие из стора (обновляется в реальном времени по WS); до первого
+  // пуша используем то, что пришло в REST-ответе профиля.
+  const livePresence = usePresenceStore((s) => (profile ? s.byId[profile.id] : undefined));
+  const online = livePresence?.online ?? profile?.online ?? false;
+  const liveRoom = livePresence?.currentRoom ?? profile?.currentRoom ?? null;
+  const lastSeenAt = livePresence?.lastSeenAt ?? profile?.lastSeenAt ?? null;
+
+  // Пока пользователь офлайн — раз в 30с форсим ре-рендер, чтобы относительное
+  // «был в сети N минут назад» дотикивало само, без обновления страницы.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (online || !lastSeenAt) return;
+    const id = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, [online, lastSeenAt]);
+
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await usersApi.profile(username);
       setProfile(res.profile);
+      // Засеять стор присутствия начальным состоянием из REST-ответа.
+      usePresenceStore.getState().apply({
+        userId: res.profile.id,
+        online: res.profile.online,
+        currentRoom: res.profile.currentRoom,
+        lastSeenAt: res.profile.lastSeenAt,
+      });
     } catch (e) {
       setError(e instanceof ApiHttpError ? e.payload.message : 'Не удалось загрузить профиль');
     } finally {
@@ -83,6 +108,16 @@ export function PublicProfile() {
       alive = false;
     };
   }, [user?.kind]);
+
+  // Подписка на live-присутствие открытого профиля — статус обновляется в
+  // реальном времени, пока страница открыта.
+  useEffect(() => {
+    const id = profile?.id;
+    if (!id) return;
+    const presence = usePresenceStore.getState();
+    presence.watch(id);
+    return () => presence.unwatch(id);
+  }, [profile?.id]);
 
   if (user && user.kind === 'guest') return <Navigate to="/library" replace />;
   if (!user) return <Navigate to="/login" replace />;
@@ -139,12 +174,12 @@ export function PublicProfile() {
         seed={profile.avatarSeed}
         src={profile.avatarUrl}
         size={96}
-        status={profile.online ? (profile.currentRoom ? 'watching' : 'online') : 'offline'}
+        status={online ? (liveRoom ? 'watching' : 'online') : 'offline'}
       />
       <div>
         <div style={{ fontSize: 20, fontWeight: 600 }}>{profile.username}</div>
-        <div style={{ fontSize: 13, color: profile.online ? 'var(--ok)' : 'var(--text-3)', marginTop: 4 }}>
-          {profile.online ? (profile.currentRoom ? `смотрит «${profile.currentRoom.name}»` : 'в сети') : 'не в сети'}
+        <div style={{ fontSize: 13, color: online ? 'var(--ok)' : 'var(--text-3)', marginTop: 4 }}>
+          {online ? (liveRoom ? `смотрит «${liveRoom.name}»` : 'в сети') : lastSeenLabel(lastSeenAt, profile.gender)}
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>{actions}</div>

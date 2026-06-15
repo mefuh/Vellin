@@ -1,4 +1,4 @@
-import type { UserS2C } from '@vellin/shared';
+import type { UserC2S, UserS2C } from '@vellin/shared';
 
 type Listener = (msg: UserS2C) => void;
 
@@ -6,6 +6,8 @@ export interface UserSocketOptions {
   /** Async ticket refresher — должен вернуть валидный realtime-тикет. */
   getTicket: () => Promise<string>;
   onMessage: Listener;
+  /** Вызывается при каждом успешном открытии (для ре-подписок после реконнекта). */
+  onOpen?: () => void;
 }
 
 /**
@@ -39,6 +41,7 @@ export class UserSocket {
 
     sock.onopen = () => {
       this.retryCount = 0;
+      this.opts.onOpen?.();
     };
 
     sock.onmessage = (event) => {
@@ -73,6 +76,13 @@ export class UserSocket {
       this.socket.close(1000, 'client closed');
     }
     this.socket = null;
+  }
+
+  /** Отправить C2S-сообщение (подписки на присутствие и т.п.). */
+  send(msg: UserC2S): void {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify(msg));
+    }
   }
 
   private sendPong(serverTs: number): void {

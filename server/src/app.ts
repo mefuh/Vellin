@@ -20,6 +20,7 @@ import { registerWebSocket } from './ws/server.js';
 import { userHub } from './realtime/UserHub.js';
 import { getAcceptedFriendIds } from './friends/service.js';
 import { logger } from './utils/logger.js';
+import { prisma } from './db/prisma.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const env = loadEnv();
@@ -107,8 +108,14 @@ export async function buildApp(): Promise<FastifyInstance> {
     { prefix: '/api' },
   );
 
-  // Хаб presence не знает про БД — отдаём ему резолвер друзей для рассылки.
+  // Хаб presence не знает про БД — отдаём ему резолвер друзей для рассылки и
+  // writer «был в сети» (персистится при уходе пользователя в офлайн).
   userHub.setFriendResolver(getAcceptedFriendIds);
+  userHub.setLastSeenWriter((userId, at) => {
+    void prisma.user
+      .update({ where: { id: userId }, data: { lastSeenAt: at } })
+      .catch((err: unknown) => logger.error({ err, userId }, 'lastSeen write failed'));
+  });
 
   await registerWebSocket(app);
 

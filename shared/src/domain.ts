@@ -320,6 +320,8 @@ export interface FriendUser extends PublicUser {
   online: boolean;
   /** Комната, которую друг смотрит прямо сейчас, либо null. */
   currentRoom: RoomRef | null;
+  /** ISO-время последнего захода. Null, если онлайн или неизвестно. */
+  lastSeenAt: string | null;
 }
 
 /** Pending-заявка в друзья (входящая или исходящая). */
@@ -353,6 +355,8 @@ export interface PublicProfile extends PublicUser {
   createdAt: string;
   online: boolean;
   currentRoom: RoomRef | null;
+  /** ISO-время последнего захода (когда офлайн). Null, если онлайн или неизвестно. */
+  lastSeenAt: string | null;
   /**
    * До 5 любимых фильмов/сериалов (по позиции #1..#5). Заполняется только на
    * странице профиля `/u/:username`; в результатах поиска отсутствует.
@@ -381,6 +385,8 @@ export interface FriendPresence {
   userId: string;
   online: boolean;
   currentRoom: RoomRef | null;
+  /** ISO-время последнего захода (момент ухода в офлайн). Null, если онлайн или неизвестно. */
+  lastSeenAt: string | null;
 }
 
 // ── Voice/video call ────────────────────────────────────────────────────

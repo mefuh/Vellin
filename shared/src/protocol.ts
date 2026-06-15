@@ -428,11 +428,21 @@ export interface UserS2CPing {
   serverTs: number;
 }
 
-export type UserC2S = UserC2SPong;
+export type UserC2S = UserC2SPong | UserC2SWatchPresence | UserC2SUnwatchPresence;
 
 export interface UserC2SPong {
   t: 'pong';
   serverTs: number;
+}
+/** Подписаться на live-присутствие пользователя (открыта его страница профиля). */
+export interface UserC2SWatchPresence {
+  t: 'watch_presence';
+  userId: string;
+}
+/** Отписаться от live-присутствия пользователя (ушли со страницы). */
+export interface UserC2SUnwatchPresence {
+  t: 'unwatch_presence';
+  userId: string;
 }
 
 // ── Type guards ────────────────────────────────────────────────────────
