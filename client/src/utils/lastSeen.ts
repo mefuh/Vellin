@@ -42,6 +42,17 @@ export function lastSeenPhrase(iso: string): string {
   return `${pad(then.getDate())}.${pad(then.getMonth() + 1)}.${String(then.getFullYear()).slice(2)}`;
 }
 
+/**
+ * Короткий статус для списка друзей: то же относительное время, но без ведущей
+ * единицы у единственного числа — «минуту назад», «час назад» (а не «1 минуту
+ * назад»). Множественное и остальное остаётся как есть: «10 минут назад»,
+ * «2 часа назад», «вчера в 14:30», «21.01.26».
+ */
+export function lastSeenShort(iso: string | null): string {
+  if (!iso) return 'не в сети';
+  return lastSeenPhrase(iso).replace(/^1 /, '');
+}
+
 /** Глагол с учётом пола: «был» / «была» / «был(а)». */
 export function seenVerb(gender: Gender | null): string {
   return gender === 'female' ? 'была' : gender === 'male' ? 'был' : 'был(а)';

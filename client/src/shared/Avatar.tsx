@@ -46,6 +46,12 @@ export function Avatar({ name, seed, src, size = 32, status, ring, style }: Avat
       }`
     : 'inset 0 1px 0 rgba(255,255,255,0.15)';
 
+  // Размер точки растёт с аватаром, но с потолком (иначе на крупном — огромная).
+  const dotSize = Math.min(Math.max(8, size * 0.28), 16);
+  // Центрируем точку на окружности под ~45° (снизу-справа), а не в углу
+  // bounding-box — иначе на круглом аватаре она «выезжает» за край.
+  const dotInset = size * 0.1464 - dotSize / 2;
+
   return (
     <div style={{ position: 'relative', width: size, height: size, flexShrink: 0, ...style }}>
       {src ? (
@@ -85,10 +91,10 @@ export function Avatar({ name, seed, src, size = 32, status, ring, style }: Avat
         <span
           style={{
             position: 'absolute',
-            right: -1,
-            bottom: -1,
-            width: Math.max(8, size * 0.28),
-            height: Math.max(8, size * 0.28),
+            right: dotInset,
+            bottom: dotInset,
+            width: dotSize,
+            height: dotSize,
             borderRadius: '50%',
             background:
               status === 'online'
