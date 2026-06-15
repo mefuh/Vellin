@@ -80,6 +80,13 @@ export interface RoomSummary {
   ownerId: string;
   ownerUsername: string;
   participantCount: number;
+  /**
+   * Постер/превью играющего сейчас видео — для карточки в библиотеке. Null,
+   * если видео не задано или у источника нет обложки (тогда рисуем пейзаж).
+   */
+  videoPoster: string | null;
+  /** Название играющего видео для карточки. Null — нет видео/без имени. */
+  videoTitle: string | null;
   createdAt: string;
 }
 

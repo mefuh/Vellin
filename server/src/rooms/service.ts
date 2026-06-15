@@ -1,5 +1,5 @@
 import type { Room, User } from '@prisma/client';
-import type { RoomDetails, RoomSummary, VideoStatus } from '@vellin/shared';
+import type { ResolvedMedia, RoomDetails, RoomSummary, VideoStatus } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import { generateRoomSlug } from '../utils/ids.js';
@@ -28,6 +28,37 @@ function asStatus(s: string): VideoStatus {
   return s === 'playing' ? 'playing' : 'paused';
 }
 
+function parseResolved(json: string | null): ResolvedMedia | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json) as ResolvedMedia;
+    return parsed && typeof parsed.kind === 'string' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Постер/название играющего видео для карточки библиотеки. У живой комнаты
+ * берём актуальный снимок из рантайма (плейлистное имя + постер резолвера),
+ * у холодной — персистнутый `videoResolvedJson`.
+ */
+function videoCardInfo(room: Room): { videoPoster: string | null; videoTitle: string | null } {
+  const runtime = roomStore.get(room.id);
+  if (runtime) {
+    const v = runtime.snapshotVideo();
+    return {
+      videoPoster: v.resolved?.poster ?? null,
+      videoTitle: v.title ?? v.resolved?.title ?? null,
+    };
+  }
+  const resolved = parseResolved(room.videoResolvedJson);
+  return {
+    videoPoster: resolved?.poster ?? null,
+    videoTitle: resolved?.title ?? null,
+  };
+}
+
 export function toRoomSummary(
   room: Room & { owner: Pick<User, 'username'> },
 ): RoomSummary {
@@ -42,6 +73,7 @@ export function toRoomSummary(
     ownerId: room.ownerId,
     ownerUsername: room.owner.username,
     participantCount: roomStore.get(room.id)?.participants.size ?? 0,
+    ...videoCardInfo(room),
     createdAt: room.createdAt.toISOString(),
   };
 }

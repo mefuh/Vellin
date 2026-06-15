@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useNotificationsStore } from '../stores/notificationsStore';
 import { useFriendsStore } from '../stores/friendsStore';
 import { usePresenceStore } from '../stores/presenceStore';
+import { useLibraryStore } from '../stores/libraryStore';
 import { realtimeApi } from '../api/realtime';
 import { UserSocket } from '../ws/UserSocket';
 
@@ -47,6 +48,9 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
           usePresenceStore.getState().apply(msg.presence);
           useFriendsStore.getState().applyPresence(msg.presence);
           break;
+        case 'room_video':
+          useLibraryStore.getState().apply(msg.roomId, msg.videoPoster, msg.videoTitle);
+          break;
         case 'friends_changed':
           void friends.refresh();
           break;
@@ -61,9 +65,14 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
       // После каждого (ре)коннекта переподписываемся на открытый профиль. Небольшая
       // задержка — чтобы сервер успел навесить слушатель сообщений (иначе ранний
       // watch может потеряться в гонке сразу после open).
-      onOpen: () => setTimeout(() => usePresenceStore.getState().rewatch(), 250),
+      onOpen: () =>
+        setTimeout(() => {
+          usePresenceStore.getState().rewatch();
+          useLibraryStore.getState().rewatch();
+        }, 250),
     });
     usePresenceStore.getState().setSender((m) => socket.send(m));
+    useLibraryStore.getState().setSender((m) => socket.send(m));
     void socket.connect();
 
     return () => {
@@ -71,6 +80,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
       useNotificationsStore.getState().reset();
       useFriendsStore.getState().reset();
       usePresenceStore.getState().reset();
+      useLibraryStore.getState().reset();
     };
   }, [token, isUser]);
 

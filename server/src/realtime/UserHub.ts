@@ -34,6 +34,8 @@ class UserHub {
   private readonly watchedByConn = new Map<UserConnection, Set<string>>();
   /** watchedUserId → соединения, подписанные на его присутствие. */
   private readonly watchersOf = new Map<string, Set<UserConnection>>();
+  /** Соединения с открытой библиотекой — получают live-обновления превью комнат. */
+  private readonly librarySubs = new Set<UserConnection>();
   private friendResolver: FriendResolver | null = null;
   private lastSeenWriter: LastSeenWriter | null = null;
 
@@ -65,6 +67,7 @@ class UserHub {
       for (const target of watched) this.watchersOf.get(target)?.delete(conn);
       this.watchedByConn.delete(conn);
     }
+    this.librarySubs.delete(conn);
     const set = this.conns.get(conn.userId);
     if (!set) return;
     set.delete(conn);
@@ -140,6 +143,27 @@ class UserHub {
   /** Очистить комнату, только если пользователь всё ещё «в» этой комнате. */
   clearRoom(userId: string, slug: string): void {
     if (this.rooms.get(userId)?.slug === slug) this.setRoom(userId, null);
+  }
+
+  /** Подписать соединение на live-обновления библиотеки (открыта страница). */
+  watchLibrary(conn: UserConnection): void {
+    this.librarySubs.add(conn);
+  }
+
+  unwatchLibrary(conn: UserConnection): void {
+    this.librarySubs.delete(conn);
+  }
+
+  /** Разослать смену играющего видео всем, у кого открыта библиотека. */
+  broadcastRoomVideo(payload: {
+    roomId: string;
+    slug: string;
+    videoPoster: string | null;
+    videoTitle: string | null;
+  }): void {
+    if (this.librarySubs.size === 0) return;
+    const msg: UserS2C = { t: 'room_video', ...payload };
+    for (const c of this.librarySubs) if (c.isOpen()) c.send(msg);
   }
 
   /** Отправить сообщение всем соединениям пользователя. */

@@ -107,6 +107,10 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         userHub.watch(conn, m.userId);
       } else if (m.t === 'unwatch_presence' && typeof m.userId === 'string') {
         userHub.unwatch(conn, m.userId);
+      } else if (m.t === 'watch_library') {
+        userHub.watchLibrary(conn);
+      } else if (m.t === 'unwatch_library') {
+        userHub.unwatchLibrary(conn);
       }
     });
     socket.on('close', () => {
