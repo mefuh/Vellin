@@ -16,7 +16,8 @@ import { friendRoutes } from './friends/routes.js';
 import { dmRoutes } from './dm/routes.js';
 import { geoRoutes } from './geo/routes.js';
 import { titleRoutes } from './titles/routes.js';
-import { ensureUploadsDir, MAX_AVATAR_BYTES } from './auth/avatar.js';
+import { ensureUploadsDir } from './auth/avatar.js';
+import { ensureDmImagesDir, MAX_DM_IMAGE_BYTES } from './dm/image.js';
 import { registerWebSocket } from './ws/server.js';
 import { userHub } from './realtime/UserHub.js';
 import { getAcceptedFriendIds } from './friends/service.js';
@@ -57,13 +58,16 @@ export async function buildApp(): Promise<FastifyInstance> {
     options: { maxPayload: 64 * 1024 },
   });
   await app.register(multipart, {
-    limits: { fileSize: MAX_AVATAR_BYTES, files: 1 },
+    // Потолок для всех загрузок; конкретные лимиты enforce'ятся в маршрутах
+    // (аватар — 5 МБ, картинка ЛС — 10 МБ) через req.file({ limits }).
+    limits: { fileSize: MAX_DM_IMAGE_BYTES, files: 1 },
   });
 
   // Статика загруженных файлов (аватары). Отдаётся по /api/uploads/... —
   // существующие прокси-правила /api/ в nginx/Caddy уже её проксируют. Каталог
   // создаётся заранее, чтобы @fastify/static не упал на старте.
   await ensureUploadsDir();
+  await ensureDmImagesDir();
   await app.register(fastifyStatic, {
     root: path.resolve(env.UPLOADS_DIR),
     prefix: '/api/uploads/',
@@ -93,7 +97,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.code(500).send({ error: 'InternalServerError', message: 'Internal error', statusCode: 500 });
   });
 
-  app.get('/health', async () => ({ ok: true, version: '0.15.0' }));
+  app.get('/health', async () => ({ ok: true, version: '0.16.0' }));
 
   await app.register(
     async (api) => {

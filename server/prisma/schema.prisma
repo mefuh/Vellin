@@ -151,6 +151,10 @@ model DirectMessage {
   senderId       String
   sender         User         @relation("DmSender", fields: [senderId], references: [id], onDelete: Cascade)
   body           String
+  /// Прикреплённое изображение (/api/uploads/dm/...). Null — текстовое сообщение.
+  imageUrl       String?
+  imageWidth     Int?
+  imageHeight    Int?
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import type { DmConversation, PublicUser } from '@vellin/shared';
 import { Avatar, Button, Icon } from '../shared';
@@ -109,7 +109,7 @@ export function Messages() {
   }
 
   return (
-    <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100svh', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}>
       <AppHeader active="messages" />
       <div
         style={{
@@ -121,6 +121,7 @@ export function Messages() {
           padding: '20px max(24px, 3vw) 28px',
           display: 'grid',
           gridTemplateColumns: '340px minmax(0, 1fr)',
+          gridTemplateRows: 'minmax(0, 1fr)',
           gap: 20,
         }}
       >
@@ -183,7 +184,14 @@ function ConversationList({
         const online = presence[c.peer.id]?.online ?? c.online;
         const active = activeUsername === c.peer.username;
         const last = c.lastMessage;
-        const preview = last ? (last.senderId === myId ? `Вы: ${last.body}` : last.body) : '';
+        const previewBody = last ? (last.hasImage ? (last.body ? `📷 ${last.body}` : '📷 Фото') : last.body) : '';
+        const preview = last && last.senderId === myId ? `Вы: ${previewBody}` : previewBody;
+        // Галочки — только если последнее сообщение отправлено мной.
+        const mine = !!last && last.senderId === myId;
+        const read =
+          mine &&
+          c.peerLastReadAt != null &&
+          new Date(c.peerLastReadAt).getTime() >= new Date(last!.createdAt).getTime();
         return (
           <Link
             key={c.id}
@@ -211,7 +219,12 @@ function ConversationList({
                 <span style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                   {c.peer.username}
                 </span>
-                {last && <span style={{ fontSize: 11, color: 'var(--text-3)', flexShrink: 0 }}>{fmtTime(last.createdAt)}</span>}
+                {last && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    {mine && <Ticks read={read} color={read ? '#5aa7e6' : 'var(--text-3)'} />}
+                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{fmtTime(last.createdAt)}</span>
+                  </span>
+                )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
                 <span
@@ -274,6 +287,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
   const [peerId, setPeerId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const setThread = useDmStore((s) => s.setThread);
   const setActivePeer = useDmStore((s) => s.setActivePeer);
@@ -289,6 +303,13 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const peerRef = useRef<PublicUser | null>(null);
+  // «Прилипание» к низу: true, пока пользователь у нижнего края ленты.
+  const pinnedRef = useRef(true);
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
 
   // Раз в 30с форсим ре-рендер, чтобы относительное «был в сети …» дотикивало.
   const [, setTick] = useState(0);
@@ -339,12 +360,18 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username]);
 
-  // Автопрокрутка вниз при новых сообщениях.
+  // При открытии диалога — всегда к низу.
+  useEffect(() => {
+    pinnedRef.current = true;
+    scrollToBottom();
+  }, [peerId, scrollToBottom]);
+
+  // Новое сообщение — докручиваем вниз, только если пользователь был у низа
+  // (иначе не дёргаем при чтении истории).
   const msgCount = thread?.messages.length ?? 0;
   useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [msgCount, peerId]);
+    if (pinnedRef.current) scrollToBottom();
+  }, [msgCount, scrollToBottom]);
 
   // При появлении/скрытии клавиатуры (resize visual viewport) держим ленту у
   // низа, чтобы последнее сообщение не пряталось за поднявшимся композером.
@@ -352,12 +379,11 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     const vv = window.visualViewport;
     if (!vv) return;
     const toBottom = (): void => {
-      const el = scrollRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (pinnedRef.current) scrollToBottom();
     };
     vv.addEventListener('resize', toBottom);
     return () => vv.removeEventListener('resize', toBottom);
-  }, []);
+  }, [scrollToBottom]);
 
   const loadEarlier = async () => {
     if (!thread || !peerId || !thread.messages[0]) return;
@@ -416,7 +442,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
             aria-label="Назад"
             style={{ display: 'grid', placeItems: 'center', width: 34, height: 34, borderRadius: 'var(--r-md)', border: 'none', background: 'transparent', color: 'var(--text-1)', cursor: 'pointer' }}
           >
-            <Icon name="prev" size={20} />
+            <Icon name="chevron" size={24} style={{ transform: 'rotate(180deg)' }} />
           </button>
         )}
         <Link to={`/u/${encodeURIComponent(peer.username)}`} style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'inherit', textDecoration: 'none', minWidth: 0 }}>
@@ -429,7 +455,14 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
       </header>
 
       {/* Лента сообщений */}
-      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px max(12px, 3%)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div
+        ref={scrollRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        }}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px max(12px, 3%)', display: 'flex', flexDirection: 'column', gap: 2 }}
+      >
         {thread.hasMore && (
           <div style={{ display: 'grid', placeItems: 'center', paddingBottom: 8 }}>
             <Button size="sm" variant="ghost" disabled={loadingMore} onClick={() => void loadEarlier()}>
@@ -442,15 +475,77 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
             Нет сообщений. Напишите первым!
           </div>
         )}
-        <MessageList messages={thread.messages} myId={myId} peerLastReadAt={thread.peerLastReadAt} />
+        <MessageList
+          messages={thread.messages}
+          myId={myId}
+          peerLastReadAt={thread.peerLastReadAt}
+          onOpenImage={setLightbox}
+          onImageLoad={() => {
+            if (pinnedRef.current) scrollToBottom();
+          }}
+        />
       </div>
 
       {/* Ввод */}
       <Composer
         peer={peer}
         eligibility={thread.eligibility}
-        onSend={(body) => sendMessage(peer, body)}
+        onSend={(body, image) => sendMessage(peer, body, image)}
       />
+
+      {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} />}
+    </div>
+  );
+}
+
+/** Полноэкранный просмотр изображения. */
+function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.9)',
+        display: 'grid',
+        placeItems: 'center',
+        padding: 24,
+        zIndex: 1200,
+      }}
+    >
+      <img
+        src={url}
+        alt=""
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8, objectFit: 'contain' }}
+      />
+      <button
+        onClick={onClose}
+        aria-label="Закрыть"
+        style={{
+          position: 'fixed',
+          top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
+          right: 16,
+          display: 'grid',
+          placeItems: 'center',
+          width: 40,
+          height: 40,
+          borderRadius: 999,
+          border: 'none',
+          background: 'rgba(255,255,255,0.12)',
+          color: '#fff',
+          cursor: 'pointer',
+        }}
+      >
+        <Icon name="close" size={20} />
+      </button>
     </div>
   );
 }
@@ -459,10 +554,14 @@ function MessageList({
   messages,
   myId,
   peerLastReadAt,
+  onOpenImage,
+  onImageLoad,
 }: {
   messages: ClientDm[];
   myId: string;
   peerLastReadAt: string | null;
+  onOpenImage: (url: string) => void;
+  onImageLoad: () => void;
 }) {
   const peerReadMs = peerLastReadAt ? new Date(peerLastReadAt).getTime() : 0;
   let lastDay = '';
@@ -474,6 +573,13 @@ function MessageList({
         const showDay = day !== lastDay;
         lastDay = day;
         const read = mine && peerReadMs >= new Date(m.createdAt).getTime() && !m.pending;
+        const status = !mine ? null : m.failed ? (
+          <span style={{ color: '#ffd0d0' }} title="Не отправлено">!</span>
+        ) : m.pending ? (
+          <Ticks read={false} faint />
+        ) : (
+          <Ticks read={read} />
+        );
         return (
           <div key={m.id}>
             {showDay && (
@@ -487,43 +593,65 @@ function MessageList({
               <div
                 style={{
                   maxWidth: '74%',
-                  padding: '8px 12px',
+                  padding: m.imageUrl ? 4 : '8px 12px',
                   borderRadius: 16,
                   borderBottomRightRadius: mine ? 4 : 16,
                   borderBottomLeftRadius: mine ? 16 : 4,
                   background: mine ? 'var(--accent)' : 'var(--bg-3)',
                   color: mine ? '#fff' : 'var(--text-0)',
                   opacity: m.pending ? 0.65 : 1,
-                  position: 'relative',
+                  overflow: 'hidden',
                 }}
               >
-                <span style={{ fontSize: 14, lineHeight: 1.42, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body}</span>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 3,
-                    float: 'right',
-                    marginLeft: 10,
-                    marginTop: 6,
-                    fontSize: 10,
-                    color: mine ? 'rgba(255,255,255,0.75)' : 'var(--text-3)',
-                    transform: 'translateY(2px)',
-                  }}
-                >
-                  {fmtTime(m.createdAt)}
-                  {mine && (
-                    <span style={{ display: 'inline-flex' }}>
-                      {m.failed ? (
-                        <span style={{ color: '#ffd0d0' }} title="Не отправлено">!</span>
-                      ) : m.pending ? (
-                        <Ticks read={false} faint />
-                      ) : (
-                        <Ticks read={read} />
-                      )}
+                {m.imageUrl ? (
+                  <>
+                    <img
+                      src={m.imageUrl}
+                      alt=""
+                      loading="lazy"
+                      onLoad={onImageLoad}
+                      onClick={() => onOpenImage(m.imageUrl!)}
+                      style={{
+                        display: 'block',
+                        maxWidth: 'min(260px, 72vw)',
+                        maxHeight: 340,
+                        width: 'auto',
+                        height: 'auto',
+                        borderRadius: 12,
+                        cursor: 'pointer',
+                      }}
+                    />
+                    {m.body && (
+                      <span style={{ display: 'block', padding: '6px 8px 0', fontSize: 14, lineHeight: 1.42, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {m.body}
+                      </span>
+                    )}
+                    <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 3, fontSize: 10, color: mine ? 'rgba(255,255,255,0.78)' : 'var(--text-3)', padding: '3px 8px 1px' }}>
+                      {fmtTime(m.createdAt)}
+                      {status}
                     </span>
-                  )}
-                </span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 14, lineHeight: 1.42, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body}</span>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 3,
+                        float: 'right',
+                        marginLeft: 10,
+                        marginTop: 6,
+                        fontSize: 10,
+                        color: mine ? 'rgba(255,255,255,0.75)' : 'var(--text-3)',
+                        transform: 'translateY(2px)',
+                      }}
+                    >
+                      {fmtTime(m.createdAt)}
+                      {status}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -534,15 +662,23 @@ function MessageList({
 }
 
 /** Галочки доставки: одна (отправлено) / две (прочитано). */
-function Ticks({ read, faint }: { read: boolean; faint?: boolean }) {
-  const color = faint ? 'rgba(255,255,255,0.5)' : read ? '#bfe3ff' : 'rgba(255,255,255,0.78)';
+function Ticks({ read, faint, color }: { read: boolean; faint?: boolean; color?: string }) {
+  const stroke = color ?? (faint ? 'rgba(255,255,255,0.5)' : read ? '#bfe3ff' : 'rgba(255,255,255,0.78)');
   const w = read ? 17 : 12;
   return (
     <svg width={w} height="11" viewBox={`0 0 ${w} 11`} fill="none" style={{ display: 'block' }}>
-      <path d="M1 5.5L4 8.5L9.5 2" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      {read && <path d="M6.5 8.5L12 2" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />}
+      <path d="M1 5.5L4 8.5L9.5 2" stroke={stroke} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      {read && <path d="M6.5 8.5L12 2" stroke={stroke} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />}
     </svg>
   );
+}
+
+interface Attachment {
+  url: string;
+  width: number;
+  height: number;
+  /** Локальный objectURL для мгновенного превью. */
+  preview: string;
 }
 
 function Composer({
@@ -552,11 +688,15 @@ function Composer({
 }: {
   peer: PublicUser;
   eligibility: ThreadState['eligibility'];
-  onSend: (body: string) => void;
+  onSend: (body: string, image?: { url: string; width: number; height: number }) => void;
 }) {
   const [text, setText] = useState('');
+  const [attach, setAttach] = useState<Attachment | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState<string | null>(null);
   const sendTyping = useDmStore((s) => s.sendTyping);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const typingActiveRef = useRef(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -579,11 +719,48 @@ function Composer({
     }, 3000);
   };
 
+  const pickImage = async (file: File | null | undefined): Promise<void> => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setUploadErr('Можно прикреплять только изображения');
+      return;
+    }
+    setUploadErr(null);
+    const preview = URL.createObjectURL(file);
+    setAttach({ url: '', width: 0, height: 0, preview });
+    setUploading(true);
+    try {
+      const res = await dmApi.uploadImage(file);
+      setAttach({ url: res.url, width: res.width, height: res.height, preview });
+    } catch (e) {
+      URL.revokeObjectURL(preview);
+      setAttach(null);
+      setUploadErr(e instanceof ApiHttpError ? e.payload.message : 'Не удалось загрузить изображение');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const clearAttach = (): void => {
+    if (attach?.preview) URL.revokeObjectURL(attach.preview);
+    setAttach(null);
+    setUploadErr(null);
+  };
+
+  const canSend = (text.trim().length > 0 || (attach != null && attach.url !== '')) && !uploading;
+
   const submit = () => {
+    if (!canSend) return;
     const body = text.trim();
-    if (!body) return;
-    onSend(body);
+    if (attach && attach.url) {
+      onSend(body, { url: attach.url, width: attach.width, height: attach.height });
+    } else if (body) {
+      onSend(body);
+    } else {
+      return;
+    }
     setText('');
+    clearAttach();
     if (typingActiveRef.current) {
       typingActiveRef.current = false;
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
@@ -593,7 +770,7 @@ function Composer({
   };
 
   if (!eligibility.canMessage) {
-    const text =
+    const reasonText =
       eligibility.reason === 'blocked'
         ? 'Вы не можете писать этому пользователю.'
         : eligibility.reason === 'privacy'
@@ -601,47 +778,114 @@ function Composer({
           : 'Отправка сообщений недоступна.';
     return (
       <div style={{ padding: '14px 16px', borderTop: '1px solid var(--line-1)', color: 'var(--text-3)', fontSize: 13, textAlign: 'center', flexShrink: 0 }}>
-        {text}
+        {reasonText}
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, padding: '12px 16px', borderTop: '1px solid var(--line-1)', flexShrink: 0 }}>
-      <textarea
-        ref={taRef}
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          pokeTyping();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-        rows={1}
-        placeholder="Сообщение…"
-        style={{
-          flex: 1,
-          resize: 'none',
-          maxHeight: 140,
-          minHeight: 42,
-          padding: '11px 14px',
-          borderRadius: 'var(--r-lg)',
-          border: '1px solid var(--line-2)',
-          background: 'var(--bg-2)',
-          color: 'var(--text-0)',
-          fontSize: 14,
-          fontFamily: 'inherit',
-          lineHeight: 1.4,
-          outline: 'none',
-        }}
-      />
-      <Button variant="primary" size="md" icon="send" aria-label="Отправить" disabled={!text.trim()} onClick={submit}>
-        {''}
-      </Button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 16px', borderTop: '1px solid var(--line-1)', flexShrink: 0 }}>
+      {(attach || uploadErr) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {attach && (
+            <div style={{ position: 'relative', width: 64, height: 64, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--line-2)', flexShrink: 0 }}>
+              <img src={attach.preview} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: uploading ? 0.5 : 1 }} />
+              {uploading && (
+                <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+                  <Spinner />
+                </div>
+              )}
+              <button
+                onClick={clearAttach}
+                aria-label="Убрать изображение"
+                style={{ position: 'absolute', top: 2, right: 2, width: 18, height: 18, borderRadius: 999, border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', display: 'grid', placeItems: 'center', cursor: 'pointer' }}
+              >
+                <Icon name="close" size={12} />
+              </button>
+            </div>
+          )}
+          {uploadErr && <span style={{ fontSize: 12, color: 'var(--accent-hi)' }}>{uploadErr}</span>}
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            void pickImage(e.target.files?.[0]);
+            e.target.value = '';
+          }}
+        />
+        <button
+          onClick={() => fileRef.current?.click()}
+          aria-label="Прикрепить изображение"
+          title="Прикрепить изображение"
+          style={{ display: 'grid', placeItems: 'center', width: 42, height: 42, flexShrink: 0, borderRadius: 'var(--r-lg)', border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-1)', cursor: 'pointer' }}
+        >
+          <Icon name="image" size={20} />
+        </button>
+        <textarea
+          ref={taRef}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            pokeTyping();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          rows={1}
+          placeholder="Сообщение…"
+          style={{
+            flex: 1,
+            resize: 'none',
+            maxHeight: 140,
+            minHeight: 42,
+            padding: '11px 14px',
+            borderRadius: 'var(--r-lg)',
+            border: '1px solid var(--line-2)',
+            background: 'var(--bg-2)',
+            color: 'var(--text-0)',
+            fontSize: 14,
+            fontFamily: 'inherit',
+            lineHeight: 1.4,
+            outline: 'none',
+          }}
+        />
+        <Button
+          variant="primary"
+          size="md"
+          icon="send"
+          aria-label="Отправить"
+          disabled={!canSend}
+          onClick={submit}
+          style={{ width: 42, height: 42, padding: 0, flexShrink: 0 }}
+        >
+          {''}
+        </Button>
+      </div>
     </div>
+  );
+}
+
+/** Маленький крутящийся индикатор (для превью при загрузке). */
+function Spinner() {
+  return (
+    <span
+      style={{
+        width: 18,
+        height: 18,
+        borderRadius: 999,
+        border: '2px solid rgba(255,255,255,0.35)',
+        borderTopColor: '#fff',
+        animation: 'vellinBufferSpin .7s linear infinite',
+        display: 'block',
+      }}
+    />
   );
 }

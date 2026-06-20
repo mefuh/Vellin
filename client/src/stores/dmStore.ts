@@ -55,8 +55,8 @@ interface DmState {
   prependMessages: (peerId: string, older: DirectMessageDTO[], hasMore: boolean) => void;
   setActivePeer: (peerId: string | null) => void;
 
-  /** Оптимистично отправить ЛС. */
-  send: (peer: PublicUser, body: string) => void;
+  /** Оптимистично отправить ЛС (текст и/или изображение). */
+  send: (peer: PublicUser, body: string, image?: { url: string; width: number; height: number }) => void;
   /** Входящее/эхо сообщение из WS. */
   applyIncoming: (message: DirectMessageDTO, peer: PublicUser, unreadTotal: number, myId: string) => void;
   /** Ошибка отправки по nonce. */
@@ -83,7 +83,12 @@ function bumpConversation(
   unreadDelta: number,
 ): DmConversation[] {
   const idx = list.findIndex((c) => c.peer.id === peer.id);
-  const last = { body: message.body, senderId: message.senderId, createdAt: message.createdAt };
+  const last = {
+    body: message.body,
+    senderId: message.senderId,
+    createdAt: message.createdAt,
+    hasImage: !!message.imageUrl,
+  };
   if (idx === -1) {
     return [
       {
@@ -142,9 +147,9 @@ export const useDmStore = create<DmState>((set, get) => ({
 
   setActivePeer: (activePeerId) => set({ activePeerId }),
 
-  send: (peer, body) => {
+  send: (peer, body, image) => {
     const text = body.trim();
-    if (!text) return;
+    if (!text && !image) return;
     const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const optimistic: ClientDm = {
       id: nonce,
@@ -152,6 +157,7 @@ export const useDmStore = create<DmState>((set, get) => ({
       senderId: 'me', // плейсхолдер; реальный senderId придёт с эхом
       body: text,
       createdAt: new Date().toISOString(),
+      ...(image ? { imageUrl: image.url, imageWidth: image.width, imageHeight: image.height } : {}),
       nonce,
       pending: true,
     };
@@ -174,7 +180,13 @@ export const useDmStore = create<DmState>((set, get) => ({
           };
       return { threads: { ...s.threads, [peer.id]: thread } };
     });
-    get()._send?.({ t: 'dm_send', toUserId: peer.id, body: text, nonce });
+    get()._send?.({
+      t: 'dm_send',
+      toUserId: peer.id,
+      body: text,
+      nonce,
+      ...(image ? { imageUrl: image.url, imageWidth: image.width, imageHeight: image.height } : {}),
+    });
   },
 
   applyIncoming: (message, peer, unreadTotal, myId) =>
@@ -239,16 +251,18 @@ export const useDmStore = create<DmState>((set, get) => ({
           unreadTotal: payload.unreadTotal ?? s.unreadTotal,
         };
       }
-      // Собеседник (= byUserId) прочитал мои сообщения — обновить «галочки».
-      // Ищем тред по id собеседника (ключ треда), а не по conversationId —
-      // надёжно даже для только что созданного диалога.
+      // Собеседник (= byUserId) прочитал мои сообщения — обновить «галочки»
+      // и в открытом треде, и в списке диалогов. Ищем по id собеседника
+      // (ключ треда / peer.id), надёжно даже для только что созданного диалога.
       const t = s.threads[payload.byUserId];
-      if (!t) return s;
+      const conversations = s.conversations.map((c) =>
+        c.peer.id === payload.byUserId ? { ...c, peerLastReadAt: payload.readAt } : c,
+      );
       return {
-        threads: {
-          ...s.threads,
-          [payload.byUserId]: { ...t, peerLastReadAt: payload.readAt },
-        },
+        conversations,
+        threads: t
+          ? { ...s.threads, [payload.byUserId]: { ...t, peerLastReadAt: payload.readAt } }
+          : s.threads,
       };
     }),
 
