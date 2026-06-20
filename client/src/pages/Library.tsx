@@ -7,11 +7,13 @@ import { useAuthStore } from '../stores/authStore';
 import { useLibraryStore } from '../stores/libraryStore';
 import { CreateRoomModal } from '../components/CreateRoomModal';
 import { AppHeader } from '../components/AppHeader';
+import { useIsMobile } from '../hooks/useMediaQuery';
 import { ApiHttpError } from '../api/client';
 
 export function Library() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  const isMobile = useIsMobile();
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -59,7 +61,7 @@ export function Library() {
     <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
       <AppHeader active="library" />
 
-      <main style={{ padding: '32px max(24px, 4vw) 80px', display: 'flex', flexDirection: 'column', gap: 28 }}>
+      <main style={{ padding: `32px max(24px, 4vw) ${isMobile ? 104 : 80}px`, display: 'flex', flexDirection: 'column', gap: 28 }}>
         <section
           style={{
             display: 'flex',

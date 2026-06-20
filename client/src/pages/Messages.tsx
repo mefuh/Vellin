@@ -65,7 +65,7 @@ export function Messages() {
     return (
       <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
         <AppHeader active="messages" />
-        <main style={{ padding: '16px 12px 64px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <main style={{ padding: '16px 12px 104px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <h1 style={{ fontSize: 24, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>Сообщения</h1>
           {list}
         </main>

@@ -62,7 +62,7 @@ export function Profile() {
         {header}
         <main
           style={{
-            padding: '20px 14px 64px',
+            padding: '20px 14px 104px',
             maxWidth: 760,
             margin: '0 auto',
             display: 'flex',
