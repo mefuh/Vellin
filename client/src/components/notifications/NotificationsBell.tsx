@@ -59,6 +59,14 @@ export function NotificationsBell() {
     navigate(`/room/${n.data.roomSlug}`);
   };
 
+  const goMessages = (n: AppNotification): void => {
+    if (!n.actor?.username) return;
+    closePanel();
+    // Прочтение диалога снимет уведомление через WS; убираем и локально сразу.
+    void dismiss(n.id);
+    navigate(`/messages/${encodeURIComponent(n.actor.username)}`);
+  };
+
   const accept = async (actorId: string): Promise<void> => {
     const req = useFriendsStore.getState().incoming.find((r) => r.user.id === actorId);
     try {
@@ -149,7 +157,7 @@ export function NotificationsBell() {
             }}
           >
             <button
-              onClick={() => goProfile(n.actor?.username)}
+              onClick={() => (n.type === 'direct_message' ? goMessages(n) : goProfile(n.actor?.username))}
               style={{ background: 'transparent', border: 'none', padding: 0, cursor: n.actor ? 'pointer' : 'default' }}
             >
               <Avatar
@@ -178,6 +186,13 @@ export function NotificationsBell() {
                 <div style={{ marginTop: 8 }}>
                   <Button size="sm" variant="secondary" iconRight="arrow" onClick={() => goRoom(n)}>
                     Перейти
+                  </Button>
+                </div>
+              )}
+              {n.type === 'direct_message' && n.actor && (
+                <div style={{ marginTop: 8 }}>
+                  <Button size="sm" variant="secondary" icon="chat" onClick={() => goMessages(n)}>
+                    Открыть
                   </Button>
                 </div>
               )}
@@ -280,6 +295,16 @@ function NotificationText({ n }: { n: AppNotification }) {
           <b style={strong}>{name}</b> приглашает в «{n.data.roomName ?? 'комнату'}»
         </span>
       );
+    case 'direct_message': {
+      const count = n.data.count ?? 1;
+      return (
+        <span>
+          <b style={strong}>{name}</b>
+          {count > 1 ? ` прислал ${count} новых сообщения` : ' прислал вам сообщение'}
+          {n.data.preview ? <span style={{ color: 'var(--text-2)' }}>: «{n.data.preview}»</span> : ''}
+        </span>
+      );
+    }
     default:
       return null;
   }

@@ -419,12 +419,18 @@ function ProfileActions({
       Присоединиться
     </Button>
   );
+  const writeBtn = (
+    <Button size="sm" variant="secondary" icon="chat" onClick={() => navigate(`/messages/${encodeURIComponent(profile.username)}`)}>
+      Написать
+    </Button>
+  );
 
   switch (profile.relationship) {
     case 'none':
       return (
         <>
           {joinBtn}
+          {writeBtn}
           <Button size="sm" variant="primary" icon="userPlus" disabled={busy} onClick={() => void act(() => friendsApi.send({ userId: profile.id }))}>
             Добавить в друзья
           </Button>
@@ -437,6 +443,7 @@ function ProfileActions({
       return (
         <>
           {joinBtn}
+          {writeBtn}
           <Button size="sm" variant="primary" disabled={busy} onClick={() => void act(() => friendsApi.send({ userId: profile.id }))}>
             Принять заявку
           </Button>
@@ -449,6 +456,7 @@ function ProfileActions({
       return (
         <>
           {joinBtn}
+          {writeBtn}
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => void act(() => friendsApi.remove(profile.id))}>
             Отменить заявку
           </Button>
@@ -458,6 +466,7 @@ function ProfileActions({
       return (
         <>
           {joinBtn}
+          {writeBtn}
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => void act(() => friendsApi.remove(profile.id))}>
             Удалить из друзей
           </Button>

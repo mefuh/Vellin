@@ -112,6 +112,7 @@ const updatePrivacySchema = z.object({
     friends: privacyRuleSchema,
     personalInfo: privacyRuleSchema,
     favorites: privacyRuleSchema,
+    messages: privacyRuleSchema,
   }),
 }) satisfies z.ZodType<UpdatePrivacyRequest>;
 

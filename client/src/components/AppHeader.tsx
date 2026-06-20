@@ -1,10 +1,11 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Avatar, Button, Chip, VellinLogo, type IconName } from '../shared';
 import { useAuthStore } from '../stores/authStore';
+import { useDmStore } from '../stores/dmStore';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { NotificationsBell } from './notifications/NotificationsBell';
 
-export type DockPage = 'library' | 'friends' | 'profile';
+export type DockPage = 'library' | 'friends' | 'messages' | 'profile';
 
 /**
  * Единый верхний хедер с доком. Один и тот же набор кнопок в одних и тех же
@@ -17,6 +18,7 @@ export function AppHeader({ active }: { active?: DockPage }) {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const dmUnread = useDmStore((s) => s.unreadTotal);
   const isMobile = useIsMobile();
 
   const activeStyle = {
@@ -85,6 +87,32 @@ export function AppHeader({ active }: { active?: DockPage }) {
             <NotificationsBell />
             {navBtn('library', 'library', 'Библиотека', '/library')}
             {navBtn('friends', 'users', 'Друзья', '/friends')}
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              {navBtn('messages', 'chat', 'Сообщения', '/messages')}
+              {dmUnread > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: -5,
+                    right: -5,
+                    minWidth: 17,
+                    height: 17,
+                    padding: '0 4px',
+                    borderRadius: 9,
+                    background: 'var(--accent)',
+                    color: '#fff',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    display: 'grid',
+                    placeItems: 'center',
+                    boxShadow: '0 0 0 2px var(--bg-0)',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {dmUnread > 99 ? '99+' : dmUnread}
+                </span>
+              )}
+            </span>
             {user.isAdmin && (
               <Button
                 variant="secondary"

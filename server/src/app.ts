@@ -13,6 +13,7 @@ import { authRoutes } from './auth/routes.js';
 import { roomRoutes } from './rooms/routes.js';
 import { adminRoutes } from './admin/routes.js';
 import { friendRoutes } from './friends/routes.js';
+import { dmRoutes } from './dm/routes.js';
 import { geoRoutes } from './geo/routes.js';
 import { titleRoutes } from './titles/routes.js';
 import { ensureUploadsDir, MAX_AVATAR_BYTES } from './auth/avatar.js';
@@ -103,6 +104,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(roomRoutes);
       await api.register(adminRoutes);
       await api.register(friendRoutes);
+      await api.register(dmRoutes);
       await api.register(geoRoutes);
       await api.register(titleRoutes);
     },

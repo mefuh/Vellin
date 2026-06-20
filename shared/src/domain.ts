@@ -42,8 +42,11 @@ export interface FavoriteTitle {
 /** Кому доступна категория данных профиля. */
 export type PrivacyVisibility = 'everyone' | 'friends' | 'nobody';
 
-/** Категории приватности профиля. */
-export type PrivacyCategory = 'online' | 'friends' | 'personalInfo' | 'favorites';
+/**
+ * Категории приватности профиля.
+ * - `messages` — кто может писать вам в личные сообщения (зритель = отправитель).
+ */
+export type PrivacyCategory = 'online' | 'friends' | 'personalInfo' | 'favorites' | 'messages';
 
 /**
  * Правило видимости одной категории. `allow`/`deny` — точечные исключения по
@@ -65,6 +68,7 @@ export const PRIVACY_CATEGORIES: readonly PrivacyCategory[] = [
   'friends',
   'personalInfo',
   'favorites',
+  'messages',
 ];
 
 /** Базовое правило по умолчанию — всё видно всем (текущее поведение сервиса). */
@@ -77,6 +81,7 @@ export function defaultPrivacySettings(): PrivacySettings {
     friends: { visibility: 'everyone', allow: [], deny: [] },
     personalInfo: { visibility: 'everyone', allow: [], deny: [] },
     favorites: { visibility: 'everyone', allow: [], deny: [] },
+    messages: { visibility: 'everyone', allow: [], deny: [] },
   };
 }
 
@@ -422,17 +427,72 @@ export interface PublicProfile extends PublicUser {
   friendshipId: string | null;
 }
 
-export type NotificationType = 'friend_request' | 'friend_accepted' | 'room_invite';
+export type NotificationType =
+  | 'friend_request'
+  | 'friend_accepted'
+  | 'room_invite'
+  | 'direct_message';
 
 /** Уведомление в колокольчике. `actor` — кто инициировал. */
 export interface AppNotification {
   id: string;
   type: NotificationType;
   actor: PublicUser | null;
-  /** Контекст: для room_invite — куда зовут. */
-  data: { roomSlug?: string; roomName?: string };
+  /** Контекст: для room_invite — куда зовут; для direct_message — превью/счётчик. */
+  data: {
+    roomSlug?: string;
+    roomName?: string;
+    /** direct_message: id диалога. */
+    conversationId?: string;
+    /** direct_message: короткое превью последнего сообщения. */
+    preview?: string;
+    /** direct_message: сколько непрочитанных в диалоге (для текста «N новых»). */
+    count?: number;
+  };
   read: boolean;
   createdAt: string;
+}
+
+// ── Личные сообщения (ЛС) ────────────────────────────────────────────────
+
+/** Одно личное сообщение. */
+export interface DirectMessageDTO {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  body: string;
+  createdAt: string;
+  /**
+   * Эхо клиентского nonce — отдаётся только отправителю, чтобы он сопоставил
+   * пришедшее с сервера сообщение со своей оптимистичной отправкой.
+   */
+  nonce?: string;
+}
+
+/** Сводка диалога для списка слева на странице «Сообщения». */
+export interface DmConversation {
+  id: string;
+  /** Собеседник. */
+  peer: PublicUser;
+  /** Последнее сообщение в диалоге (для превью), либо null — диалог пуст. */
+  lastMessage: { body: string; senderId: string; createdAt: string } | null;
+  /** Сколько у меня непрочитанных в этом диалоге. */
+  unreadCount: number;
+  /**
+   * Когда собеседник прочитал переписку (ISO) — для «галочек» на моих
+   * сообщениях. Null — ещё не читал.
+   */
+  peerLastReadAt: string | null;
+  /** Онлайн ли собеседник (снимок на момент запроса). */
+  online: boolean;
+  /** Время последнего сообщения (ISO) — для сортировки списка. */
+  lastMessageAt: string;
+}
+
+/** Можно ли писать данному пользователю + причина запрета (для UI чата). */
+export interface DmEligibility {
+  canMessage: boolean;
+  reason: 'ok' | 'blocked' | 'privacy' | 'self' | 'guest' | 'not_found';
 }
 
 /** Live-присутствие друга, рассылается по пользовательскому WS-каналу. */

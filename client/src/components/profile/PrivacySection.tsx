@@ -18,6 +18,7 @@ const CATS: { key: PrivacyCategory; title: string; desc: string }[] = [
   { key: 'friends', title: 'Список друзей', desc: 'Кто видит ваших друзей в профиле.' },
   { key: 'personalInfo', title: 'Личная информация', desc: 'Пол, дата рождения и город.' },
   { key: 'favorites', title: 'Любимое кино', desc: 'Кто видит ваш список любимых фильмов.' },
+  { key: 'messages', title: 'Личные сообщения', desc: 'Кто может писать вам в личку.' },
 ];
 
 const VIS: { value: PrivacyVisibility; label: string }[] = [
