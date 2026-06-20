@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import type { DmConversation, PublicUser } from '@vellin/shared';
 import { Avatar, Button, Icon } from '../shared';
@@ -6,6 +6,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useDmStore, type ClientDm, type ThreadState } from '../stores/dmStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useIsMobile } from '../hooks/useMediaQuery';
+import { useVisualViewport } from '../hooks/useVisualViewport';
 import { dmApi } from '../api/dm';
 import { ApiHttpError } from '../api/client';
 import { lastSeenLabel } from '../utils/lastSeen';
@@ -34,6 +35,10 @@ export function Messages() {
   const conversations = useDmStore((s) => s.conversations);
   const setConversations = useDmStore((s) => s.setConversations);
 
+  // Открытый чат на мобилке занимает весь экран и подстраивается под клавиатуру.
+  const chatOpen = isMobile && !!username;
+  const vp = useVisualViewport(chatOpen);
+
   useEffect(() => {
     let alive = true;
     void dmApi
@@ -47,6 +52,17 @@ export function Messages() {
     };
   }, [setConversations]);
 
+  // Пока открыт полноэкранный чат — запрещаем прокрутку body (фикс-контейнер
+  // не должен «резинить» под собой страницу).
+  useEffect(() => {
+    if (!chatOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [chatOpen]);
+
   if (user && user.kind === 'guest') return <Navigate to="/library" replace />;
   if (!user) return <Navigate to="/login" replace />;
 
@@ -56,16 +72,35 @@ export function Messages() {
   if (isMobile) {
     // Мобайл: либо список, либо открытый чат на весь экран.
     if (username) {
-      return (
-        <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}>
-          {chat}
-        </div>
-      );
+      // Высоту берём из visual viewport — тогда композер «едет» вместе с
+      // выезжающей клавиатурой и не прячется за ней. Фоллбэк — 100svh.
+      const wrapStyle: CSSProperties = vp
+        ? {
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: vp.height,
+            transform: `translateY(${vp.offsetTop}px)`,
+            background: 'var(--bg-0)',
+            color: 'var(--text-0)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }
+        : {
+            minHeight: '100svh',
+            background: 'var(--bg-0)',
+            color: 'var(--text-0)',
+            display: 'flex',
+            flexDirection: 'column',
+          };
+      return <div style={wrapStyle}>{chat}</div>;
     }
     return (
       <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
         <AppHeader active="messages" />
-        <main style={{ padding: '16px 12px 64px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <main style={{ padding: '16px 12px 104px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <h1 style={{ fontSize: 24, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>Сообщения</h1>
           {list}
         </main>
@@ -310,6 +345,19 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [msgCount, peerId]);
+
+  // При появлении/скрытии клавиатуры (resize visual viewport) держим ленту у
+  // низа, чтобы последнее сообщение не пряталось за поднявшимся композером.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const toBottom = (): void => {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    };
+    vv.addEventListener('resize', toBottom);
+    return () => vv.removeEventListener('resize', toBottom);
+  }, []);
 
   const loadEarlier = async () => {
     if (!thread || !peerId || !thread.messages[0]) return;

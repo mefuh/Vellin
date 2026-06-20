@@ -58,7 +58,9 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   fullscreen: <path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" />,
   minimize: <path d="M8 4v4H4M16 4v4h4M8 20v-4H4M16 20v-4h4" />,
-  chat: <path d="M21 12a8 8 0 11-3.2-6.4L21 4l-1.4 3.5A7.96 7.96 0 0121 12z" />,
+  chat: (
+    <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
+  ),
   send: <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />,
   plus: <path d="M12 5v14M5 12h14" />,
   close: <path d="M18 6L6 18M6 6l12 12" />,

@@ -368,7 +368,7 @@ export function PublicProfile() {
       </Button>
     </div>
   ) : isMobile ? (
-    <main style={{ padding: '20px 14px 64px', maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <main style={{ padding: '20px 14px 104px', maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
       {identityCard}
       {details}
       {friendsCard}

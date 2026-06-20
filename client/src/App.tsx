@@ -12,6 +12,7 @@ import { PublicProfile } from './pages/PublicProfile';
 import { Room } from './pages/Room';
 import { NotFound } from './pages/NotFound';
 import { RealtimeProvider } from './realtime/RealtimeProvider';
+import { MobileDock } from './components/MobileDock';
 import { AdminShell } from './pages/admin/AdminShell';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminUsers } from './pages/admin/AdminUsers';
@@ -135,6 +136,7 @@ export function App() {
       </Route>
       <Route path="*" element={<NotFound />} />
       </Routes>
+      <MobileDock />
     </RealtimeProvider>
   );
 }
