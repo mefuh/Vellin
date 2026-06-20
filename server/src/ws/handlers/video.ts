@@ -52,10 +52,12 @@ export async function handleSetVideoUrl(
     return;
   }
 
+  runtime.signalVideoLoading(ctx.principal.userId, true, { sourceUrl: msg.url });
   try {
     const resolved = await resolveWithCache(msg.url);
     await runtime.setVideoUrl(msg.url, ctx.principal.userId, true, null, resolved);
   } catch (err) {
+    runtime.signalVideoLoading(ctx.principal.userId, false);
     const userMessage =
       err instanceof ResolveError ? err.userMessage : 'Could not resolve this media link';
     logger.warn({ err: (err as Error).message, url: msg.url }, 'video resolve failed');

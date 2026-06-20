@@ -171,6 +171,9 @@ export function useRoomSync(opts: UseRoomSyncOpts): RoomSyncApi {
           case 'video_set_url':
             store.setVideoUrl(msg.url, msg.video);
             break;
+          case 'video_loading':
+            store.setVideoLoading(msg.loading ? { title: msg.title, sourceUrl: msg.sourceUrl } : null);
+            break;
           case 'reaction':
             store.appendReaction(msg.reaction);
             window.setTimeout(() => {

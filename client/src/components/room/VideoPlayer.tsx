@@ -119,6 +119,10 @@ export function VideoPlayer({
   const resolved: ResolvedMedia | null = video?.resolved ?? null;
   const [torrentStats, setTorrentStats] = useState<TorrentStats | null>(null);
   const updateVideo = useRoomStore((s) => s.updateVideo);
+  // Видео меняется: фаза резолва (сигнал сервера, ещё нет нового resolved) →
+  // фаза загрузки движка (resolved есть, но ready ещё false). Карточка
+  // «Меняем видео…» держится весь интервал.
+  const videoLoadingState = useRoomStore((s) => s.videoLoading);
 
   // Stable refs so controller (created ONCE) reads up-to-date props without rebuild.
   const canPlayPauseRef = useRef(canPlayPause);
@@ -465,6 +469,13 @@ export function VideoPlayer({
     else void document.exitFullscreen?.();
   };
 
+  // Индикатор смены видео: фаза резолва (сигнал сервера) ИЛИ фаза загрузки
+  // нового движка (resolved есть, ready ещё нет, без ошибки).
+  const inResolvePhase = !!videoLoadingState;
+  const showLoadingCard = inResolvePhase || (!!resolved && !ready && !engineError);
+  const loadingCardPoster = inResolvePhase ? undefined : resolved?.poster ?? undefined;
+  const loadingCardTitle = inResolvePhase ? videoLoadingState?.title : resolved?.title;
+
   if (!resolved || !video?.url) {
     return (
       <div
@@ -481,6 +492,7 @@ export function VideoPlayer({
       >
         <MountainPoster seed={2} />
         <ReactionsOverlay />
+        {videoLoadingState && <VideoLoadingCard title={videoLoadingState.title} zIndex={4} />}
         <div
           style={{
             position: 'absolute',
@@ -545,8 +557,12 @@ export function VideoPlayer({
       />
 
       {/* YouTube-style buffering spinner. Only visible while the engine
-          reports a sustained (>200ms) stall — not on every micro-buffer. */}
-      {showBufferSpinner && !engineError && <BufferingSpinner />}
+          reports a sustained (>200ms) stall — not on every micro-buffer. Скрыт
+          во время карточки смены видео (у неё свой спиннер). */}
+      {showBufferSpinner && !engineError && !showLoadingCard && <BufferingSpinner />}
+
+      {/* Индикатор смены видео — покрывает и серверный резолв, и загрузку движка. */}
+      {showLoadingCard && <VideoLoadingCard poster={loadingCardPoster} title={loadingCardTitle} />}
 
       {/* Reactions live inside the player element so they keep flying in
           fullscreen — an overlay outside it would be hidden by the top-layer. */}
@@ -955,6 +971,95 @@ function ErrorOverlay({
           Сменить ссылку
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Карточка «Меняем видео…» — показывается весь интервал смены: от серверного
+ * сигнала (резолв yt-dlp) до готовности нового движка. В фазе загрузки, когда
+ * уже известен постер нового видео, рисуем его размытым фоном с названием.
+ */
+function VideoLoadingCard({
+  poster,
+  title,
+  zIndex = 1,
+}: {
+  poster?: string;
+  title?: string;
+  zIndex?: number;
+}): JSX.Element {
+  return (
+    <div
+      aria-live="polite"
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex,
+        pointerEvents: 'none',
+        overflow: 'hidden',
+        background: '#000',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 14,
+      }}
+    >
+      {poster && (
+        <img
+          src={poster}
+          alt=""
+          aria-hidden
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            filter: 'blur(18px) brightness(0.45)',
+            transform: 'scale(1.1)',
+          }}
+        />
+      )}
+      <div
+        style={{
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 12,
+          padding: '0 24px',
+          textAlign: 'center',
+        }}
+      >
+        <svg
+          width="52"
+          height="52"
+          viewBox="0 0 50 50"
+          style={{ animation: 'vellinBufferSpin 1s linear infinite', filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.45))' }}
+        >
+          <circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="4" />
+          <circle cx="25" cy="25" r="20" fill="none" stroke="#fff" strokeWidth="4" strokeLinecap="round" strokeDasharray="70 200" />
+        </svg>
+        <div style={{ color: '#fff', fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>
+          Меняем видео…
+        </div>
+        {title && (
+          <div
+            style={{
+              color: 'rgba(255,255,255,0.78)',
+              fontSize: 13,
+              maxWidth: 420,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {title}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

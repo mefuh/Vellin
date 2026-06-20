@@ -206,6 +206,7 @@ export type S2C =
   | S2CVideoApply
   | S2CVideoSync
   | S2CVideoSetUrl
+  | S2CVideoLoading
   | S2CSyncStatus
   | S2CReaction
   | S2CRoomStateUpdate
@@ -284,6 +285,21 @@ export interface S2CVideoSetUrl {
 export interface S2CReaction {
   t: 'reaction';
   reaction: ReactionEvent;
+}
+/**
+ * Видео начало меняться — рассылается ВСЕМ сразу при старте смены (до того как
+ * сервер извлёк поток), чтобы плеер показал индикатор «меняем видео…» весь
+ * интервал, а не только при загрузке у себя. `loading:false` — смена сорвалась
+ * (резолв упал); успех закрывается приходом `video_set_url`.
+ */
+export interface S2CVideoLoading {
+  t: 'video_loading';
+  loading: boolean;
+  byUserId: string;
+  /** Известное название/ссылка для подписи карточки (если есть). */
+  title?: string;
+  sourceUrl?: string;
+  serverTs: number;
 }
 /** Состояние синхронизации комнаты — питает информер плеера (см. SyncStatus). */
 export interface S2CSyncStatus extends SyncStatus {

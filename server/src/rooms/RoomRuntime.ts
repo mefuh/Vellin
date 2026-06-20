@@ -920,6 +920,22 @@ export class RoomRuntime {
    * to a synthetic embed-shaped record only if the caller couldn't resolve
    * (legacy callers).
    */
+  /**
+   * Сигнал «видео меняется» — шлём всем сразу при старте смены, ещё до резолва,
+   * чтобы индикатор загрузки покрывал весь интервал (включая секунды yt-dlp).
+   * `loading:false` означает срыв смены (резолв упал).
+   */
+  signalVideoLoading(byUserId: string, loading: boolean, info?: { title?: string; sourceUrl?: string }): void {
+    this.broadcast({
+      t: 'video_loading',
+      loading,
+      byUserId,
+      title: info?.title,
+      sourceUrl: info?.sourceUrl,
+      serverTs: Date.now(),
+    });
+  }
+
   async setVideoUrl(
     url: string,
     byUserId: string,

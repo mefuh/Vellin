@@ -22,12 +22,17 @@ const MAX_TITLE_LEN = 200;
  * keeps its current video and the user can try again.
  */
 async function resolveOrReport(
+  runtime: RoomRuntime,
   ctx: ConnectionContext | null,
   url: string,
+  info: { byUserId: string; title?: string },
 ): Promise<ReturnType<typeof resolveWithCache> | null> {
+  // Индикатор «меняем видео…» — всем сразу, ещё до извлечения потока.
+  runtime.signalVideoLoading(info.byUserId, true, { sourceUrl: url, title: info.title });
   try {
     return await resolveWithCache(url);
   } catch (err) {
+    runtime.signalVideoLoading(info.byUserId, false);
     const msg = err instanceof ResolveError ? err.userMessage : 'Could not resolve next video';
     logger.warn({ err: (err as Error).message, url }, 'playlist resolve failed');
     if (ctx) sendError(ctx, 'resolve_failed', msg);
@@ -121,7 +126,10 @@ export async function handleVideoEnded(
   if (typeof msg.currentUrl !== 'string') return;
   const next = runtime.popNextOnEnded(msg.currentUrl);
   if (!next) return;
-  const resolved = await resolveOrReport(ctx, next.url);
+  const resolved = await resolveOrReport(runtime, ctx, next.url, {
+    byUserId: ctx.principal.userId,
+    title: next.title,
+  });
   if (!resolved) return;
   await runtime.setVideoUrl(next.url, ctx.principal.userId, true, next.title ?? null, resolved);
   // Try to auto-play; if the reporting user lacks canPlayPause, the video
@@ -150,7 +158,10 @@ export async function handlePlaylistPlay(
   }
   const item = runtime.takePlaylistItem(msg.itemId);
   if (!item) return; // already gone (raced with remove or another play)
-  const resolved = await resolveOrReport(ctx, item.url);
+  const resolved = await resolveOrReport(runtime, ctx, item.url, {
+    byUserId: ctx.principal.userId,
+    title: item.title,
+  });
   if (!resolved) return;
   await runtime.setVideoUrl(item.url, ctx.principal.userId, true, item.title ?? null, resolved);
   runtime.applyPlay(ctx.principal.userId, 0);
@@ -172,7 +183,10 @@ export async function handlePlaylistPrev(
   }
   const prev = runtime.takePrevious();
   if (!prev) return;
-  const resolved = await resolveOrReport(ctx, prev.url);
+  const resolved = await resolveOrReport(runtime, ctx, prev.url, {
+    byUserId: ctx.principal.userId,
+    title: prev.title,
+  });
   if (!resolved) return;
   await runtime.setVideoUrl(prev.url, ctx.principal.userId, false, prev.title ?? null, resolved);
   runtime.applyPlay(ctx.principal.userId, 0);

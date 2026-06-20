@@ -209,10 +209,12 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       reply.code(403).send({ error: 'Forbidden', message: 'You cannot change the video', statusCode: 403 });
       return;
     }
+    runtime.signalVideoLoading(principal.userId, true, { sourceUrl: body.url });
     try {
       const resolved = await resolveWithCache(body.url);
       await runtime.setVideoUrl(body.url, principal.userId, true, null, resolved);
     } catch (err) {
+      runtime.signalVideoLoading(principal.userId, false);
       const userMessage =
         err instanceof ResolveError ? err.userMessage : 'Could not resolve this media link';
       reply
