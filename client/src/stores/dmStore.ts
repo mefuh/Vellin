@@ -239,16 +239,18 @@ export const useDmStore = create<DmState>((set, get) => ({
           unreadTotal: payload.unreadTotal ?? s.unreadTotal,
         };
       }
-      // Собеседник (= byUserId) прочитал мои сообщения — обновить «галочки».
-      // Ищем тред по id собеседника (ключ треда), а не по conversationId —
-      // надёжно даже для только что созданного диалога.
+      // Собеседник (= byUserId) прочитал мои сообщения — обновить «галочки»
+      // и в открытом треде, и в списке диалогов. Ищем по id собеседника
+      // (ключ треда / peer.id), надёжно даже для только что созданного диалога.
       const t = s.threads[payload.byUserId];
-      if (!t) return s;
+      const conversations = s.conversations.map((c) =>
+        c.peer.id === payload.byUserId ? { ...c, peerLastReadAt: payload.readAt } : c,
+      );
       return {
-        threads: {
-          ...s.threads,
-          [payload.byUserId]: { ...t, peerLastReadAt: payload.readAt },
-        },
+        conversations,
+        threads: t
+          ? { ...s.threads, [payload.byUserId]: { ...t, peerLastReadAt: payload.readAt } }
+          : s.threads,
       };
     }),
 

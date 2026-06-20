@@ -109,7 +109,7 @@ export function Messages() {
   }
 
   return (
-    <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100svh', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}>
       <AppHeader active="messages" />
       <div
         style={{
@@ -121,6 +121,7 @@ export function Messages() {
           padding: '20px max(24px, 3vw) 28px',
           display: 'grid',
           gridTemplateColumns: '340px minmax(0, 1fr)',
+          gridTemplateRows: 'minmax(0, 1fr)',
           gap: 20,
         }}
       >
@@ -184,6 +185,12 @@ function ConversationList({
         const active = activeUsername === c.peer.username;
         const last = c.lastMessage;
         const preview = last ? (last.senderId === myId ? `Вы: ${last.body}` : last.body) : '';
+        // Галочки — только если последнее сообщение отправлено мной.
+        const mine = !!last && last.senderId === myId;
+        const read =
+          mine &&
+          c.peerLastReadAt != null &&
+          new Date(c.peerLastReadAt).getTime() >= new Date(last!.createdAt).getTime();
         return (
           <Link
             key={c.id}
@@ -211,7 +218,12 @@ function ConversationList({
                 <span style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                   {c.peer.username}
                 </span>
-                {last && <span style={{ fontSize: 11, color: 'var(--text-3)', flexShrink: 0 }}>{fmtTime(last.createdAt)}</span>}
+                {last && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    {mine && <Ticks read={read} color={read ? '#5aa7e6' : 'var(--text-3)'} />}
+                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{fmtTime(last.createdAt)}</span>
+                  </span>
+                )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
                 <span
@@ -416,7 +428,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
             aria-label="Назад"
             style={{ display: 'grid', placeItems: 'center', width: 34, height: 34, borderRadius: 'var(--r-md)', border: 'none', background: 'transparent', color: 'var(--text-1)', cursor: 'pointer' }}
           >
-            <Icon name="prev" size={20} />
+            <Icon name="chevron" size={24} style={{ transform: 'rotate(180deg)' }} />
           </button>
         )}
         <Link to={`/u/${encodeURIComponent(peer.username)}`} style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'inherit', textDecoration: 'none', minWidth: 0 }}>
@@ -534,13 +546,13 @@ function MessageList({
 }
 
 /** Галочки доставки: одна (отправлено) / две (прочитано). */
-function Ticks({ read, faint }: { read: boolean; faint?: boolean }) {
-  const color = faint ? 'rgba(255,255,255,0.5)' : read ? '#bfe3ff' : 'rgba(255,255,255,0.78)';
+function Ticks({ read, faint, color }: { read: boolean; faint?: boolean; color?: string }) {
+  const stroke = color ?? (faint ? 'rgba(255,255,255,0.5)' : read ? '#bfe3ff' : 'rgba(255,255,255,0.78)');
   const w = read ? 17 : 12;
   return (
     <svg width={w} height="11" viewBox={`0 0 ${w} 11`} fill="none" style={{ display: 'block' }}>
-      <path d="M1 5.5L4 8.5L9.5 2" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      {read && <path d="M6.5 8.5L12 2" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />}
+      <path d="M1 5.5L4 8.5L9.5 2" stroke={stroke} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      {read && <path d="M6.5 8.5L12 2" stroke={stroke} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />}
     </svg>
   );
 }
@@ -639,7 +651,15 @@ function Composer({
           outline: 'none',
         }}
       />
-      <Button variant="primary" size="md" icon="send" aria-label="Отправить" disabled={!text.trim()} onClick={submit}>
+      <Button
+        variant="primary"
+        size="md"
+        icon="send"
+        aria-label="Отправить"
+        disabled={!text.trim()}
+        onClick={submit}
+        style={{ width: 42, height: 42, padding: 0, flexShrink: 0 }}
+      >
         {''}
       </Button>
     </div>
