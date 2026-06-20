@@ -243,6 +243,14 @@ export interface ConversationThreadResponse {
   eligibility: DmEligibility;
 }
 
+/** Ответ на загрузку изображения для ЛС (multipart). */
+export interface UploadDmImageResponse {
+  /** Публичный URL сохранённого изображения (`/api/uploads/dm/...`). */
+  url: string;
+  width: number;
+  height: number;
+}
+
 // ── Realtime (пользовательский WS-канал) ─────────────────────────────────
 export interface RealtimeTicketResponse {
   ticket: string;

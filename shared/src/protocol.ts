@@ -543,7 +543,12 @@ export interface UserC2SUnwatchLibrary {
 export interface UserC2SDmSend {
   t: 'dm_send';
   toUserId: string;
+  /** Текст (может быть пустым, если приложено изображение). */
   body: string;
+  /** URL заранее загруженного изображения (через POST /dm/image), либо отсутствует. */
+  imageUrl?: string;
+  imageWidth?: number;
+  imageHeight?: number;
   /** Клиентский идентификатор для сопоставления эха (оптимистичная отправка). */
   nonce: string;
 }

@@ -4,7 +4,7 @@ import { userHub } from '../realtime/UserHub.js';
 import { removeNotifications } from '../realtime/notify.js';
 import { toAppNotification } from '../friends/mappers.js';
 import { logger } from '../utils/logger.js';
-import { DmError, markRead, sendMessage, unreadTotal } from './service.js';
+import { DmError, markRead, sendMessage, unreadTotal, type SendImage } from './service.js';
 
 function parseDmCount(json: string): number {
   try {
@@ -53,9 +53,10 @@ export async function handleDmSend(
   toUserId: string,
   body: string,
   nonce: string,
+  image?: SendImage,
 ): Promise<void> {
   try {
-    const res = await sendMessage(senderId, toUserId, body);
+    const res = await sendMessage(senderId, toUserId, body, image);
     const [recipUnread, senderUnread] = await Promise.all([
       unreadTotal(toUserId),
       unreadTotal(senderId),
@@ -74,7 +75,8 @@ export async function handleDmSend(
       peer: res.recipient,
       unreadTotal: senderUnread,
     });
-    await pushDmNotification(toUserId, res.sender, res.conversationId, body);
+    const preview = body.trim() || (image ? '📷 Фото' : '');
+    await pushDmNotification(toUserId, res.sender, res.conversationId, preview);
   } catch (err) {
     if (err instanceof DmError) {
       userHub.pushTo(senderId, { t: 'dm_error', nonce, reason: err.reason, message: err.message });

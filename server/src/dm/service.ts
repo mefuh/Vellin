@@ -5,6 +5,7 @@ import { canSee, parsePrivacy } from '../privacy/privacy.js';
 import { PUBLIC_USER_SELECT, toPublicUser } from '../friends/mappers.js';
 import { getAcceptedFriendIds } from '../friends/service.js';
 import { userHub } from '../realtime/UserHub.js';
+import { isDmImageUrl } from './image.js';
 
 export const MAX_DM_BODY = 4000;
 /** Сколько сообщений отдаём одной страницей треда. */
@@ -35,6 +36,13 @@ function toDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
     senderId: m.senderId,
     body: m.body,
     createdAt: m.createdAt.toISOString(),
+    ...(m.imageUrl
+      ? {
+          imageUrl: m.imageUrl,
+          ...(m.imageWidth != null ? { imageWidth: m.imageWidth } : {}),
+          ...(m.imageHeight != null ? { imageHeight: m.imageHeight } : {}),
+        }
+      : {}),
     ...(nonce ? { nonce } : {}),
   };
 }
@@ -137,15 +145,27 @@ export interface SendResult {
   recipient: PublicUser;
 }
 
+export interface SendImage {
+  url: string;
+  width: number;
+  height: number;
+}
+
 /**
- * Сохранить личное сообщение от `meId` к `peerId`. Бросает {@link DmError},
- * если писать нельзя. Обновляет lastMessageAt диалога и отметку «прочитано»
- * отправителя (свои сообщения он уже «прочитал»).
+ * Сохранить личное сообщение от `meId` к `peerId` (текст и/или изображение).
+ * Бросает {@link DmError}, если писать нельзя. Обновляет lastMessageAt диалога
+ * и отметку «прочитано» отправителя (свои сообщения он уже «прочитал»).
  */
-export async function sendMessage(meId: string, peerId: string, rawBody: string): Promise<SendResult> {
+export async function sendMessage(
+  meId: string,
+  peerId: string,
+  rawBody: string,
+  image?: SendImage,
+): Promise<SendResult> {
   const body = rawBody.trim();
-  if (!body) throw new DmError('ok', 'Пустое сообщение');
+  if (!body && !image) throw new DmError('ok', 'Пустое сообщение');
   if (body.length > MAX_DM_BODY) throw new DmError('ok', 'Сообщение слишком длинное');
+  if (image && !isDmImageUrl(image.url)) throw new DmError('ok', 'Некорректное изображение');
 
   const peer = await loadPeerOrThrow(peerId);
   const elig = await checkEligibility(meId, peer);
@@ -161,7 +181,14 @@ export async function sendMessage(meId: string, peerId: string, rawBody: string)
 
   const conv = await getOrCreateConversation(meId, peerId);
   const message = await prisma.directMessage.create({
-    data: { conversationId: conv.id, senderId: meId, body },
+    data: {
+      conversationId: conv.id,
+      senderId: meId,
+      body,
+      ...(image
+        ? { imageUrl: image.url, imageWidth: Math.round(image.width), imageHeight: Math.round(image.height) }
+        : {}),
+    },
   });
   // lastMessageAt + отправитель «прочитал» собственное сообщение.
   await prisma.conversation.update({
@@ -246,7 +273,12 @@ export async function listConversations(
     conversations.push({
       id: c.id,
       peer: toPublicUser(other),
-      lastMessage: { body: last.body, senderId: last.senderId, createdAt: last.createdAt.toISOString() },
+      lastMessage: {
+        body: last.body,
+        senderId: last.senderId,
+        createdAt: last.createdAt.toISOString(),
+        hasImage: !!last.imageUrl,
+      },
       unreadCount: unread,
       peerLastReadAt: peerRead ? peerRead.toISOString() : null,
       online: showOnline && userHub.isOnline(other.id),

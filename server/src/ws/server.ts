@@ -113,6 +113,9 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         body?: string;
         nonce?: string;
         typing?: boolean;
+        imageUrl?: string;
+        imageWidth?: number;
+        imageHeight?: number;
       };
       if (m.t === 'watch_presence' && typeof m.userId === 'string') {
         userHub.watch(conn, m.userId);
@@ -129,7 +132,15 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         typeof m.nonce === 'string' &&
         m.body.length <= MAX_DM_BODY
       ) {
-        void handleDmSend(principal.userId, m.toUserId, m.body, m.nonce);
+        const image =
+          typeof m.imageUrl === 'string'
+            ? {
+                url: m.imageUrl,
+                width: typeof m.imageWidth === 'number' ? m.imageWidth : 0,
+                height: typeof m.imageHeight === 'number' ? m.imageHeight : 0,
+              }
+            : undefined;
+        void handleDmSend(principal.userId, m.toUserId, m.body, m.nonce, image);
       } else if (m.t === 'dm_typing' && typeof m.toUserId === 'string' && typeof m.typing === 'boolean') {
         handleDmTyping(principal.userId, m.toUserId, m.typing);
       } else if (m.t === 'dm_read' && typeof m.peerId === 'string') {

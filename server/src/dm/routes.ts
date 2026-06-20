@@ -1,8 +1,13 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { ConversationThreadResponse, ListConversationsResponse } from '@vellin/shared';
+import type {
+  ConversationThreadResponse,
+  ListConversationsResponse,
+  UploadDmImageResponse,
+} from '@vellin/shared';
 import type { Principal } from '../auth/jwt.js';
 import { requireAuth } from '../auth/middleware.js';
 import { getThreadByUsername, listConversations } from './service.js';
+import { ALLOWED_DM_IMAGE_MIME, MAX_DM_IMAGE_BYTES, processAndSaveDmImage } from './image.js';
 
 function deny(reply: FastifyReply, status: number, error: string, message: string): void {
   reply.code(status).send({ error, message, statusCode: status });
@@ -40,4 +45,37 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
       reply.send(thread satisfies ConversationThreadResponse);
     },
   );
+
+  // Загрузка изображения для ЛС (multipart). Сама отправка идёт по WS с
+  // полученным здесь url.
+  app.post('/dm/image', async (req, reply) => {
+    const p = requireUser(req, reply);
+    if (!p) return;
+    const file = await req.file({ limits: { fileSize: MAX_DM_IMAGE_BYTES, files: 1 } });
+    if (!file) {
+      deny(reply, 400, 'BadRequest', 'Файл не получен');
+      return;
+    }
+    if (!ALLOWED_DM_IMAGE_MIME.has(file.mimetype)) {
+      deny(reply, 400, 'BadRequest', 'Поддерживаются только JPEG, PNG и WebP');
+      return;
+    }
+    let buffer: Buffer;
+    try {
+      buffer = await file.toBuffer();
+    } catch {
+      deny(reply, 400, 'BadRequest', 'Файл слишком большой (макс. 10 МБ)');
+      return;
+    }
+    if (file.file.truncated) {
+      deny(reply, 400, 'BadRequest', 'Файл слишком большой (макс. 10 МБ)');
+      return;
+    }
+    try {
+      const saved = await processAndSaveDmImage(p.userId, buffer);
+      reply.send(saved satisfies UploadDmImageResponse);
+    } catch {
+      deny(reply, 400, 'BadRequest', 'Не удалось обработать изображение');
+    }
+  });
 }

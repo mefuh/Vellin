@@ -460,8 +460,14 @@ export interface DirectMessageDTO {
   id: string;
   conversationId: string;
   senderId: string;
+  /** Текст сообщения (может быть пустым, если есть только вложение). */
   body: string;
   createdAt: string;
+  /** URL прикреплённого изображения (`/api/uploads/dm/...`), либо отсутствует. */
+  imageUrl?: string;
+  /** Исходные размеры изображения — чтобы зарезервировать место без скачка вёрстки. */
+  imageWidth?: number;
+  imageHeight?: number;
   /**
    * Эхо клиентского nonce — отдаётся только отправителю, чтобы он сопоставил
    * пришедшее с сервера сообщение со своей оптимистичной отправкой.
@@ -475,7 +481,7 @@ export interface DmConversation {
   /** Собеседник. */
   peer: PublicUser;
   /** Последнее сообщение в диалоге (для превью), либо null — диалог пуст. */
-  lastMessage: { body: string; senderId: string; createdAt: string } | null;
+  lastMessage: { body: string; senderId: string; createdAt: string; hasImage: boolean } | null;
   /** Сколько у меня непрочитанных в этом диалоге. */
   unreadCount: number;
   /**
