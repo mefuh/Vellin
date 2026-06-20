@@ -214,6 +214,9 @@ model ResolvedMedia {
   sourceUrl   String    @id
   kind        String
   mediaUrl    String
+  /// Companion audio-only URL for kind='dual' (YouTube HD split). Без неё
+  /// кэш-хит на dual-видео терял звук и плеер падал «отсутствует audioUrl».
+  audioUrl    String?
   mime        String?
   title       String?
   durationSec Float?
