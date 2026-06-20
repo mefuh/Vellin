@@ -5,8 +5,10 @@ import { useNotificationsStore } from '../stores/notificationsStore';
 import { useFriendsStore } from '../stores/friendsStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useLibraryStore } from '../stores/libraryStore';
+import { useDmStore } from '../stores/dmStore';
 import { realtimeApi } from '../api/realtime';
 import { UserSocket } from '../ws/UserSocket';
+import { playDmSound } from '../utils/sound';
 
 /**
  * Держит app-wide пользовательский realtime-канал для авторизованного
@@ -22,11 +24,13 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
 
     const notifications = useNotificationsStore.getState();
     const friends = useFriendsStore.getState();
+    const myId = useAuthStore.getState().user?.id ?? '';
 
     const onMessage = (msg: UserS2C): void => {
       switch (msg.t) {
         case 'hello':
           notifications.setSnapshot(msg.notifications, msg.unreadCount);
+          useDmStore.getState().setUnreadTotal(msg.dmUnreadTotal);
           for (const p of msg.presence) usePresenceStore.getState().apply(p);
           // Подтягиваем список друзей; presence из снапшота применится после.
           void friends.refresh().then(() => {
@@ -54,6 +58,28 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
         case 'friends_changed':
           void friends.refresh();
           break;
+        case 'dm_message': {
+          const dm = useDmStore.getState();
+          dm.applyIncoming(msg.message, msg.peer, msg.unreadTotal, myId);
+          const incoming = msg.message.senderId !== myId;
+          if (incoming) {
+            // Звук — если вкладка не в фокусе или открыт другой диалог.
+            const active = dm.activePeerId === msg.peer.id && !document.hidden;
+            if (!active) playDmSound();
+            // Открытый и видимый диалог — сразу помечаем прочитанным.
+            if (dm.activePeerId === msg.peer.id && !document.hidden) dm.markRead(msg.peer.id);
+          }
+          break;
+        }
+        case 'dm_read':
+          useDmStore.getState().applyRead(msg, myId);
+          break;
+        case 'dm_typing':
+          useDmStore.getState().applyTyping(msg.fromUserId, msg.typing);
+          break;
+        case 'dm_error':
+          useDmStore.getState().applyError(msg.nonce);
+          break;
         default:
           break;
       }
@@ -73,6 +99,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
     });
     usePresenceStore.getState().setSender((m) => socket.send(m));
     useLibraryStore.getState().setSender((m) => socket.send(m));
+    useDmStore.getState().setSender((m) => socket.send(m));
     void socket.connect();
 
     return () => {
@@ -81,6 +108,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
       useFriendsStore.getState().reset();
       usePresenceStore.getState().reset();
       useLibraryStore.getState().reset();
+      useDmStore.getState().reset();
     };
   }, [token, isUser]);
 

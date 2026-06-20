@@ -46,6 +46,9 @@ model User {
   blockedBy              Block[]        @relation("Blocked")
   notifications          Notification[]
   favoriteTitles         FavoriteTitle[]
+  conversationsA         Conversation[]  @relation("ConvUserA")
+  conversationsB         Conversation[]  @relation("ConvUserB")
+  directMessages         DirectMessage[] @relation("DmSender")
 
   @@index([isBlocked])
 }
@@ -114,6 +117,43 @@ model Notification {
   createdAt DateTime  @default(now())
 
   @@index([userId, createdAt])
+}
+
+/// Личный диалог ровно между двумя пользователями. Пара канонически
+/// отсортирована (userAId < userBId по строковому сравнению) — это гарантирует
+/// один диалог на пару через @@unique. Поля *LastReadAt хранят «прочитано до»
+/// для каждой стороны (A/B) — из них считаются непрочитанные и «галочки».
+model Conversation {
+  id            String   @id @default(cuid())
+  userAId       String
+  userBId       String
+  userA         User     @relation("ConvUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB         User     @relation("ConvUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  /// Время последнего сообщения — для сортировки списка диалогов.
+  lastMessageAt DateTime @default(now())
+  /// «Прочитано до» для стороны A / стороны B. Null — ещё не открывала диалог.
+  aLastReadAt   DateTime?
+  bLastReadAt   DateTime?
+
+  messages DirectMessage[]
+
+  @@unique([userAId, userBId])
+  @@index([userAId, lastMessageAt])
+  @@index([userBId, lastMessageAt])
+}
+
+/// Одно личное сообщение в диалоге.
+model DirectMessage {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation("DmSender", fields: [senderId], references: [id], onDelete: Cascade)
+  body           String
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
 }
 
 /// Серверная запись о входе (устройство/браузер). JWT пользователя несёт
@@ -214,6 +254,9 @@ model ResolvedMedia {
   sourceUrl   String    @id
   kind        String
   mediaUrl    String
+  /// Companion audio-only URL for kind='dual' (YouTube HD split). Без неё
+  /// кэш-хит на dual-видео терял звук и плеер падал «отсутствует audioUrl».
+  audioUrl    String?
   mime        String?
   title       String?
   durationSec Float?

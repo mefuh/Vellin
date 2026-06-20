@@ -7,6 +7,7 @@ import { createEngine, kindLabel } from './engines/EngineRegistry';
 import type { EngineError, PlayerEngine } from './engines/PlayerEngine';
 import { WebTorrentEngine, type TorrentStats } from './engines/WebTorrentEngine';
 import { roomsApi } from '../../api/rooms';
+import { extractYouTubeId } from '../../utils/youtube';
 import { useRoomStore } from '../../stores/roomStore';
 import { useIsMobile } from '../../hooks/useMediaQuery';
 import { FullscreenChatOverlay } from './FullscreenChatOverlay';
@@ -29,6 +30,18 @@ interface VideoPlayerProps {
   send: (msg: C2S) => boolean;
   client: WSClient | null;
   onRequestUrl: () => void;
+}
+
+/** Клиентский запасной resolved для YouTube — встроенный плеер (iframe). */
+function buildYoutubeEmbed(sourceUrl: string, id: string): ResolvedMedia {
+  return {
+    kind: 'youtube_embed',
+    mediaUrl: `https://www.youtube-nocookie.com/embed/${id}`,
+    poster: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+    sourceUrl,
+    resolvedAt: Date.now(),
+    expiresAt: 0,
+  };
 }
 
 function formatTime(seconds: number): string {
@@ -59,6 +72,10 @@ export function VideoPlayer({
   // почти всегда транзиент от программного возобновления (в т.ч. авто-синхро),
   // который глушит muted-фоллбэк, поэтому большой оверлей не показываем.
   const hasPlayedOnceRef = useRef(false);
+  // YouTube-фоллбэк: какие источники уже пере-резолвили / увели в iframe, чтобы
+  // не зациклиться. Ключ — sourceUrl.
+  const ytRetriedRef = useRef<Set<string>>(new Set());
+  const ytEmbeddedRef = useRef<Set<string>>(new Set());
 
   const [duration, setDuration] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -102,6 +119,10 @@ export function VideoPlayer({
   const resolved: ResolvedMedia | null = video?.resolved ?? null;
   const [torrentStats, setTorrentStats] = useState<TorrentStats | null>(null);
   const updateVideo = useRoomStore((s) => s.updateVideo);
+  // Видео меняется: фаза резолва (сигнал сервера, ещё нет нового resolved) →
+  // фаза загрузки движка (resolved есть, но ready ещё false). Карточка
+  // «Меняем видео…» держится весь интервал.
+  const videoLoadingState = useRoomStore((s) => s.videoLoading);
 
   // Stable refs so controller (created ONCE) reads up-to-date props without rebuild.
   const canPlayPauseRef = useRef(canPlayPause);
@@ -177,7 +198,36 @@ export function VideoPlayer({
       // Большой play-оверлей (autoplay_blocked) показываем только пока видео ещё
       // ни разу не играло. Иначе это возобновление (в т.ч. авто-синхронизация) —
       // тихо отдаём muted-фоллбэку, не всплываем красной кнопкой.
-      if (err.kind === 'autoplay_blocked' && hasPlayedOnceRef.current) return;
+      if (err.kind === 'autoplay_blocked') {
+        if (hasPlayedOnceRef.current) return;
+        setEngineError(err);
+        return;
+      }
+
+      // YouTube-цепочка восстановления (CORS/истечение/троттлинг прямого потока):
+      //   1) один свежий ре-резолв (остаёмся на чистом извлечении),
+      //   2) если опять не вышло — встроенный плеер (iframe), чтобы видео
+      //      гарантированно запустилось. Эхо-петель нет: ключуем по sourceUrl.
+      const src = resolved.sourceUrl || videoUrlRef.current || '';
+      const ytId = extractYouTubeId(src);
+      if (ytId && resolved.kind !== 'youtube_embed') {
+        if (!ytRetriedRef.current.has(src)) {
+          ytRetriedRef.current.add(src);
+          void roomsApi
+            .resolve({ url: src })
+            .then((fresh) => updateVideo((v) => (v ? { ...v, resolved: fresh } : v)))
+            .catch(() => {
+              ytEmbeddedRef.current.add(src);
+              updateVideo((v) => (v ? { ...v, resolved: buildYoutubeEmbed(src, ytId) } : v));
+            });
+          return;
+        }
+        if (!ytEmbeddedRef.current.has(src)) {
+          ytEmbeddedRef.current.add(src);
+          updateVideo((v) => (v ? { ...v, resolved: buildYoutubeEmbed(src, ytId) } : v));
+          return;
+        }
+      }
       setEngineError(err);
     });
     const offReady = engine.on('ready', () => setReady(true));
@@ -308,8 +358,10 @@ export function VideoPlayer({
   useEffect(() => {
     if (!resolved || !video?.url) return;
     if (resolved.expiresAt === 0) return;
-    const msUntilRefresh = resolved.expiresAt - Date.now() - 60_000;
-    if (msUntilRefresh < 0) return;
+    // Если ссылка уже истекла или вот-вот истечёт (поздний заход в комнату со
+    // старым снимком) — рефрешим немедленно, а не пропускаем, иначе поток сразу
+    // отдаст CORS/403.
+    const msUntilRefresh = Math.max(0, resolved.expiresAt - Date.now() - 60_000);
     const id = window.setTimeout(() => {
       void roomsApi
         .resolve({ url: video.url! })
@@ -417,6 +469,13 @@ export function VideoPlayer({
     else void document.exitFullscreen?.();
   };
 
+  // Индикатор смены видео: фаза резолва (сигнал сервера) ИЛИ фаза загрузки
+  // нового движка (resolved есть, ready ещё нет, без ошибки).
+  const inResolvePhase = !!videoLoadingState;
+  const showLoadingCard = inResolvePhase || (!!resolved && !ready && !engineError);
+  const loadingCardPoster = inResolvePhase ? undefined : resolved?.poster ?? undefined;
+  const loadingCardTitle = inResolvePhase ? videoLoadingState?.title : resolved?.title;
+
   if (!resolved || !video?.url) {
     return (
       <div
@@ -433,6 +492,7 @@ export function VideoPlayer({
       >
         <MountainPoster seed={2} />
         <ReactionsOverlay />
+        {videoLoadingState && <VideoLoadingCard title={videoLoadingState.title} zIndex={4} />}
         <div
           style={{
             position: 'absolute',
@@ -497,8 +557,12 @@ export function VideoPlayer({
       />
 
       {/* YouTube-style buffering spinner. Only visible while the engine
-          reports a sustained (>200ms) stall — not on every micro-buffer. */}
-      {showBufferSpinner && !engineError && <BufferingSpinner />}
+          reports a sustained (>200ms) stall — not on every micro-buffer. Скрыт
+          во время карточки смены видео (у неё свой спиннер). */}
+      {showBufferSpinner && !engineError && !showLoadingCard && <BufferingSpinner />}
+
+      {/* Индикатор смены видео — покрывает и серверный резолв, и загрузку движка. */}
+      {showLoadingCard && <VideoLoadingCard poster={loadingCardPoster} title={loadingCardTitle} />}
 
       {/* Reactions live inside the player element so they keep flying in
           fullscreen — an overlay outside it would be hidden by the top-layer. */}
@@ -907,6 +971,95 @@ function ErrorOverlay({
           Сменить ссылку
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Карточка «Меняем видео…» — показывается весь интервал смены: от серверного
+ * сигнала (резолв yt-dlp) до готовности нового движка. В фазе загрузки, когда
+ * уже известен постер нового видео, рисуем его размытым фоном с названием.
+ */
+function VideoLoadingCard({
+  poster,
+  title,
+  zIndex = 1,
+}: {
+  poster?: string;
+  title?: string;
+  zIndex?: number;
+}): JSX.Element {
+  return (
+    <div
+      aria-live="polite"
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex,
+        pointerEvents: 'none',
+        overflow: 'hidden',
+        background: '#000',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 14,
+      }}
+    >
+      {poster && (
+        <img
+          src={poster}
+          alt=""
+          aria-hidden
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            filter: 'blur(18px) brightness(0.45)',
+            transform: 'scale(1.1)',
+          }}
+        />
+      )}
+      <div
+        style={{
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 12,
+          padding: '0 24px',
+          textAlign: 'center',
+        }}
+      >
+        <svg
+          width="52"
+          height="52"
+          viewBox="0 0 50 50"
+          style={{ animation: 'vellinBufferSpin 1s linear infinite', filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.45))' }}
+        >
+          <circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="4" />
+          <circle cx="25" cy="25" r="20" fill="none" stroke="#fff" strokeWidth="4" strokeLinecap="round" strokeDasharray="70 200" />
+        </svg>
+        <div style={{ color: '#fff', fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>
+          Меняем видео…
+        </div>
+        {title && (
+          <div
+            style={{
+              color: 'rgba(255,255,255,0.78)',
+              fontSize: 13,
+              maxWidth: 420,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {title}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -18,6 +18,7 @@ export const MediaCache = {
         sourceUrl: resolved.sourceUrl,
         kind: resolved.kind,
         mediaUrl: resolved.mediaUrl,
+        audioUrl: resolved.audioUrl ?? null,
         mime: resolved.mime ?? null,
         title: resolved.title ?? null,
         durationSec: resolved.durationSec ?? null,
@@ -29,6 +30,7 @@ export const MediaCache = {
       update: {
         kind: resolved.kind,
         mediaUrl: resolved.mediaUrl,
+        audioUrl: resolved.audioUrl ?? null,
         mime: resolved.mime ?? null,
         title: resolved.title ?? null,
         durationSec: resolved.durationSec ?? null,
@@ -48,6 +50,7 @@ function rowToResolved(row: ResolvedRowNN): ResolvedMedia {
   return {
     kind: row.kind as ResolvedMedia['kind'],
     mediaUrl: row.mediaUrl,
+    audioUrl: row.audioUrl ?? undefined,
     mime: row.mime ?? undefined,
     title: row.title ?? undefined,
     durationSec: row.durationSec ?? undefined,

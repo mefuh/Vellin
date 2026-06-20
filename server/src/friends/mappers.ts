@@ -21,12 +21,15 @@ export function toPublicUser(u: PublicUserCols): PublicUser {
   };
 }
 
-function parseData(json: string): { roomSlug?: string; roomName?: string } {
+function parseData(json: string): AppNotification['data'] {
   try {
     const v = JSON.parse(json) as Record<string, unknown>;
     return {
       roomSlug: typeof v.roomSlug === 'string' ? v.roomSlug : undefined,
       roomName: typeof v.roomName === 'string' ? v.roomName : undefined,
+      conversationId: typeof v.conversationId === 'string' ? v.conversationId : undefined,
+      preview: typeof v.preview === 'string' ? v.preview : undefined,
+      count: typeof v.count === 'number' ? v.count : undefined,
     };
   } catch {
     return {};

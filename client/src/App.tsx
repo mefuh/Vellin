@@ -7,6 +7,7 @@ import { Guest } from './pages/Guest';
 import { Library } from './pages/Library';
 import { Profile } from './pages/Profile';
 import { Friends } from './pages/Friends';
+import { Messages } from './pages/Messages';
 import { PublicProfile } from './pages/PublicProfile';
 import { Room } from './pages/Room';
 import { NotFound } from './pages/NotFound';
@@ -84,6 +85,22 @@ export function App() {
           element={
             <ProtectedRoute>
               <Friends />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/messages"
+          element={
+            <ProtectedRoute>
+              <Messages />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/messages/:username"
+          element={
+            <ProtectedRoute>
+              <Messages />
             </ProtectedRoute>
           }
         />

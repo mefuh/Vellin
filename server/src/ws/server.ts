@@ -15,6 +15,9 @@ import { ensureRoomRuntime } from '../rooms/RoomRuntime.js';
 import { prisma } from '../db/prisma.js';
 import { userHub, type UserConnection } from '../realtime/UserHub.js';
 import { getFriendPresenceSnapshot, getNotificationsSnapshot } from '../friends/service.js';
+import { handleDmRead, handleDmSend, handleDmTyping } from '../dm/realtime.js';
+import { unreadTotal as dmUnreadTotal } from '../dm/service.js';
+import { MAX_DM_BODY } from '../dm/service.js';
 import { TokenBucket } from './rateLimit.js';
 import { makeSession, sendError, type ConnectionContext } from './connection.js';
 import { handleChatMessage } from './handlers/chat.js';
@@ -102,7 +105,15 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       } catch {
         return;
       }
-      const m = msg as { t?: string; userId?: string };
+      const m = msg as {
+        t?: string;
+        userId?: string;
+        toUserId?: string;
+        peerId?: string;
+        body?: string;
+        nonce?: string;
+        typing?: boolean;
+      };
       if (m.t === 'watch_presence' && typeof m.userId === 'string') {
         userHub.watch(conn, m.userId);
       } else if (m.t === 'unwatch_presence' && typeof m.userId === 'string') {
@@ -111,6 +122,18 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         userHub.watchLibrary(conn);
       } else if (m.t === 'unwatch_library') {
         userHub.unwatchLibrary(conn);
+      } else if (
+        m.t === 'dm_send' &&
+        typeof m.toUserId === 'string' &&
+        typeof m.body === 'string' &&
+        typeof m.nonce === 'string' &&
+        m.body.length <= MAX_DM_BODY
+      ) {
+        void handleDmSend(principal.userId, m.toUserId, m.body, m.nonce);
+      } else if (m.t === 'dm_typing' && typeof m.toUserId === 'string' && typeof m.typing === 'boolean') {
+        handleDmTyping(principal.userId, m.toUserId, m.typing);
+      } else if (m.t === 'dm_read' && typeof m.peerId === 'string') {
+        void handleDmRead(principal.userId, m.peerId);
       }
     });
     socket.on('close', () => {
@@ -124,15 +147,17 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
 
     // hello-снапшот — после навешивания слушателей.
     try {
-      const [snapshot, presence] = await Promise.all([
+      const [snapshot, presence, dmUnread] = await Promise.all([
         getNotificationsSnapshot(principal.userId),
         getFriendPresenceSnapshot(principal.userId),
+        dmUnreadTotal(principal.userId),
       ]);
       conn.send({
         t: 'hello',
         notifications: snapshot.notifications,
         unreadCount: snapshot.unreadCount,
         presence,
+        dmUnreadTotal: dmUnread,
         serverTs: Date.now(),
       });
     } catch (err) {

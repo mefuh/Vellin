@@ -5,13 +5,15 @@ import { HlsEngine } from './HlsEngine';
 import { DashEngine } from './DashEngine';
 import { DualStreamEngine } from './DualStreamEngine';
 import { WebTorrentEngine } from './WebTorrentEngine';
+import { YouTubeIframeEngine } from './YouTubeIframeEngine';
 
 /**
  * Build a PlayerEngine for the given resolved media. Caller is responsible
  * for owning the engine's lifetime (destroy on swap).
  *
- * Iframe-based providers (`*_embed`) are intentionally unsupported — the
- * server resolver should produce a direct/hls/dash stream or fail loudly.
+ * `youtube_embed` — запасной путь (iframe-плеер YouTube), когда извлечение
+ * прямого потока невозможно или упало в браузере. Прочие `*_embed` пока не
+ * поддерживаются — резолвер должен дать нативный поток.
  */
 export function createEngine(
   resolved: ResolvedMedia,
@@ -29,6 +31,7 @@ export function createEngine(
     case 'torrent':
       return new WebTorrentEngine(videoEl);
     case 'youtube_embed':
+      return new YouTubeIframeEngine(videoEl);
     case 'rutube_embed':
     case 'vimeo_embed':
     case 'vk_embed':
@@ -60,6 +63,7 @@ export function kindLabel(kind: MediaKind): string {
     case 'torrent':
       return 'Torrent';
     case 'youtube_embed':
+      return 'YouTube';
     case 'rutube_embed':
     case 'vimeo_embed':
     case 'vk_embed':

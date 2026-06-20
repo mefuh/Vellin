@@ -22,6 +22,8 @@ interface RoomState {
   room: RoomDetails | null;
   participants: ParticipantInfo[];
   video: VideoState | null;
+  /** Видео в процессе смены (от сигнала сервера до прихода set_url). null — нет. */
+  videoLoading: { title?: string; sourceUrl?: string } | null;
   playlist: PlaylistItem[];
   historyLength: number;
   you: ParticipantInfo | null;
@@ -65,6 +67,7 @@ interface RoomState {
   removeReaction: (id: string) => void;
   updateVideo: (updater: (v: VideoState | null) => VideoState | null) => void;
   setVideoUrl: (url: string, video: VideoState) => void;
+  setVideoLoading: (v: { title?: string; sourceUrl?: string } | null) => void;
   applyCallSnapshot: (snapshot: CallSnapshot) => void;
   upsertCallMember: (member: CallMember) => void;
   removeCallMember: (userId: string) => void;
@@ -77,6 +80,7 @@ export const useRoomStore = create<RoomState>((set) => ({
   room: null,
   participants: [],
   video: null,
+  videoLoading: null,
   playlist: [],
   historyLength: 0,
   you: null,
@@ -96,6 +100,7 @@ export const useRoomStore = create<RoomState>((set) => ({
       room: null,
       participants: [],
       video: null,
+      videoLoading: null,
       playlist: [],
       historyLength: 0,
       you: null,
@@ -114,6 +119,7 @@ export const useRoomStore = create<RoomState>((set) => ({
       you,
       participants,
       video,
+      videoLoading: null,
       playlist,
       historyLength,
       messages: recentMessages,
@@ -164,8 +170,13 @@ export const useRoomStore = create<RoomState>((set) => ({
   setVideoUrl: (url, video) =>
     set((s) => ({
       video,
+      // Новое видео пришло — фаза резолва завершена; дальше индикатор держит сам
+      // плеер по флагу готовности движка.
+      videoLoading: null,
       room: s.room ? { ...s.room, videoUrl: url, videoPositionSec: 0, videoStatus: 'paused' } : s.room,
     })),
+
+  setVideoLoading: (videoLoading) => set({ videoLoading }),
 
   applyCallSnapshot: (snapshot) => set({ call: snapshot }),
 

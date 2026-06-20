@@ -17,6 +17,10 @@ import type {
   ResolvedMedia,
   RoomPermissions,
   RoomRole,
+  DmConversation,
+  DirectMessageDTO,
+  DmEligibility,
+  PublicUser,
 } from './domain.js';
 
 // ── Auth ────────────────────────────────────────────────────────────────
@@ -212,6 +216,31 @@ export interface MarkNotificationsReadResponse {
 /** Ответ на удаление одного уведомления (по id). */
 export interface DismissNotificationResponse {
   unreadCount: number;
+}
+
+// ── Личные сообщения (REST) ──────────────────────────────────────────────
+export interface ListConversationsResponse {
+  conversations: DmConversation[];
+  /** Суммарно непрочитанных ЛС по всем диалогам — для бейджа в навбаре. */
+  unreadTotal: number;
+}
+/** Тред переписки с одним собеседником (последняя страница сообщений). */
+export interface ConversationThreadResponse {
+  /** Пусто, если диалога ещё нет (создастся при первой отправке). */
+  conversationId: string;
+  peer: PublicUser;
+  /** Сообщения по возрастанию времени (старые → новые). */
+  messages: DirectMessageDTO[];
+  /** Есть ещё более старые сообщения (для подгрузки «раньше»). */
+  hasMore: boolean;
+  /** Когда собеседник прочитал переписку — для галочек. Null — не читал. */
+  peerLastReadAt: string | null;
+  online: boolean;
+  /** Время последнего захода собеседника (ISO, с учётом приватности). Null — онлайн/скрыто. */
+  peerLastSeenAt: string | null;
+  /** Пол собеседника (для грамматики «был/была»), с учётом приватности. */
+  peerGender: Gender | null;
+  eligibility: DmEligibility;
 }
 
 // ── Realtime (пользовательский WS-канал) ─────────────────────────────────

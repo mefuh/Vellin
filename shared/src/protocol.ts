@@ -3,9 +3,11 @@ import type {
   CallMember,
   CallSnapshot,
   ChatMessage,
+  DirectMessageDTO,
   FriendPresence,
   ParticipantInfo,
   PlaylistItem,
+  PublicUser,
   ReactionEvent,
   RoomPermissions,
   RoomRole,
@@ -206,6 +208,7 @@ export type S2C =
   | S2CVideoApply
   | S2CVideoSync
   | S2CVideoSetUrl
+  | S2CVideoLoading
   | S2CSyncStatus
   | S2CReaction
   | S2CRoomStateUpdate
@@ -284,6 +287,21 @@ export interface S2CVideoSetUrl {
 export interface S2CReaction {
   t: 'reaction';
   reaction: ReactionEvent;
+}
+/**
+ * Видео начало меняться — рассылается ВСЕМ сразу при старте смены (до того как
+ * сервер извлёк поток), чтобы плеер показал индикатор «меняем видео…» весь
+ * интервал, а не только при загрузке у себя. `loading:false` — смена сорвалась
+ * (резолв упал); успех закрывается приходом `video_set_url`.
+ */
+export interface S2CVideoLoading {
+  t: 'video_loading';
+  loading: boolean;
+  byUserId: string;
+  /** Известное название/ссылка для подписи карточки (если есть). */
+  title?: string;
+  sourceUrl?: string;
+  serverTs: number;
 }
 /** Состояние синхронизации комнаты — питает информер плеера (см. SyncStatus). */
 export interface S2CSyncStatus extends SyncStatus {
@@ -391,6 +409,10 @@ export type UserS2C =
   | UserS2CPresence
   | UserS2CRoomVideo
   | UserS2CFriendsChanged
+  | UserS2CDmMessage
+  | UserS2CDmRead
+  | UserS2CDmTyping
+  | UserS2CDmError
   | UserS2CPing;
 
 /** Снапшот при подключении: непрочитанные уведомления + presence друзей. */
@@ -399,6 +421,8 @@ export interface UserS2CHello {
   notifications: AppNotification[];
   unreadCount: number;
   presence: FriendPresence[];
+  /** Суммарно непрочитанных личных сообщений — для бейджа в навбаре. */
+  dmUnreadTotal: number;
   serverTs: number;
 }
 export interface UserS2CNotification {
@@ -435,6 +459,49 @@ export interface UserS2CRoomVideo {
 export interface UserS2CFriendsChanged {
   t: 'friends_changed';
 }
+/**
+ * Новое личное сообщение. Шлётся обоим участникам диалога: получателю и всем
+ * соединениям отправителя (эхо — для синхронизации вкладок и присвоения id).
+ * `unreadTotal` — суммарный счётчик непрочитанных получателя сообщения (для
+ * бейджа); у эха отправителю он равен его собственному счётчику.
+ */
+export interface UserS2CDmMessage {
+  t: 'dm_message';
+  message: DirectMessageDTO;
+  /** Собеседник в этом диалоге глазами получателя сообщения. */
+  peer: PublicUser;
+  unreadTotal: number;
+}
+/**
+ * Переписку прочитали. Шлётся: (1) самому прочитавшему на остальные его
+ * соединения — сбросить непрочитанные и бейдж (`unreadTotal` задан); (2)
+ * собеседнику — обновить «галочки» на его сообщениях (`unreadTotal` опущен).
+ */
+export interface UserS2CDmRead {
+  t: 'dm_read';
+  conversationId: string;
+  /** Кто прочитал. */
+  byUserId: string;
+  /** До какого момента прочитано (ISO). */
+  readAt: string;
+  /** Только в эхе самому прочитавшему — его новый суммарный счётчик. */
+  unreadTotal?: number;
+}
+/** Собеседник печатает (или перестал). Транзиентно, не персистится. */
+export interface UserS2CDmTyping {
+  t: 'dm_typing';
+  conversationId: string;
+  fromUserId: string;
+  typing: boolean;
+}
+/** Ошибка отправки ЛС (нет прав/заблокирован/слишком длинно). */
+export interface UserS2CDmError {
+  t: 'dm_error';
+  /** nonce неудавшегося сообщения — чтобы клиент пометил его как непосланное. */
+  nonce?: string;
+  reason: string;
+  message: string;
+}
 export interface UserS2CPing {
   t: 'ping';
   serverTs: number;
@@ -445,7 +512,10 @@ export type UserC2S =
   | UserC2SWatchPresence
   | UserC2SUnwatchPresence
   | UserC2SWatchLibrary
-  | UserC2SUnwatchLibrary;
+  | UserC2SUnwatchLibrary
+  | UserC2SDmSend
+  | UserC2SDmTyping
+  | UserC2SDmRead;
 
 export interface UserC2SPong {
   t: 'pong';
@@ -468,6 +538,25 @@ export interface UserC2SWatchLibrary {
 /** Отписаться от обновлений библиотеки (ушли со страницы). */
 export interface UserC2SUnwatchLibrary {
   t: 'unwatch_library';
+}
+/** Отправить личное сообщение пользователю `toUserId`. */
+export interface UserC2SDmSend {
+  t: 'dm_send';
+  toUserId: string;
+  body: string;
+  /** Клиентский идентификатор для сопоставления эха (оптимистичная отправка). */
+  nonce: string;
+}
+/** Сигнал «печатаю/перестал» собеседнику `toUserId`. */
+export interface UserC2SDmTyping {
+  t: 'dm_typing';
+  toUserId: string;
+  typing: boolean;
+}
+/** Отметить переписку с `peerId` прочитанной (до текущего момента). */
+export interface UserC2SDmRead {
+  t: 'dm_read';
+  peerId: string;
 }
 
 // ── Type guards ────────────────────────────────────────────────────────
