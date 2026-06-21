@@ -70,12 +70,10 @@ export function VoicePlayer({
 
   const isCurrent = useVoicePlayerStore((s) => s.currentId === messageId);
   const playing = useVoicePlayerStore((s) => s.playing && s.currentId === messageId);
-  const rate = useVoicePlayerStore((s) => s.rate);
   const posSec = useVoicePlayerStore((s) => (s.currentId === messageId ? s.positionSec : 0));
   const liveDur = useVoicePlayerStore((s) => (s.currentId === messageId ? s.durationSec : 0));
   const toggle = useVoicePlayerStore((s) => s.toggle);
   const seek = useVoicePlayerStore((s) => s.seek);
-  const cycleRate = useVoicePlayerStore((s) => s.cycleRate);
 
   const dur = liveDur > 0 ? liveDur : durationSec;
   const frac = isCurrent && dur > 0 ? Math.min(1, posSec / dur) : 0;
@@ -98,6 +96,7 @@ export function VoicePlayer({
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: 'min(248px, 58vw)', opacity: pending ? 0.7 : 1 }}>
       <button
         onClick={() => !pending && toggle(messageId, url, durationSec)}
+        onMouseDown={(e) => e.preventDefault()}
         aria-label={playing ? 'Пауза' : 'Воспроизвести'}
         disabled={pending}
         style={{
@@ -159,26 +158,6 @@ export function VoicePlayer({
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>
             {fmtDur(isCurrent && (playing || posSec > 0) ? posSec : dur)}
           </span>
-          {isCurrent && (
-            <button
-              onClick={cycleRate}
-              aria-label="Скорость воспроизведения"
-              style={{
-                flexShrink: 0,
-                padding: '1px 6px',
-                borderRadius: 999,
-                border: 'none',
-                background: pal.pillBg,
-                color: pal.pillColor,
-                fontSize: 10,
-                fontWeight: 700,
-                cursor: 'pointer',
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              {rate}×
-            </button>
-          )}
           {incomingUnplayed && (
             <span
               aria-label="Не прослушано"
