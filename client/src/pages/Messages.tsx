@@ -876,7 +876,8 @@ function Composer({
       return;
     }
     // Палец отпустили раньше, чем стартанул рекордер — завершаем сразу.
-    if (!holdRef.current.active) {
+    // (Но НЕ когда жест перешёл в фиксацию — там запись должна продолжаться.)
+    if (!holdRef.current.active && !lockedRef.current) {
       const res = await recorder.stop();
       if (res && !cancelArmedRef.current) await handleRecorded(res);
     }
@@ -891,6 +892,15 @@ function Composer({
       lockedRef.current = true;
       setLocked(true);
       armCancel(false);
+      // ВАЖНО: снять захват указателя и завершить жест. Иначе MicButton
+      // размонтируется с активным pointer-capture, и тап по кнопке «отправить»
+      // (тем же пальцем) не доходит до клика — запись не отправляется.
+      holdRef.current.active = false;
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {
+        /* указатель уже отпущен — игнорируем */
+      }
       return;
     }
     armCancel(holdRef.current.startX - e.clientX > CANCEL_SWIPE_PX);
