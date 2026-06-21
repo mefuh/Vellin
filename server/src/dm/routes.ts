@@ -3,11 +3,13 @@ import type {
   ConversationThreadResponse,
   ListConversationsResponse,
   UploadDmImageResponse,
+  UploadDmVoiceResponse,
 } from '@vellin/shared';
 import type { Principal } from '../auth/jwt.js';
 import { requireAuth } from '../auth/middleware.js';
 import { getThreadByUsername, listConversations } from './service.js';
 import { ALLOWED_DM_IMAGE_MIME, MAX_DM_IMAGE_BYTES, processAndSaveDmImage } from './image.js';
+import { ALLOWED_DM_VOICE_MIME, MAX_DM_VOICE_BYTES, saveDmVoice } from './voice.js';
 
 function deny(reply: FastifyReply, status: number, error: string, message: string): void {
   reply.code(status).send({ error, message, statusCode: status });
@@ -76,6 +78,41 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
       reply.send(saved satisfies UploadDmImageResponse);
     } catch {
       deny(reply, 400, 'BadRequest', 'Не удалось обработать изображение');
+    }
+  });
+
+  // Загрузка голосового сообщения (multipart). Аудио не перекодируем — кладём
+  // исходный blob; длительность/волну считает клиент и шлёт в dm_send.
+  app.post('/dm/voice', async (req, reply) => {
+    const p = requireUser(req, reply);
+    if (!p) return;
+    const file = await req.file({ limits: { fileSize: MAX_DM_VOICE_BYTES, files: 1 } });
+    if (!file) {
+      deny(reply, 400, 'BadRequest', 'Файл не получен');
+      return;
+    }
+    // MediaRecorder отдаёт mime вида `audio/webm;codecs=opus` — берём базовый тип.
+    const baseMime = file.mimetype.split(';')[0].trim().toLowerCase();
+    if (!ALLOWED_DM_VOICE_MIME.has(baseMime)) {
+      deny(reply, 400, 'BadRequest', 'Неподдерживаемый формат аудио');
+      return;
+    }
+    let buffer: Buffer;
+    try {
+      buffer = await file.toBuffer();
+    } catch {
+      deny(reply, 400, 'BadRequest', 'Файл слишком большой (макс. 25 МБ)');
+      return;
+    }
+    if (file.file.truncated) {
+      deny(reply, 400, 'BadRequest', 'Файл слишком большой (макс. 25 МБ)');
+      return;
+    }
+    try {
+      const saved = await saveDmVoice(p.userId, buffer, baseMime);
+      reply.send(saved satisfies UploadDmVoiceResponse);
+    } catch {
+      deny(reply, 400, 'BadRequest', 'Не удалось сохранить голосовое');
     }
   });
 }

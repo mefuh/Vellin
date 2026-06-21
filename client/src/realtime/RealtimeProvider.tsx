@@ -74,6 +74,9 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
         case 'dm_read':
           useDmStore.getState().applyRead(msg, myId);
           break;
+        case 'dm_voice_played':
+          useDmStore.getState().applyVoicePlayed(msg.messageId);
+          break;
         case 'dm_typing':
           useDmStore.getState().applyTyping(msg.fromUserId, msg.typing);
           break;

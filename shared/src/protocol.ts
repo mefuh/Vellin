@@ -412,6 +412,7 @@ export type UserS2C =
   | UserS2CDmMessage
   | UserS2CDmRead
   | UserS2CDmTyping
+  | UserS2CDmVoicePlayed
   | UserS2CDmError
   | UserS2CPing;
 
@@ -494,6 +495,12 @@ export interface UserS2CDmTyping {
   fromUserId: string;
   typing: boolean;
 }
+/** Собеседник прослушал моё голосовое — обновить индикатор «прослушано». */
+export interface UserS2CDmVoicePlayed {
+  t: 'dm_voice_played';
+  conversationId: string;
+  messageId: string;
+}
 /** Ошибка отправки ЛС (нет прав/заблокирован/слишком длинно). */
 export interface UserS2CDmError {
   t: 'dm_error';
@@ -515,7 +522,8 @@ export type UserC2S =
   | UserC2SUnwatchLibrary
   | UserC2SDmSend
   | UserC2SDmTyping
-  | UserC2SDmRead;
+  | UserC2SDmRead
+  | UserC2SDmVoicePlayed;
 
 export interface UserC2SPong {
   t: 'pong';
@@ -549,8 +557,18 @@ export interface UserC2SDmSend {
   imageUrl?: string;
   imageWidth?: number;
   imageHeight?: number;
+  /** URL заранее загруженного голосового (через POST /dm/voice), либо отсутствует. */
+  voiceUrl?: string;
+  voiceDurationSec?: number;
+  /** Амплитудная волна голосового (целые 0..100), считается клиентом при записи. */
+  voicePeaks?: number[];
   /** Клиентский идентификатор для сопоставления эха (оптимистичная отправка). */
   nonce: string;
+}
+/** Отметить голосовое сообщение прослушанным (получателем). */
+export interface UserC2SDmVoicePlayed {
+  t: 'dm_voice_played';
+  messageId: string;
 }
 /** Сигнал «печатаю/перестал» собеседнику `toUserId`. */
 export interface UserC2SDmTyping {

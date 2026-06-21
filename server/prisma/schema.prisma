@@ -155,6 +155,14 @@ model DirectMessage {
   imageUrl       String?
   imageWidth     Int?
   imageHeight    Int?
+  /// Голосовое сообщение (/api/uploads/dm-voice/...). Null — не голосовое.
+  voiceUrl       String?
+  /// Длительность голосового в секундах.
+  voiceDurationSec Float?
+  /// Амплитудная волна голосового — JSON-массив целых 0..100 (для отрисовки без декода).
+  voicePeaksJson String?
+  /// Когда получатель впервые прослушал голосовое (для индикатора «прослушано»). Null — нет.
+  voicePlayedAt  DateTime?
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])

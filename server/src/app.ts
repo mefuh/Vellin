@@ -17,7 +17,8 @@ import { dmRoutes } from './dm/routes.js';
 import { geoRoutes } from './geo/routes.js';
 import { titleRoutes } from './titles/routes.js';
 import { ensureUploadsDir } from './auth/avatar.js';
-import { ensureDmImagesDir, MAX_DM_IMAGE_BYTES } from './dm/image.js';
+import { ensureDmImagesDir } from './dm/image.js';
+import { ensureDmVoiceDir, MAX_DM_VOICE_BYTES } from './dm/voice.js';
 import { registerWebSocket } from './ws/server.js';
 import { userHub } from './realtime/UserHub.js';
 import { getAcceptedFriendIds } from './friends/service.js';
@@ -58,9 +59,10 @@ export async function buildApp(): Promise<FastifyInstance> {
     options: { maxPayload: 64 * 1024 },
   });
   await app.register(multipart, {
-    // Потолок для всех загрузок; конкретные лимиты enforce'ятся в маршрутах
-    // (аватар — 5 МБ, картинка ЛС — 10 МБ) через req.file({ limits }).
-    limits: { fileSize: MAX_DM_IMAGE_BYTES, files: 1 },
+    // Глобальный потолок — максимум из всех загрузок (голосовое — 25 МБ);
+    // конкретные лимиты enforce'ятся в маршрутах (аватар — 5 МБ, картинка ЛС —
+    // 10 МБ, голосовое — 25 МБ) через req.file({ limits }).
+    limits: { fileSize: MAX_DM_VOICE_BYTES, files: 1 },
   });
 
   // Статика загруженных файлов (аватары). Отдаётся по /api/uploads/... —
@@ -68,6 +70,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // создаётся заранее, чтобы @fastify/static не упал на старте.
   await ensureUploadsDir();
   await ensureDmImagesDir();
+  await ensureDmVoiceDir();
   await app.register(fastifyStatic, {
     root: path.resolve(env.UPLOADS_DIR),
     prefix: '/api/uploads/',

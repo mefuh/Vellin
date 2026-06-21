@@ -178,3 +178,14 @@ input[type='date']::-webkit-datetime-edit {
     transform: rotate(360deg);
   }
 }
+
+/* Пульсация индикатора активной записи голосового. */
+@keyframes vellinPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
