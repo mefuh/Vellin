@@ -27,6 +27,8 @@ interface VoicePlayerState {
   _onStart: ((messageId: string) => void) | null;
 
   toggle: (id: string, url: string, durationSec: number) => void;
+  /** Пауза/продолжение текущего без перезагрузки (для мини-плеера). */
+  toggleCurrent: () => void;
   seek: (id: string, url: string, durationSec: number, frac: number) => void;
   cycleRate: () => void;
   stop: () => void;
@@ -109,6 +111,17 @@ export const useVoicePlayerStore = create<VoicePlayerState>((set, get) => {
         return;
       }
       loadAndPlay(id, url, durationSec);
+    },
+
+    toggleCurrent: () => {
+      const { _audio, currentId, playing } = get();
+      if (!_audio || !currentId) return;
+      if (playing) {
+        _audio.pause();
+      } else {
+        _audio.playbackRate = get().rate;
+        void _audio.play().catch(() => set({ playing: false }));
+      }
     },
 
     seek: (id, url, durationSec, frac) => {

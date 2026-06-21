@@ -19,6 +19,7 @@ import { ApiHttpError } from '../api/client';
 import { lastSeenLabel } from '../utils/lastSeen';
 import { AppHeader } from '../components/AppHeader';
 import { VoicePlayer } from '../components/messages/VoicePlayer';
+import { VoiceNowPlaying } from '../components/messages/VoiceNowPlaying';
 import { useVoicePlayerStore } from '../stores/voicePlayerStore';
 import { useVoiceRecorder, type RecordResult } from '../hooks/useVoiceRecorder';
 import { computeVoiceMeta } from '../utils/audioPeaks';
@@ -399,6 +400,9 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     const vp = useVoicePlayerStore.getState();
     const isUnplayedIncoming = (m: ClientDm): boolean =>
       !!m.voiceUrl && m.senderId !== myId && m.senderId !== 'me' && !m.voicePlayed;
+    // Авто-проигрывание как плейлист: после текущего — следующее голосовое по
+    // порядку, независимо от отправителя (так последовательность ГС играет
+    // подряд). Отметку «прослушано» при этом ставим только входящим.
     vp.setNextResolver((currentId) => {
       const t = useDmStore.getState().threads[peerId];
       if (!t) return null;
@@ -406,8 +410,8 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
       if (idx < 0) return null;
       for (let i = idx + 1; i < t.messages.length; i++) {
         const m = t.messages[i];
-        if (isUnplayedIncoming(m)) {
-          return { id: m.id, url: m.voiceUrl!, durationSec: m.voiceDurationSec ?? 0 };
+        if (m.voiceUrl) {
+          return { id: m.id, url: m.voiceUrl, durationSec: m.voiceDurationSec ?? 0 };
         }
       }
       return null;
@@ -506,15 +510,18 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
         </Link>
       </header>
 
-      {/* Лента сообщений */}
-      <div
-        ref={scrollRef}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-        }}
-        style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px max(12px, 3%)', display: 'flex', flexDirection: 'column', gap: 2 }}
-      >
+      {/* Лента сообщений + плавающий мини-плеер «сейчас играет» (оверлей, чтобы
+          его появление не сдвигало ленту и не вызывало автоскролл к сообщению). */}
+      <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <VoiceNowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} />
+        <div
+          ref={scrollRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          }}
+          style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px max(12px, 3%)', display: 'flex', flexDirection: 'column', gap: 2 }}
+        >
         {thread.hasMore && (
           <div style={{ display: 'grid', placeItems: 'center', paddingBottom: 8 }}>
             <Button size="sm" variant="ghost" disabled={loadingMore} onClick={() => void loadEarlier()}>
@@ -536,6 +543,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
             if (pinnedRef.current) scrollToBottom();
           }}
         />
+        </div>
       </div>
 
       {/* Ввод */}
@@ -749,6 +757,8 @@ interface Attachment {
 const MIN_VOICE_MS = 700;
 /** На сколько нужно увести палец влево, чтобы отменить запись. */
 const CANCEL_SWIPE_PX = 70;
+/** На сколько нужно увести палец вверх, чтобы зафиксировать запись (hands-free). */
+const LOCK_LIFT_PX = 60;
 
 function Composer({
   peer,
@@ -769,6 +779,8 @@ function Composer({
   const [uploadErr, setUploadErr] = useState<string | null>(null);
   const [cancelArmed, setCancelArmed] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [lockProgress, setLockProgress] = useState(0);
   const sendTyping = useDmStore((s) => s.sendTyping);
   const recorder = useVoiceRecorder();
   const isMobile = useIsMobile();
@@ -776,13 +788,39 @@ function Composer({
   const fileRef = useRef<HTMLInputElement>(null);
   const typingActiveRef = useRef(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const holdRef = useRef<{ startX: number; active: boolean }>({ startX: 0, active: false });
+  const holdRef = useRef<{ startX: number; startY: number; active: boolean }>({ startX: 0, startY: 0, active: false });
   const cancelArmedRef = useRef(false);
+  const lockedRef = useRef(false);
 
   const armCancel = (v: boolean): void => {
     cancelArmedRef.current = v;
     setCancelArmed(v);
   };
+
+  // Пока идёт запись — глушим выделение текста и callout-меню (иначе долгое
+  // удержание кнопки на телефоне выделяет соседний текст / открывает меню).
+  useEffect(() => {
+    if (!recorder.recording) return;
+    const s = document.body.style;
+    s.setProperty('user-select', 'none');
+    s.setProperty('-webkit-user-select', 'none');
+    s.setProperty('-webkit-touch-callout', 'none');
+    return () => {
+      s.removeProperty('user-select');
+      s.removeProperty('-webkit-user-select');
+      s.removeProperty('-webkit-touch-callout');
+    };
+  }, [recorder.recording]);
+
+  // Сброс состояний жеста при завершении записи.
+  useEffect(() => {
+    if (!recorder.recording) {
+      lockedRef.current = false;
+      setLocked(false);
+      setLockProgress(0);
+      armCancel(false);
+    }
+  }, [recorder.recording]);
 
   const handleRecorded = async (res: RecordResult): Promise<void> => {
     if (res.durationMs < MIN_VOICE_MS) {
@@ -827,7 +865,10 @@ function Composer({
     if (voiceBusy) return;
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    holdRef.current = { startX: e.clientX, active: true };
+    holdRef.current = { startX: e.clientX, startY: e.clientY, active: true };
+    lockedRef.current = false;
+    setLocked(false);
+    setLockProgress(0);
     armCancel(false);
     const ok = await recorder.start();
     if (!ok) {
@@ -842,13 +883,23 @@ function Composer({
   };
 
   const onMicMove = (e: ReactPointerEvent): void => {
-    if (!holdRef.current.active) return;
+    if (!holdRef.current.active || lockedRef.current) return;
+    const dy = holdRef.current.startY - e.clientY; // вверх — положительно
+    setLockProgress(Math.max(0, Math.min(1, dy / LOCK_LIFT_PX)));
+    if (dy > LOCK_LIFT_PX) {
+      // Протянули вверх — фиксируем запись: палец можно отпустить.
+      lockedRef.current = true;
+      setLocked(true);
+      armCancel(false);
+      return;
+    }
     armCancel(holdRef.current.startX - e.clientX > CANCEL_SWIPE_PX);
   };
 
   const onMicUp = async (): Promise<void> => {
     if (!holdRef.current.active) return;
     holdRef.current.active = false;
+    if (lockedRef.current) return; // запись зафиксирована — продолжаем без пальца
     if (cancelArmedRef.current) {
       await recorder.cancel();
       armCancel(false);
@@ -966,7 +1017,7 @@ function Composer({
           {uploadErr && <span style={{ fontSize: 12, color: 'var(--accent-hi)' }}>{uploadErr}</span>}
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: 10 }}>
         <input
           ref={fileRef}
           type="file"
@@ -978,7 +1029,7 @@ function Composer({
           }}
         />
         {recorder.recording ? (
-          <RecordingBar elapsedMs={recorder.elapsedMs} cancelArmed={cancelArmed} hold={isMobile} />
+          <RecordingBar elapsedMs={recorder.elapsedMs} cancelArmed={cancelArmed} hold={isMobile && !locked} />
         ) : (
           <>
             <button
@@ -1024,19 +1075,23 @@ function Composer({
           </>
         )}
         {recorder.recording ? (
-          isMobile ? (
-            // Мобилка: одна кнопка-микрофон, отпускание = отправить, свайп = отмена.
-            <MicButton
-              recording
-              cancelArmed={cancelArmed}
-              busy={voiceBusy}
-              onPointerDown={onMicDown}
-              onPointerMove={onMicMove}
-              onPointerUp={onMicUp}
-              onPointerCancel={onMicUp}
-            />
+          isMobile && !locked ? (
+            // Мобилка (удержание): микрофон + подсказка фиксации; отпускание =
+            // отправить, свайп влево = отмена, протяжка вверх = зафиксировать.
+            <>
+              <LockHint progress={lockProgress} />
+              <MicButton
+                recording
+                cancelArmed={cancelArmed}
+                busy={voiceBusy}
+                onPointerDown={onMicDown}
+                onPointerMove={onMicMove}
+                onPointerUp={onMicUp}
+                onPointerCancel={onMicUp}
+              />
+            </>
           ) : (
-            // Десктоп: отдельные «отмена» и «отправить».
+            // Десктоп или зафиксированная запись: отдельные «отмена» и «отправить».
             <>
               <IconButton icon="trash" label="Отменить запись" onClick={() => void cancelRecord()} />
               <Button
@@ -1088,7 +1143,7 @@ function RecordingBar({ elapsedMs, cancelArmed, hold }: { elapsedMs: number; can
   const s = Math.floor(elapsedMs / 1000);
   const mm = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   // На ПК запись по клику — подсказки про свайп нет, просто «Идёт запись…».
-  const hint = hold ? (cancelArmed ? 'Отпустите для отмены' : '‹ Свайп для отмены') : 'Идёт запись…';
+  const hint = hold ? (cancelArmed ? 'Отпустите для отмены' : '‹ отмена · вверх — зафиксировать') : 'Идёт запись…';
   return (
     <div
       style={{
@@ -1174,6 +1229,7 @@ function MicButton({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
+      onContextMenu={(e) => e.preventDefault()}
       disabled={busy}
       aria-label={recording ? 'Запись — отпустите, чтобы отправить' : 'Записать голосовое'}
       title="Удерживайте, чтобы записать"
@@ -1193,11 +1249,53 @@ function MicButton({
         transition: 'transform .15s ease, background .15s ease',
         touchAction: 'none',
         userSelect: 'none',
+        WebkitUserSelect: 'none',
         opacity: busy ? 0.6 : 1,
       }}
     >
       <Icon name={cancelArmed ? 'trash' : 'mic'} size={20} />
     </button>
+  );
+}
+
+/** Подсказка фиксации записи: «потяни вверх», подсвечивается у порога. */
+function LockHint({ progress }: { progress: number }) {
+  const p = Math.min(1, progress);
+  const active = p >= 1;
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: 'absolute',
+        right: 0,
+        bottom: '100%',
+        marginBottom: 10,
+        width: 42,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 6,
+        pointerEvents: 'none',
+      }}
+    >
+      <div
+        style={{
+          width: 34,
+          height: 46,
+          borderRadius: 18,
+          background: active ? 'var(--accent)' : 'var(--bg-3)',
+          border: '1px solid var(--line-2)',
+          display: 'grid',
+          placeItems: 'center',
+          opacity: 0.55 + 0.45 * p,
+          transform: `translateY(${-6 * p}px)`,
+          transition: 'background .15s ease',
+        }}
+      >
+        <Icon name="pin" size={16} style={{ color: active ? '#fff' : 'var(--text-2)' }} />
+      </div>
+      <Icon name="chevron" size={14} style={{ transform: 'rotate(-90deg)', color: 'var(--text-3)', animation: 'vellinPulse 1.2s ease-in-out infinite' }} />
+    </div>
   );
 }
 
