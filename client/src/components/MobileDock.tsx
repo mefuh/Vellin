@@ -31,8 +31,8 @@ function shouldShow(path: string): boolean {
 /** Индекс активной вкладки по маршруту (−1 — нет активной). */
 function activeIndexFromPath(path: string, myUsername: string): number {
   if (path.startsWith('/library')) return 0;
-  if (path.startsWith('/friends')) return 1;
-  if (path === '/messages') return 2;
+  if (path === '/messages') return 1;
+  if (path.startsWith('/friends')) return 2;
   if (path === '/profile') return 3;
   if (path.startsWith('/u/')) {
     const uname = decodeURIComponent(path.slice('/u/'.length));
@@ -73,8 +73,8 @@ export function MobileDock() {
 
   const tabs: Tab[] = [
     { id: 'library', label: 'Библиотека', icon: 'library', to: '/library' },
-    { id: 'friends', label: 'Друзья', icon: 'users', to: '/friends' },
     { id: 'messages', label: 'Чаты', icon: 'chat', to: '/messages' },
+    { id: 'friends', label: 'Друзья', icon: 'users', to: '/friends' },
     { id: 'profile', label: 'Профиль', to: myUsername ? `/u/${encodeURIComponent(myUsername)}` : '/profile' },
   ];
 

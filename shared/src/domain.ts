@@ -468,6 +468,17 @@ export interface DirectMessageDTO {
   /** Исходные размеры изображения — чтобы зарезервировать место без скачка вёрстки. */
   imageWidth?: number;
   imageHeight?: number;
+  /** URL голосового сообщения (`/api/uploads/dm-voice/...`), либо отсутствует. */
+  voiceUrl?: string;
+  /** Длительность голосового в секундах. */
+  voiceDurationSec?: number;
+  /**
+   * Амплитудная волна голосового: массив целых 0..100 (обычно ≤56 столбиков),
+   * считается клиентом при записи — чтобы плеер рисовал волну без декодирования.
+   */
+  voicePeaks?: number[];
+  /** Прослушал ли собеседник это голосовое (только для своих сообщений). */
+  voicePlayed?: boolean;
   /**
    * Эхо клиентского nonce — отдаётся только отправителю, чтобы он сопоставил
    * пришедшее с сервера сообщение со своей оптимистичной отправкой.
@@ -481,7 +492,7 @@ export interface DmConversation {
   /** Собеседник. */
   peer: PublicUser;
   /** Последнее сообщение в диалоге (для превью), либо null — диалог пуст. */
-  lastMessage: { body: string; senderId: string; createdAt: string; hasImage: boolean } | null;
+  lastMessage: { body: string; senderId: string; createdAt: string; hasImage: boolean; hasVoice: boolean } | null;
   /** Сколько у меня непрочитанных в этом диалоге. */
   unreadCount: number;
   /**

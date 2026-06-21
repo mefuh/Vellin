@@ -55,12 +55,21 @@ interface DmState {
   prependMessages: (peerId: string, older: DirectMessageDTO[], hasMore: boolean) => void;
   setActivePeer: (peerId: string | null) => void;
 
-  /** Оптимистично отправить ЛС (текст и/или изображение). */
-  send: (peer: PublicUser, body: string, image?: { url: string; width: number; height: number }) => void;
+  /** Оптимистично отправить ЛС (текст и/или вложение — изображение/голосовое). */
+  send: (
+    peer: PublicUser,
+    body: string,
+    image?: { url: string; width: number; height: number },
+    voice?: { url: string; durationSec: number; peaks: number[] },
+  ) => void;
   /** Входящее/эхо сообщение из WS. */
   applyIncoming: (message: DirectMessageDTO, peer: PublicUser, unreadTotal: number, myId: string) => void;
   /** Ошибка отправки по nonce. */
   applyError: (nonce: string | undefined) => void;
+  /** Я (получатель) прослушал голосовое — оптимистично + сигнал серверу. */
+  markVoicePlayed: (messageId: string) => void;
+  /** Собеседник прослушал моё голосовое (из WS) — обновить индикатор. */
+  applyVoicePlayed: (messageId: string) => void;
   /** Кто-то прочитал (своё эхо или собеседник). */
   applyRead: (
     payload: { conversationId: string; byUserId: string; readAt: string; unreadTotal?: number },
@@ -88,6 +97,7 @@ function bumpConversation(
     senderId: message.senderId,
     createdAt: message.createdAt,
     hasImage: !!message.imageUrl,
+    hasVoice: !!message.voiceUrl,
   };
   if (idx === -1) {
     return [
@@ -147,9 +157,9 @@ export const useDmStore = create<DmState>((set, get) => ({
 
   setActivePeer: (activePeerId) => set({ activePeerId }),
 
-  send: (peer, body, image) => {
+  send: (peer, body, image, voice) => {
     const text = body.trim();
-    if (!text && !image) return;
+    if (!text && !image && !voice) return;
     const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const optimistic: ClientDm = {
       id: nonce,
@@ -158,6 +168,7 @@ export const useDmStore = create<DmState>((set, get) => ({
       body: text,
       createdAt: new Date().toISOString(),
       ...(image ? { imageUrl: image.url, imageWidth: image.width, imageHeight: image.height } : {}),
+      ...(voice ? { voiceUrl: voice.url, voiceDurationSec: voice.durationSec, voicePeaks: voice.peaks } : {}),
       nonce,
       pending: true,
     };
@@ -186,6 +197,7 @@ export const useDmStore = create<DmState>((set, get) => ({
       body: text,
       nonce,
       ...(image ? { imageUrl: image.url, imageWidth: image.width, imageHeight: image.height } : {}),
+      ...(voice ? { voiceUrl: voice.url, voiceDurationSec: voice.durationSec, voicePeaks: voice.peaks } : {}),
     });
   },
 
@@ -237,6 +249,42 @@ export const useDmStore = create<DmState>((set, get) => ({
         }
       }
       return { threads };
+    }),
+
+  markVoicePlayed: (messageId) => {
+    let shouldSend = false;
+    set((s) => {
+      const threads = { ...s.threads };
+      let changed = false;
+      for (const [pid, t] of Object.entries(threads)) {
+        const idx = t.messages.findIndex((m) => m.id === messageId);
+        if (idx >= 0 && !t.messages[idx].voicePlayed) {
+          shouldSend = true;
+          changed = true;
+          const msgs = t.messages.slice();
+          msgs[idx] = { ...msgs[idx], voicePlayed: true };
+          threads[pid] = { ...t, messages: msgs };
+        }
+      }
+      return changed ? { threads } : s;
+    });
+    if (shouldSend) get()._send?.({ t: 'dm_voice_played', messageId });
+  },
+
+  applyVoicePlayed: (messageId) =>
+    set((s) => {
+      const threads = { ...s.threads };
+      let changed = false;
+      for (const [pid, t] of Object.entries(threads)) {
+        const idx = t.messages.findIndex((m) => m.id === messageId);
+        if (idx >= 0 && !t.messages[idx].voicePlayed) {
+          changed = true;
+          const msgs = t.messages.slice();
+          msgs[idx] = { ...msgs[idx], voicePlayed: true };
+          threads[pid] = { ...t, messages: msgs };
+        }
+      }
+      return changed ? { threads } : s;
     }),
 
   applyRead: (payload, myId) =>

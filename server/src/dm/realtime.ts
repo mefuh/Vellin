@@ -4,7 +4,15 @@ import { userHub } from '../realtime/UserHub.js';
 import { removeNotifications } from '../realtime/notify.js';
 import { toAppNotification } from '../friends/mappers.js';
 import { logger } from '../utils/logger.js';
-import { DmError, markRead, sendMessage, unreadTotal, type SendImage } from './service.js';
+import {
+  DmError,
+  markRead,
+  markVoicePlayed,
+  sendMessage,
+  unreadTotal,
+  type SendImage,
+  type SendVoice,
+} from './service.js';
 
 function parseDmCount(json: string): number {
   try {
@@ -54,9 +62,10 @@ export async function handleDmSend(
   body: string,
   nonce: string,
   image?: SendImage,
+  voice?: SendVoice,
 ): Promise<void> {
   try {
-    const res = await sendMessage(senderId, toUserId, body, image);
+    const res = await sendMessage(senderId, toUserId, body, image, voice);
     const [recipUnread, senderUnread] = await Promise.all([
       unreadTotal(toUserId),
       unreadTotal(senderId),
@@ -75,7 +84,7 @@ export async function handleDmSend(
       peer: res.recipient,
       unreadTotal: senderUnread,
     });
-    const preview = body.trim() || (image ? '📷 Фото' : '');
+    const preview = body.trim() || (image ? '📷 Фото' : voice ? '🎤 Голосовое сообщение' : '');
     await pushDmNotification(toUserId, res.sender, res.conversationId, preview);
   } catch (err) {
     if (err instanceof DmError) {
@@ -111,6 +120,21 @@ export async function handleDmRead(meId: string, peerId: string): Promise<void> 
     await removeNotifications(meId, { type: 'direct_message', actorId: peerId });
   } catch (err) {
     logger.error({ err, meId, peerId }, 'dm read failed');
+  }
+}
+
+/** Получатель прослушал голосовое — уведомить автора (индикатор «прослушано»). */
+export async function handleDmVoicePlayed(meId: string, messageId: string): Promise<void> {
+  try {
+    const r = await markVoicePlayed(meId, messageId);
+    if (!r) return;
+    userHub.pushTo(r.senderId, {
+      t: 'dm_voice_played',
+      conversationId: r.conversationId,
+      messageId: r.messageId,
+    });
+  } catch (err) {
+    logger.error({ err, meId, messageId }, 'dm voice played failed');
   }
 }
 

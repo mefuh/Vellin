@@ -6,6 +6,7 @@ import { PUBLIC_USER_SELECT, toPublicUser } from '../friends/mappers.js';
 import { getAcceptedFriendIds } from '../friends/service.js';
 import { userHub } from '../realtime/UserHub.js';
 import { isDmImageUrl } from './image.js';
+import { isDmVoiceUrl, sanitizeVoicePeaks } from './voice.js';
 
 export const MAX_DM_BODY = 4000;
 /** Сколько сообщений отдаём одной страницей треда. */
@@ -29,6 +30,16 @@ function myReadField(conv: Pick<Conversation, 'userAId'>, userId: string): 'aLas
   return conv.userAId === userId ? 'aLastReadAt' : 'bLastReadAt';
 }
 
+function parseVoicePeaks(json: string | null): number[] | undefined {
+  if (!json) return undefined;
+  try {
+    const v = JSON.parse(json) as unknown;
+    return sanitizeVoicePeaks(v) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function toDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
   return {
     id: m.id,
@@ -41,6 +52,17 @@ function toDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
           imageUrl: m.imageUrl,
           ...(m.imageWidth != null ? { imageWidth: m.imageWidth } : {}),
           ...(m.imageHeight != null ? { imageHeight: m.imageHeight } : {}),
+        }
+      : {}),
+    ...(m.voiceUrl
+      ? {
+          voiceUrl: m.voiceUrl,
+          ...(m.voiceDurationSec != null ? { voiceDurationSec: m.voiceDurationSec } : {}),
+          ...(() => {
+            const peaks = parseVoicePeaks(m.voicePeaksJson);
+            return peaks ? { voicePeaks: peaks } : {};
+          })(),
+          voicePlayed: m.voicePlayedAt != null,
         }
       : {}),
     ...(nonce ? { nonce } : {}),
@@ -151,21 +173,30 @@ export interface SendImage {
   height: number;
 }
 
+export interface SendVoice {
+  url: string;
+  durationSec: number;
+  peaks: number[];
+}
+
 /**
- * Сохранить личное сообщение от `meId` к `peerId` (текст и/или изображение).
- * Бросает {@link DmError}, если писать нельзя. Обновляет lastMessageAt диалога
- * и отметку «прочитано» отправителя (свои сообщения он уже «прочитал»).
+ * Сохранить личное сообщение от `meId` к `peerId` (текст и/или вложение —
+ * изображение или голосовое). Бросает {@link DmError}, если писать нельзя.
+ * Обновляет lastMessageAt диалога и отметку «прочитано» отправителя (свои
+ * сообщения он уже «прочитал»).
  */
 export async function sendMessage(
   meId: string,
   peerId: string,
   rawBody: string,
   image?: SendImage,
+  voice?: SendVoice,
 ): Promise<SendResult> {
   const body = rawBody.trim();
-  if (!body && !image) throw new DmError('ok', 'Пустое сообщение');
+  if (!body && !image && !voice) throw new DmError('ok', 'Пустое сообщение');
   if (body.length > MAX_DM_BODY) throw new DmError('ok', 'Сообщение слишком длинное');
   if (image && !isDmImageUrl(image.url)) throw new DmError('ok', 'Некорректное изображение');
+  if (voice && !isDmVoiceUrl(voice.url)) throw new DmError('ok', 'Некорректное голосовое');
 
   const peer = await loadPeerOrThrow(peerId);
   const elig = await checkEligibility(meId, peer);
@@ -187,6 +218,13 @@ export async function sendMessage(
       body,
       ...(image
         ? { imageUrl: image.url, imageWidth: Math.round(image.width), imageHeight: Math.round(image.height) }
+        : {}),
+      ...(voice
+        ? {
+            voiceUrl: voice.url,
+            voiceDurationSec: voice.durationSec,
+            voicePeaksJson: JSON.stringify(sanitizeVoicePeaks(voice.peaks) ?? []),
+          }
         : {}),
     },
   });
@@ -238,6 +276,33 @@ export async function markRead(meId: string, peerId: string): Promise<MarkReadRe
   };
 }
 
+export interface VoicePlayedResult {
+  conversationId: string;
+  messageId: string;
+  /** Автор голосового — ему шлём обновление индикатора «прослушано». */
+  senderId: string;
+}
+
+/**
+ * Отметить голосовое сообщение прослушанным слушателем `meId`. Разрешено только
+ * получателю (не автору) и только для голосовых в его диалоге. Идемпотентно:
+ * повторный вызов вернёт результат, но не перезапишет момент. Возвращает null,
+ * если сообщение не найдено/не голосовое/нет доступа.
+ */
+export async function markVoicePlayed(meId: string, messageId: string): Promise<VoicePlayedResult | null> {
+  const m = await prisma.directMessage.findUnique({
+    where: { id: messageId },
+    include: { conversation: { select: { userAId: true, userBId: true } } },
+  });
+  if (!m || !m.voiceUrl) return null;
+  const isParticipant = m.conversation.userAId === meId || m.conversation.userBId === meId;
+  if (!isParticipant || m.senderId === meId) return null; // только получатель
+  if (!m.voicePlayedAt) {
+    await prisma.directMessage.update({ where: { id: m.id }, data: { voicePlayedAt: new Date() } });
+  }
+  return { conversationId: m.conversationId, messageId: m.id, senderId: m.senderId };
+}
+
 /** Список диалогов пользователя (по убыванию активности). */
 export async function listConversations(
   userId: string,
@@ -278,6 +343,7 @@ export async function listConversations(
         senderId: last.senderId,
         createdAt: last.createdAt.toISOString(),
         hasImage: !!last.imageUrl,
+        hasVoice: !!last.voiceUrl,
       },
       unreadCount: unread,
       peerLastReadAt: peerRead ? peerRead.toISOString() : null,

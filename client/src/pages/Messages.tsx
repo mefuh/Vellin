@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import type { DmConversation, PublicUser } from '@vellin/shared';
 import { Avatar, Button, Icon } from '../shared';
@@ -11,6 +18,10 @@ import { dmApi } from '../api/dm';
 import { ApiHttpError } from '../api/client';
 import { lastSeenLabel } from '../utils/lastSeen';
 import { AppHeader } from '../components/AppHeader';
+import { VoicePlayer } from '../components/messages/VoicePlayer';
+import { useVoicePlayerStore } from '../stores/voicePlayerStore';
+import { useVoiceRecorder, type RecordResult } from '../hooks/useVoiceRecorder';
+import { computeVoiceMeta } from '../utils/audioPeaks';
 
 function fmtTime(iso: string): string {
   const d = new Date(iso);
@@ -184,7 +195,15 @@ function ConversationList({
         const online = presence[c.peer.id]?.online ?? c.online;
         const active = activeUsername === c.peer.username;
         const last = c.lastMessage;
-        const previewBody = last ? (last.hasImage ? (last.body ? `📷 ${last.body}` : '📷 Фото') : last.body) : '';
+        const previewBody = last
+          ? last.hasVoice
+            ? '🎤 Голосовое сообщение'
+            : last.hasImage
+              ? last.body
+                ? `📷 ${last.body}`
+                : '📷 Фото'
+              : last.body
+          : '';
         const preview = last && last.senderId === myId ? `Вы: ${previewBody}` : previewBody;
         // Галочки — только если последнее сообщение отправлено мной.
         const mine = !!last && last.senderId === myId;
@@ -373,6 +392,39 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     if (pinnedRef.current) scrollToBottom();
   }, [msgCount, scrollToBottom]);
 
+  // Авто-следующее голосовое + отметка «прослушано». Резолвер читает свежий
+  // тред из стора (getState), поэтому ставим его один раз на peerId.
+  useEffect(() => {
+    if (!peerId) return;
+    const vp = useVoicePlayerStore.getState();
+    const isUnplayedIncoming = (m: ClientDm): boolean =>
+      !!m.voiceUrl && m.senderId !== myId && m.senderId !== 'me' && !m.voicePlayed;
+    vp.setNextResolver((currentId) => {
+      const t = useDmStore.getState().threads[peerId];
+      if (!t) return null;
+      const idx = t.messages.findIndex((m) => m.id === currentId);
+      if (idx < 0) return null;
+      for (let i = idx + 1; i < t.messages.length; i++) {
+        const m = t.messages[i];
+        if (isUnplayedIncoming(m)) {
+          return { id: m.id, url: m.voiceUrl!, durationSec: m.voiceDurationSec ?? 0 };
+        }
+      }
+      return null;
+    });
+    vp.setOnStart((messageId) => {
+      const t = useDmStore.getState().threads[peerId];
+      const m = t?.messages.find((x) => x.id === messageId);
+      if (m && isUnplayedIncoming(m)) useDmStore.getState().markVoicePlayed(messageId);
+    });
+    return () => {
+      const cur = useVoicePlayerStore.getState();
+      cur.setNextResolver(null);
+      cur.setOnStart(null);
+      cur.stop();
+    };
+  }, [peerId, myId]);
+
   // При появлении/скрытии клавиатуры (resize visual viewport) держим ленту у
   // низа, чтобы последнее сообщение не пряталось за поднявшимся композером.
   useEffect(() => {
@@ -490,7 +542,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
       <Composer
         peer={peer}
         eligibility={thread.eligibility}
-        onSend={(body, image) => sendMessage(peer, body, image)}
+        onSend={(body, image, voice) => sendMessage(peer, body, image, voice)}
       />
 
       {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} />}
@@ -593,7 +645,7 @@ function MessageList({
               <div
                 style={{
                   maxWidth: '74%',
-                  padding: m.imageUrl ? 4 : '8px 12px',
+                  padding: m.voiceUrl ? '7px 9px' : m.imageUrl ? 4 : '8px 12px',
                   borderRadius: 16,
                   borderBottomRightRadius: mine ? 4 : 16,
                   borderBottomLeftRadius: mine ? 16 : 4,
@@ -603,7 +655,19 @@ function MessageList({
                   overflow: 'hidden',
                 }}
               >
-                {m.imageUrl ? (
+                {m.voiceUrl ? (
+                  <VoicePlayer
+                    messageId={m.id}
+                    url={m.voiceUrl}
+                    durationSec={m.voiceDurationSec ?? 0}
+                    peaks={m.voicePeaks ?? []}
+                    mine={mine}
+                    played={!!m.voicePlayed}
+                    pending={m.pending}
+                    clock={fmtTime(m.createdAt)}
+                    statusSlot={status}
+                  />
+                ) : m.imageUrl ? (
                   <>
                     <img
                       src={m.imageUrl}
@@ -681,6 +745,11 @@ interface Attachment {
   preview: string;
 }
 
+/** Минимальная длительность записи, ниже — считаем случайным тапом. */
+const MIN_VOICE_MS = 700;
+/** На сколько нужно увести палец влево, чтобы отменить запись. */
+const CANCEL_SWIPE_PX = 70;
+
 function Composer({
   peer,
   eligibility,
@@ -688,17 +757,107 @@ function Composer({
 }: {
   peer: PublicUser;
   eligibility: ThreadState['eligibility'];
-  onSend: (body: string, image?: { url: string; width: number; height: number }) => void;
+  onSend: (
+    body: string,
+    image?: { url: string; width: number; height: number },
+    voice?: { url: string; durationSec: number; peaks: number[] },
+  ) => void;
 }) {
   const [text, setText] = useState('');
   const [attach, setAttach] = useState<Attachment | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const [cancelArmed, setCancelArmed] = useState(false);
+  const [voiceBusy, setVoiceBusy] = useState(false);
   const sendTyping = useDmStore((s) => s.sendTyping);
+  const recorder = useVoiceRecorder();
+  const isMobile = useIsMobile();
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const typingActiveRef = useRef(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdRef = useRef<{ startX: number; active: boolean }>({ startX: 0, active: false });
+  const cancelArmedRef = useRef(false);
+
+  const armCancel = (v: boolean): void => {
+    cancelArmedRef.current = v;
+    setCancelArmed(v);
+  };
+
+  const handleRecorded = async (res: RecordResult): Promise<void> => {
+    if (res.durationMs < MIN_VOICE_MS) {
+      setUploadErr('Запись слишком короткая — удерживайте дольше');
+      return;
+    }
+    setUploadErr(null);
+    setVoiceBusy(true);
+    try {
+      const meta = await computeVoiceMeta(res.blob, res.durationMs / 1000);
+      const ext = res.mimeType.includes('mp4') ? 'm4a' : res.mimeType.includes('ogg') ? 'ogg' : 'webm';
+      const up = await dmApi.uploadVoice(res.blob, `voice.${ext}`);
+      onSend('', undefined, {
+        url: up.url,
+        durationSec: Math.max(1, Math.round(meta.durationSec * 10) / 10),
+        peaks: meta.peaks,
+      });
+    } catch (e) {
+      setUploadErr(e instanceof ApiHttpError ? e.payload.message : 'Не удалось отправить голосовое');
+    } finally {
+      setVoiceBusy(false);
+    }
+  };
+
+  // Десктоп: запись по клику (не удержанием). Старт → стоп-и-отправить / отмена.
+  const startClickRecord = async (): Promise<void> => {
+    if (voiceBusy || recorder.recording) return;
+    armCancel(false);
+    await recorder.start();
+  };
+  const stopAndSend = async (): Promise<void> => {
+    if (!recorder.recording) return;
+    const res = await recorder.stop();
+    if (res) await handleRecorded(res);
+  };
+  const cancelRecord = async (): Promise<void> => {
+    if (!recorder.recording) return;
+    await recorder.cancel();
+  };
+
+  const onMicDown = async (e: ReactPointerEvent): Promise<void> => {
+    if (voiceBusy) return;
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    holdRef.current = { startX: e.clientX, active: true };
+    armCancel(false);
+    const ok = await recorder.start();
+    if (!ok) {
+      holdRef.current.active = false;
+      return;
+    }
+    // Палец отпустили раньше, чем стартанул рекордер — завершаем сразу.
+    if (!holdRef.current.active) {
+      const res = await recorder.stop();
+      if (res && !cancelArmedRef.current) await handleRecorded(res);
+    }
+  };
+
+  const onMicMove = (e: ReactPointerEvent): void => {
+    if (!holdRef.current.active) return;
+    armCancel(holdRef.current.startX - e.clientX > CANCEL_SWIPE_PX);
+  };
+
+  const onMicUp = async (): Promise<void> => {
+    if (!holdRef.current.active) return;
+    holdRef.current.active = false;
+    if (cancelArmedRef.current) {
+      await recorder.cancel();
+      armCancel(false);
+      return;
+    }
+    const res = await recorder.stop();
+    armCancel(false);
+    if (res) await handleRecorded(res);
+  };
 
   useEffect(() => {
     return () => {
@@ -818,58 +977,227 @@ function Composer({
             e.target.value = '';
           }}
         />
-        <button
-          onClick={() => fileRef.current?.click()}
-          aria-label="Прикрепить изображение"
-          title="Прикрепить изображение"
-          style={{ display: 'grid', placeItems: 'center', width: 42, height: 42, flexShrink: 0, borderRadius: 'var(--r-lg)', border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-1)', cursor: 'pointer' }}
-        >
-          <Icon name="image" size={20} />
-        </button>
-        <textarea
-          ref={taRef}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            pokeTyping();
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          rows={1}
-          placeholder="Сообщение…"
-          style={{
-            flex: 1,
-            resize: 'none',
-            maxHeight: 140,
-            minHeight: 42,
-            padding: '11px 14px',
-            borderRadius: 'var(--r-lg)',
-            border: '1px solid var(--line-2)',
-            background: 'var(--bg-2)',
-            color: 'var(--text-0)',
-            fontSize: 14,
-            fontFamily: 'inherit',
-            lineHeight: 1.4,
-            outline: 'none',
-          }}
-        />
-        <Button
-          variant="primary"
-          size="md"
-          icon="send"
-          aria-label="Отправить"
-          disabled={!canSend}
-          onClick={submit}
-          style={{ width: 42, height: 42, padding: 0, flexShrink: 0 }}
-        >
-          {''}
-        </Button>
+        {recorder.recording ? (
+          <RecordingBar elapsedMs={recorder.elapsedMs} cancelArmed={cancelArmed} hold={isMobile} />
+        ) : (
+          <>
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={voiceBusy}
+              aria-label="Прикрепить изображение"
+              title="Прикрепить изображение"
+              style={{ display: 'grid', placeItems: 'center', width: 42, height: 42, flexShrink: 0, borderRadius: 'var(--r-lg)', border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-1)', cursor: voiceBusy ? 'default' : 'pointer' }}
+            >
+              <Icon name="image" size={20} />
+            </button>
+            <textarea
+              ref={taRef}
+              value={text}
+              onChange={(e) => {
+                setText(e.target.value);
+                pokeTyping();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              rows={1}
+              placeholder="Сообщение…"
+              style={{
+                flex: 1,
+                resize: 'none',
+                maxHeight: 140,
+                minHeight: 42,
+                padding: '11px 14px',
+                borderRadius: 'var(--r-lg)',
+                border: '1px solid var(--line-2)',
+                background: 'var(--bg-2)',
+                color: 'var(--text-0)',
+                fontSize: 14,
+                fontFamily: 'inherit',
+                lineHeight: 1.4,
+                outline: 'none',
+              }}
+            />
+          </>
+        )}
+        {recorder.recording ? (
+          isMobile ? (
+            // Мобилка: одна кнопка-микрофон, отпускание = отправить, свайп = отмена.
+            <MicButton
+              recording
+              cancelArmed={cancelArmed}
+              busy={voiceBusy}
+              onPointerDown={onMicDown}
+              onPointerMove={onMicMove}
+              onPointerUp={onMicUp}
+              onPointerCancel={onMicUp}
+            />
+          ) : (
+            // Десктоп: отдельные «отмена» и «отправить».
+            <>
+              <IconButton icon="trash" label="Отменить запись" onClick={() => void cancelRecord()} />
+              <Button
+                variant="primary"
+                size="md"
+                icon="send"
+                aria-label="Отправить голосовое"
+                disabled={voiceBusy}
+                onClick={() => void stopAndSend()}
+                style={{ width: 42, height: 42, padding: 0, flexShrink: 0 }}
+              >
+                {''}
+              </Button>
+            </>
+          )
+        ) : canSend ? (
+          <Button
+            variant="primary"
+            size="md"
+            icon="send"
+            aria-label="Отправить"
+            onClick={submit}
+            style={{ width: 42, height: 42, padding: 0, flexShrink: 0 }}
+          >
+            {''}
+          </Button>
+        ) : isMobile ? (
+          <MicButton
+            recording={false}
+            cancelArmed={false}
+            busy={voiceBusy}
+            onPointerDown={onMicDown}
+            onPointerMove={onMicMove}
+            onPointerUp={onMicUp}
+            onPointerCancel={onMicUp}
+          />
+        ) : (
+          // Десктоп в покое: клик начинает запись.
+          <IconButton icon="mic" label="Записать голосовое" busy={voiceBusy} onClick={() => void startClickRecord()} />
+        )}
       </div>
+      {recorder.error && <span style={{ fontSize: 12, color: 'var(--accent-hi)' }}>{recorder.error}</span>}
     </div>
+  );
+}
+
+/** Полоса активной записи: пульсирующая точка + таймер + подсказка. */
+function RecordingBar({ elapsedMs, cancelArmed, hold }: { elapsedMs: number; cancelArmed: boolean; hold: boolean }) {
+  const s = Math.floor(elapsedMs / 1000);
+  const mm = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  // На ПК запись по клику — подсказки про свайп нет, просто «Идёт запись…».
+  const hint = hold ? (cancelArmed ? 'Отпустите для отмены' : '‹ Свайп для отмены') : 'Идёт запись…';
+  return (
+    <div
+      style={{
+        flex: 1,
+        minHeight: 42,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '0 14px',
+        borderRadius: 'var(--r-lg)',
+        border: '1px solid var(--line-2)',
+        background: 'var(--bg-2)',
+      }}
+    >
+      <span style={{ width: 10, height: 10, borderRadius: 999, background: '#ff4d4f', animation: 'vellinPulse 1s ease-in-out infinite', flexShrink: 0 }} />
+      <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 14, fontWeight: 600, color: 'var(--text-1)' }}>{mm}</span>
+      <span style={{ marginLeft: 'auto', fontSize: 12, whiteSpace: 'nowrap', color: cancelArmed ? '#ff6b6b' : 'var(--text-3)' }}>
+        {hint}
+      </span>
+    </div>
+  );
+}
+
+/** Простая квадратная кнопка-иконка (мик/корзина) для десктопного управления записью. */
+function IconButton({
+  icon,
+  label,
+  busy,
+  onClick,
+}: {
+  icon: 'mic' | 'trash';
+  label: string;
+  busy?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={busy}
+      aria-label={label}
+      title={label}
+      style={{
+        flexShrink: 0,
+        width: 42,
+        height: 42,
+        padding: 0,
+        borderRadius: 'var(--r-lg)',
+        border: '1px solid var(--line-2)',
+        background: 'var(--bg-2)',
+        color: 'var(--text-1)',
+        display: 'grid',
+        placeItems: 'center',
+        cursor: busy ? 'default' : 'pointer',
+        opacity: busy ? 0.6 : 1,
+      }}
+    >
+      <Icon name={icon} size={20} />
+    </button>
+  );
+}
+
+/** Кнопка микрофона: зажать-и-держать для записи, свайп влево — отмена. */
+function MicButton({
+  recording,
+  cancelArmed,
+  busy,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+}: {
+  recording: boolean;
+  cancelArmed: boolean;
+  busy: boolean;
+  onPointerDown: (e: ReactPointerEvent) => void;
+  onPointerMove: (e: ReactPointerEvent) => void;
+  onPointerUp: (e: ReactPointerEvent) => void;
+  onPointerCancel: (e: ReactPointerEvent) => void;
+}) {
+  return (
+    <button
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      disabled={busy}
+      aria-label={recording ? 'Запись — отпустите, чтобы отправить' : 'Записать голосовое'}
+      title="Удерживайте, чтобы записать"
+      style={{
+        flexShrink: 0,
+        width: 42,
+        height: 42,
+        padding: 0,
+        borderRadius: 'var(--r-lg)',
+        border: recording ? 'none' : '1px solid var(--line-2)',
+        background: recording ? (cancelArmed ? '#ff4d4f' : 'var(--accent)') : 'var(--bg-2)',
+        color: recording ? '#fff' : 'var(--text-1)',
+        display: 'grid',
+        placeItems: 'center',
+        cursor: busy ? 'default' : 'pointer',
+        transform: recording ? 'scale(1.08)' : 'none',
+        transition: 'transform .15s ease, background .15s ease',
+        touchAction: 'none',
+        userSelect: 'none',
+        opacity: busy ? 0.6 : 1,
+      }}
+    >
+      <Icon name={cancelArmed ? 'trash' : 'mic'} size={20} />
+    </button>
   );
 }
 

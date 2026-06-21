@@ -15,7 +15,7 @@ import { ensureRoomRuntime } from '../rooms/RoomRuntime.js';
 import { prisma } from '../db/prisma.js';
 import { userHub, type UserConnection } from '../realtime/UserHub.js';
 import { getFriendPresenceSnapshot, getNotificationsSnapshot } from '../friends/service.js';
-import { handleDmRead, handleDmSend, handleDmTyping } from '../dm/realtime.js';
+import { handleDmRead, handleDmSend, handleDmTyping, handleDmVoicePlayed } from '../dm/realtime.js';
 import { unreadTotal as dmUnreadTotal } from '../dm/service.js';
 import { MAX_DM_BODY } from '../dm/service.js';
 import { TokenBucket } from './rateLimit.js';
@@ -116,6 +116,10 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         imageUrl?: string;
         imageWidth?: number;
         imageHeight?: number;
+        voiceUrl?: string;
+        voiceDurationSec?: number;
+        voicePeaks?: number[];
+        messageId?: string;
       };
       if (m.t === 'watch_presence' && typeof m.userId === 'string') {
         userHub.watch(conn, m.userId);
@@ -140,11 +144,21 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
                 height: typeof m.imageHeight === 'number' ? m.imageHeight : 0,
               }
             : undefined;
-        void handleDmSend(principal.userId, m.toUserId, m.body, m.nonce, image);
+        const voice =
+          typeof m.voiceUrl === 'string'
+            ? {
+                url: m.voiceUrl,
+                durationSec: typeof m.voiceDurationSec === 'number' ? m.voiceDurationSec : 0,
+                peaks: Array.isArray(m.voicePeaks) ? m.voicePeaks : [],
+              }
+            : undefined;
+        void handleDmSend(principal.userId, m.toUserId, m.body, m.nonce, image, voice);
       } else if (m.t === 'dm_typing' && typeof m.toUserId === 'string' && typeof m.typing === 'boolean') {
         handleDmTyping(principal.userId, m.toUserId, m.typing);
       } else if (m.t === 'dm_read' && typeof m.peerId === 'string') {
         void handleDmRead(principal.userId, m.peerId);
+      } else if (m.t === 'dm_voice_played' && typeof m.messageId === 'string') {
+        void handleDmVoicePlayed(principal.userId, m.messageId);
       }
     });
     socket.on('close', () => {

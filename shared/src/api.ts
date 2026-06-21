@@ -251,6 +251,12 @@ export interface UploadDmImageResponse {
   height: number;
 }
 
+/** Ответ на загрузку голосового сообщения для ЛС (multipart). */
+export interface UploadDmVoiceResponse {
+  /** Публичный URL сохранённого аудио (`/api/uploads/dm-voice/...`). */
+  url: string;
+}
+
 // ── Realtime (пользовательский WS-канал) ─────────────────────────────────
 export interface RealtimeTicketResponse {
   ticket: string;
