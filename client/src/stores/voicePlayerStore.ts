@@ -69,7 +69,9 @@ export const useVoicePlayerStore = create<VoicePlayerState>((set, get) => {
         // Авто-следующее непрослушанное — продолжаем цепочку.
         get().toggle(next.id, next.url, next.durationSec);
       } else {
-        set({ playing: false, positionSec: 0 });
+        // Плейлист закончился — полностью останавливаемся (currentId → null),
+        // чтобы мини-плеер «сейчас играет» сам закрылся с анимацией.
+        get().stop();
       }
     });
 

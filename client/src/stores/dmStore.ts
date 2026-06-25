@@ -43,6 +43,8 @@ interface DmState {
   threads: Record<string, ThreadState>;
   /** peerId → момент истечения «печатает…». */
   typing: Record<string, number>;
+  /** peerId → что делает: печатает текст или записывает голосовое. */
+  typingKind: Record<string, 'text' | 'voice'>;
   /** Открытый сейчас диалог (для пометки прочтения и звука). */
   activePeerId: string | null;
   _send: ((msg: UserC2S) => void) | null;
@@ -75,10 +77,10 @@ interface DmState {
     payload: { conversationId: string; byUserId: string; readAt: string; unreadTotal?: number },
     myId: string,
   ) => void;
-  applyTyping: (fromUserId: string, typing: boolean) => void;
+  applyTyping: (fromUserId: string, typing: boolean, kind?: 'text' | 'voice') => void;
   /** Открыли диалог — отметить прочитанным (оптимистично + сигнал серверу). */
   markRead: (peerId: string) => void;
-  sendTyping: (peerId: string, typing: boolean) => void;
+  sendTyping: (peerId: string, typing: boolean, kind?: 'text' | 'voice') => void;
 
   reset: () => void;
 }
@@ -129,6 +131,7 @@ export const useDmStore = create<DmState>((set, get) => ({
   unreadTotal: 0,
   threads: {},
   typing: {},
+  typingKind: {},
   activePeerId: null,
   _send: null,
 
@@ -314,19 +317,24 @@ export const useDmStore = create<DmState>((set, get) => ({
       };
     }),
 
-  applyTyping: (fromUserId, typing) => {
+  applyTyping: (fromUserId, typing, kind = 'text') => {
     const prev = typingTimers.get(fromUserId);
     if (prev) clearTimeout(prev);
     if (typing) {
-      set((s) => ({ typing: { ...s.typing, [fromUserId]: Date.now() + TYPING_TTL_MS } }));
+      set((s) => ({
+        typing: { ...s.typing, [fromUserId]: Date.now() + TYPING_TTL_MS },
+        typingKind: { ...s.typingKind, [fromUserId]: kind },
+      }));
       typingTimers.set(
         fromUserId,
         setTimeout(() => {
           typingTimers.delete(fromUserId);
           set((s) => {
             const next = { ...s.typing };
+            const nextKind = { ...s.typingKind };
             delete next[fromUserId];
-            return { typing: next };
+            delete nextKind[fromUserId];
+            return { typing: next, typingKind: nextKind };
           });
         }, TYPING_TTL_MS),
       );
@@ -334,8 +342,10 @@ export const useDmStore = create<DmState>((set, get) => ({
       typingTimers.delete(fromUserId);
       set((s) => {
         const next = { ...s.typing };
+        const nextKind = { ...s.typingKind };
         delete next[fromUserId];
-        return { typing: next };
+        delete nextKind[fromUserId];
+        return { typing: next, typingKind: nextKind };
       });
     }
   },
@@ -352,13 +362,13 @@ export const useDmStore = create<DmState>((set, get) => ({
     get()._send?.({ t: 'dm_read', peerId });
   },
 
-  sendTyping: (peerId, typing) => {
-    get()._send?.({ t: 'dm_typing', toUserId: peerId, typing });
+  sendTyping: (peerId, typing, kind) => {
+    get()._send?.({ t: 'dm_typing', toUserId: peerId, typing, ...(kind ? { kind } : {}) });
   },
 
   reset: () => {
     for (const t of typingTimers.values()) clearTimeout(t);
     typingTimers.clear();
-    set({ conversations: [], unreadTotal: 0, threads: {}, typing: {}, activePeerId: null, _send: null });
+    set({ conversations: [], unreadTotal: 0, threads: {}, typing: {}, typingKind: {}, activePeerId: null, _send: null });
   },
 }));

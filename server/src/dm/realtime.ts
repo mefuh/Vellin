@@ -138,7 +138,7 @@ export async function handleDmVoicePlayed(meId: string, messageId: string): Prom
   }
 }
 
-/** Транзиентный сигнал «печатаю» — просто реле собеседнику. */
-export function handleDmTyping(meId: string, toUserId: string, typing: boolean): void {
-  userHub.pushTo(toUserId, { t: 'dm_typing', conversationId: '', fromUserId: meId, typing });
+/** Транзиентный сигнал «печатаю/записываю голосовое» — просто реле собеседнику. */
+export function handleDmTyping(meId: string, toUserId: string, typing: boolean, kind: 'text' | 'voice' = 'text'): void {
+  userHub.pushTo(toUserId, { t: 'dm_typing', conversationId: '', fromUserId: meId, typing, kind });
 }

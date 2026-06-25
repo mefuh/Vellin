@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -8,7 +9,7 @@ import {
 } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import type { DmConversation, PublicUser } from '@vellin/shared';
-import { Avatar, Button, Icon } from '../shared';
+import { Avatar, Button, Icon, type IconName } from '../shared';
 import { useAuthStore } from '../stores/authStore';
 import { useDmStore, type ClientDm, type ThreadState } from '../stores/dmStore';
 import { usePresenceStore } from '../stores/presenceStore';
@@ -23,6 +24,17 @@ import { VoiceNowPlaying } from '../components/messages/VoiceNowPlaying';
 import { useVoicePlayerStore } from '../stores/voicePlayerStore';
 import { useVoiceRecorder, type RecordResult } from '../hooks/useVoiceRecorder';
 import { computeVoiceMeta } from '../utils/audioPeaks';
+import {
+  ACCENT_GRAD,
+  ACCENT_GRAD_BTN,
+  ACCENT_TEXT,
+  ACCENT_TEXT_SOFT,
+  BTN_GLOW,
+  ON_ACCENT_DIM,
+  OUT_SHADOW,
+  R_BUBBLE_IN,
+  R_BUBBLE_OUT,
+} from '../components/messages/chatTheme';
 
 function fmtTime(iso: string): string {
   const d = new Date(iso);
@@ -78,7 +90,9 @@ export function Messages() {
   if (user && user.kind === 'guest') return <Navigate to="/library" replace />;
   if (!user) return <Navigate to="/login" replace />;
 
-  const list = <ConversationList conversations={conversations} activeUsername={username} myId={user.id} />;
+  const list = (
+    <ConversationList conversations={conversations} activeUsername={username} myId={user.id} compact={!isMobile} />
+  );
   const chat = username ? <ChatPane key={username} username={username} myId={user.id} /> : <EmptyChat />;
 
   if (isMobile) {
@@ -110,12 +124,9 @@ export function Messages() {
       return <div style={wrapStyle}>{chat}</div>;
     }
     return (
-      <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
+      <div style={{ height: '100svh', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}>
         <AppHeader active="messages" />
-        <main style={{ padding: '16px 12px 104px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <h1 style={{ fontSize: 24, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>Сообщения</h1>
-          {list}
-        </main>
+        <div style={{ flex: 1, minHeight: 0 }}>{list}</div>
       </div>
     );
   }
@@ -148,10 +159,7 @@ export function Messages() {
             overflow: 'hidden',
           }}
         >
-          <div style={{ padding: '16px 18px 12px', borderBottom: '1px solid var(--line-1)' }}>
-            <h1 style={{ fontSize: 18, margin: 0, fontWeight: 600 }}>Сообщения</h1>
-          </div>
-          <div style={{ overflowY: 'auto', flex: 1, padding: 8 }}>{list}</div>
+          {list}
         </aside>
         <section
           style={{
@@ -177,114 +185,225 @@ function ConversationList({
   conversations,
   activeUsername,
   myId,
+  compact,
 }: {
   conversations: DmConversation[];
   activeUsername?: string;
   myId: string;
+  /** Десктоп-сайдбар: чуть компактнее заголовок/отступы. */
+  compact?: boolean;
 }) {
   const presence = usePresenceStore((s) => s.byId);
-  if (conversations.length === 0) {
-    return (
-      <div style={{ padding: '40px 18px', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
-        Здесь появятся ваши переписки. Откройте профиль друга и нажмите «Написать».
-      </div>
-    );
-  }
+  const navigate = useNavigate();
+  const [query, setQuery] = useState('');
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? conversations.filter((c) => c.peer.username.toLowerCase().includes(q))
+    : conversations;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {conversations.map((c) => {
-        const online = presence[c.peer.id]?.online ?? c.online;
-        const active = activeUsername === c.peer.username;
-        const last = c.lastMessage;
-        const previewBody = last
-          ? last.hasVoice
-            ? '🎤 Голосовое сообщение'
-            : last.hasImage
-              ? last.body
-                ? `📷 ${last.body}`
-                : '📷 Фото'
-              : last.body
-          : '';
-        const preview = last && last.senderId === myId ? `Вы: ${previewBody}` : previewBody;
-        // Галочки — только если последнее сообщение отправлено мной.
-        const mine = !!last && last.senderId === myId;
-        const read =
-          mine &&
-          c.peerLastReadAt != null &&
-          new Date(c.peerLastReadAt).getTime() >= new Date(last!.createdAt).getTime();
-        return (
-          <Link
-            key={c.id}
-            to={`/messages/${encodeURIComponent(c.peer.username)}`}
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
+      {/* Шапка списка: заголовок + «написать» + поиск */}
+      <div
+        style={{
+          flexShrink: 0,
+          padding: compact ? '14px 14px 12px' : '8px 16px 12px',
+          background: 'var(--glass-bg)',
+          backdropFilter: 'blur(var(--glass-blur))',
+          WebkitBackdropFilter: 'blur(var(--glass-blur))',
+          borderBottom: '1px solid var(--line-1)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <h1 style={{ margin: 0, fontSize: compact ? 22 : 28, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-0)' }}>
+            Сообщения
+          </h1>
+          <button
+            onClick={() => navigate('/friends')}
+            aria-label="Написать"
+            title="Написать"
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              padding: '10px 12px',
-              borderRadius: 'var(--r-md)',
-              background: active ? 'var(--bg-3)' : 'transparent',
-              color: 'inherit',
-              textDecoration: 'none',
+              width: 38,
+              height: 38,
+              flexShrink: 0,
+              borderRadius: 999,
+              border: 'none',
+              background: ACCENT_GRAD_BTN,
+              color: '#fff',
+              display: 'grid',
+              placeItems: 'center',
+              cursor: 'pointer',
+              boxShadow: BTN_GLOW,
             }}
           >
-            <Avatar
-              name={c.peer.username}
-              seed={c.peer.avatarSeed}
-              src={c.peer.avatarUrl}
-              size={46}
-              status={online ? 'online' : 'offline'}
+            <Icon name="edit" size={17} />
+          </button>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            height: 40,
+            padding: '0 14px',
+            borderRadius: 20,
+            background: 'var(--bg-2)',
+            border: '1px solid var(--line-2)',
+          }}
+        >
+          <Icon name="search" size={16} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Поиск"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              border: 'none',
+              background: 'transparent',
+              outline: 'none',
+              color: 'var(--text-0)',
+              fontSize: 15,
+              fontFamily: 'inherit',
+            }}
+          />
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              aria-label="Очистить"
+              style={{ border: 'none', background: 'transparent', color: 'var(--text-3)', display: 'grid', placeItems: 'center', cursor: 'pointer', padding: 0 }}
+            >
+              <Icon name="close" size={15} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Строки (снизу — место под плавающий док на мобилке) */}
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto', padding: compact ? '6px 8px 14px' : '6px 8px 96px' }}>
+        {conversations.length === 0 ? (
+          <div style={{ padding: '40px 18px', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
+            Здесь появятся ваши переписки. Откройте профиль друга и нажмите «Написать».
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: '32px 18px', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
+            Ничего не найдено
+          </div>
+        ) : (
+          filtered.map((c) => (
+            <ConversationRow
+              key={c.id}
+              c={c}
+              myId={myId}
+              online={presence[c.peer.id]?.online ?? c.online}
+              active={activeUsername === c.peer.username}
             />
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                  {c.peer.username}
-                </span>
-                {last && (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                    {mine && <Ticks read={read} color={read ? '#5aa7e6' : 'var(--text-3)'} />}
-                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{fmtTime(last.createdAt)}</span>
-                  </span>
-                )}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
-                <span
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontSize: 13,
-                    color: c.unreadCount > 0 ? 'var(--text-1)' : 'var(--text-3)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {preview}
-                </span>
-                {c.unreadCount > 0 && (
-                  <span
-                    style={{
-                      flexShrink: 0,
-                      minWidth: 18,
-                      height: 18,
-                      padding: '0 5px',
-                      borderRadius: 9,
-                      background: 'var(--accent)',
-                      color: '#fff',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      display: 'grid',
-                      placeItems: 'center',
-                    }}
-                  >
-                    {c.unreadCount > 99 ? '99+' : c.unreadCount}
-                  </span>
-                )}
-              </div>
-            </div>
-          </Link>
-        );
-      })}
+          ))
+        )}
+      </div>
     </div>
+  );
+}
+
+/** Одна строка списка диалогов в стиле макета. */
+function ConversationRow({
+  c,
+  myId,
+  online,
+  active,
+}: {
+  c: DmConversation;
+  myId: string;
+  online: boolean;
+  active: boolean;
+}) {
+  const last = c.lastMessage;
+  const mine = !!last && last.senderId === myId;
+  const read =
+    mine && c.peerLastReadAt != null && new Date(c.peerLastReadAt).getTime() >= new Date(last!.createdAt).getTime();
+
+  // Иконка-маркер вложения в превью (голосовое/фото).
+  const marker = last?.hasVoice ? 'mic' : last?.hasImage ? 'image' : null;
+  const previewText = last
+    ? last.hasVoice
+      ? 'Голосовое сообщение'
+      : last.hasImage
+        ? last.body || 'Фото'
+        : last.body
+    : '';
+  const prefix = mine ? 'Вы: ' : '';
+
+  return (
+    <Link
+      to={`/messages/${encodeURIComponent(c.peer.username)}`}
+      className="dm-row"
+      data-active={active}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 13,
+        padding: '11px 10px',
+        borderRadius: 18,
+        color: 'inherit',
+        textDecoration: 'none',
+      }}
+    >
+      <Avatar name={c.peer.username} seed={c.peer.avatarSeed} src={c.peer.avatarUrl} size={54} status={online ? 'online' : 'offline'} />
+      <div style={{ flex: 1, minWidth: 0, borderBottom: active ? 'none' : '1px solid var(--line-1)', paddingBottom: 11 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {c.peer.username}
+          </span>
+          {last && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+              {mine && <Ticks read={read} color={read ? 'var(--accent-hi)' : 'var(--text-3)'} />}
+              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{fmtTime(last.createdAt)}</span>
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 3 }}>
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              fontSize: 14,
+              color: c.unreadCount > 0 ? 'var(--text-1)' : 'var(--text-2)',
+              overflow: 'hidden',
+            }}
+          >
+            {marker && <Icon name={marker} size={14} style={{ color: ACCENT_TEXT_SOFT, flexShrink: 0 }} />}
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {prefix}
+              {previewText}
+            </span>
+          </span>
+          {c.unreadCount > 0 && (
+            <span
+              style={{
+                flexShrink: 0,
+                minWidth: 20,
+                height: 20,
+                padding: '0 6px',
+                borderRadius: 10,
+                background: ACCENT_GRAD,
+                color: '#fff',
+                fontSize: 12,
+                fontWeight: 700,
+                display: 'grid',
+                placeItems: 'center',
+                boxShadow: BTN_GLOW,
+              }}
+            >
+              {c.unreadCount > 99 ? '99+' : c.unreadCount}
+            </span>
+          )}
+        </div>
+      </div>
+    </Link>
   );
 }
 
@@ -307,7 +426,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
   const [peerId, setPeerId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ url: string; rect: DOMRect | null } | null>(null);
 
   const setThread = useDmStore((s) => s.setThread);
   const setActivePeer = useDmStore((s) => s.setActivePeer);
@@ -317,6 +436,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
 
   const thread = useDmStore((s) => (peerId ? s.threads[peerId] : undefined));
   const typingUntil = useDmStore((s) => (peerId ? s.typing[peerId] : undefined));
+  const typingKind = useDmStore((s) => (peerId ? s.typingKind[peerId] : undefined));
   const peerPresence = usePresenceStore((s) => (peerId ? s.byId[peerId] : undefined));
   const watch = usePresenceStore((s) => s.watch);
   const unwatch = usePresenceStore((s) => s.unwatch);
@@ -468,7 +588,17 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
   const isTyping = typingUntil != null && typingUntil > Date.now();
   const room = peerPresence?.currentRoom ?? null;
   const subtitle = isTyping ? (
-    <span style={{ color: 'var(--accent-hi)' }}>печатает…</span>
+    <span style={{ color: 'var(--accent-hi)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+      {typingKind === 'voice' ? (
+        <>
+          <Icon name="mic" size={13} style={{ marginRight: -1 }} />
+          записывает голосовое
+        </>
+      ) : (
+        'печатает'
+      )}
+      <TypingDots />
+    </span>
   ) : online ? (
     room ? (
       <span style={{ color: 'var(--accent-hi)' }}>смотрит «{room.name}»</span>
@@ -486,9 +616,12 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 12,
-          padding: '12px 16px',
+          gap: 6,
+          padding: '11px 12px',
           borderBottom: '1px solid var(--line-1)',
+          background: 'var(--glass-bg)',
+          backdropFilter: 'blur(var(--glass-blur))',
+          WebkitBackdropFilter: 'blur(var(--glass-blur))',
           flexShrink: 0,
         }}
       >
@@ -496,18 +629,40 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
           <button
             onClick={() => navigate('/messages')}
             aria-label="Назад"
-            style={{ display: 'grid', placeItems: 'center', width: 34, height: 34, borderRadius: 'var(--r-md)', border: 'none', background: 'transparent', color: 'var(--text-1)', cursor: 'pointer' }}
+            style={{ display: 'grid', placeItems: 'center', width: 36, height: 38, flexShrink: 0, borderRadius: 'var(--r-md)', border: 'none', background: 'transparent', color: ACCENT_TEXT, cursor: 'pointer' }}
           >
-            <Icon name="chevron" size={24} style={{ transform: 'rotate(180deg)' }} />
+            <Icon name="chevron" size={22} stroke={2.4} style={{ transform: 'rotate(180deg)' }} />
           </button>
         )}
-        <Link to={`/u/${encodeURIComponent(peer.username)}`} style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'inherit', textDecoration: 'none', minWidth: 0 }}>
+        <Link
+          to={`/u/${encodeURIComponent(peer.username)}`}
+          style={{ display: 'flex', alignItems: 'center', gap: 11, color: 'inherit', textDecoration: 'none', minWidth: 0, flex: 1 }}
+        >
           <Avatar name={peer.username} seed={peer.avatarSeed} src={peer.avatarUrl} size={40} status={online ? 'online' : 'offline'} />
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{peer.username}</div>
-            <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 1 }}>{subtitle}</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {peer.username}
+            </div>
+            <div
+              style={{
+                fontSize: 12.5,
+                fontWeight: 500,
+                marginTop: 1,
+                color: isTyping || online ? ACCENT_TEXT_SOFT : 'var(--text-2)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {subtitle}
+            </div>
           </div>
         </Link>
+        {/* Действия (звонок/видео — оформление; функционал добавим позже). */}
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          <HeaderActionButton icon="video" label="Видеозвонок" />
+          <HeaderActionButton icon="phone" label="Позвонить" />
+        </div>
       </header>
 
       {/* Лента сообщений + плавающий мини-плеер «сейчас играет» (оверлей, чтобы
@@ -538,7 +693,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
           messages={thread.messages}
           myId={myId}
           peerLastReadAt={thread.peerLastReadAt}
-          onOpenImage={setLightbox}
+          onOpenImage={(url, rect) => setLightbox({ url, rect })}
           onImageLoad={() => {
             if (pinnedRef.current) scrollToBottom();
           }}
@@ -553,59 +708,127 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
         onSend={(body, image, voice) => sendMessage(peer, body, image, voice)}
       />
 
-      {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} />}
+      {lightbox && <Lightbox url={lightbox.url} rect={lightbox.rect} peer={peer} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
 
-/** Полноэкранный просмотр изображения. */
-function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
+/** Полноэкранный просмотр изображения (по образцу макета): чёрный фон, шапка с
+ *  собеседником и кнопкой закрытия. Механика открытия/закрытия не меняется. */
+/** Кривые перехода фото: открытие — мягкий «вылет», закрытие — собранный заход. */
+const PHOTO_OPEN_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
+const PHOTO_CLOSE_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
+const PHOTO_MS = 320;
+
+/**
+ * Просмотр фото с hero-зумом «из миниатюры» (FLIP): картинка раскрывается из
+ * того места в ленте, где её тапнули, подложка плавно затемняется; при закрытии
+ * — обратный заход в ту же точку. Источник — DOMRect миниатюры (`rect`).
+ */
+function Lightbox({ url, rect, peer, onClose }: { url: string; rect: DOMRect | null; peer: PublicUser; onClose: () => void }) {
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [shown, setShown] = useState(false); // затемнение + ui
+  const closingRef = useRef(false);
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /** Трансформа, помещающая полноэкранную картинку обратно в исходную миниатюру. */
+  const transformToSource = useCallback((): string | null => {
+    const img = imgRef.current;
+    if (!img || !rect) return null;
+    const f = img.getBoundingClientRect();
+    if (f.width < 1 || f.height < 1) return null;
+    const scale = rect.width / f.width;
+    const tx = rect.left + rect.width / 2 - (f.left + f.width / 2);
+    const ty = rect.top + rect.height / 2 - (f.top + f.height / 2);
+    return `translate(${tx}px, ${ty}px) scale(${scale})`;
+  }, [rect]);
+
+  // Открытие: ставим картинку в позицию миниатюры и пускаем к центру.
+  useLayoutEffect(() => {
+    const img = imgRef.current;
+    if (img && !reduceMotion) {
+      const from = transformToSource();
+      if (from) {
+        img.style.transition = 'none';
+        img.style.transform = from;
+        void img.offsetWidth; // reflow — зафиксировать стартовую позицию
+        requestAnimationFrame(() => {
+          img.style.transition = `transform ${PHOTO_MS}ms ${PHOTO_OPEN_EASE}`;
+          img.style.transform = 'translate(0, 0) scale(1)';
+        });
+      }
+    }
+    requestAnimationFrame(() => setShown(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const requestClose = useCallback((): void => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setShown(false);
+    const img = imgRef.current;
+    const to = reduceMotion ? null : transformToSource();
+    if (img && to) {
+      img.style.transition = `transform ${PHOTO_MS}ms ${PHOTO_CLOSE_EASE}`;
+      img.style.transform = to;
+      window.setTimeout(onClose, PHOTO_MS);
+    } else {
+      window.setTimeout(onClose, reduceMotion ? 0 : 180);
+    }
+  }, [onClose, reduceMotion, transformToSource]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') requestClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [requestClose]);
+
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.9)',
-        display: 'grid',
-        placeItems: 'center',
-        padding: 24,
-        zIndex: 1200,
-      }}
-    >
-      <img
-        src={url}
-        alt=""
+    <div onClick={requestClose} style={{ position: 'fixed', inset: 0, zIndex: 1200, display: 'flex', flexDirection: 'column' }}>
+      {/* Затемнение-подложка (плавно) */}
+      <div style={{ position: 'absolute', inset: 0, background: '#000', opacity: shown ? 1 : 0, transition: `opacity ${PHOTO_MS}ms ease`, pointerEvents: 'none' }} />
+      {/* Шапка: собеседник + закрыть */}
+      <div
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8, objectFit: 'contain' }}
-      />
-      <button
-        onClick={onClose}
-        aria-label="Закрыть"
         style={{
-          position: 'fixed',
-          top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
-          right: 16,
-          display: 'grid',
-          placeItems: 'center',
-          width: 40,
-          height: 40,
-          borderRadius: 999,
-          border: 'none',
-          background: 'rgba(255,255,255,0.12)',
-          color: '#fff',
-          cursor: 'pointer',
+          position: 'relative',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px',
+          background: 'linear-gradient(180deg, rgba(0,0,0,0.65), transparent)',
+          opacity: shown ? 1 : 0,
+          transition: `opacity ${PHOTO_MS}ms ease`,
         }}
       >
-        <Icon name="close" size={20} />
-      </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <Avatar name={peer.username} seed={peer.avatarSeed} src={peer.avatarUrl} size={36} />
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {peer.username}
+          </div>
+        </div>
+        <button
+          onClick={requestClose}
+          aria-label="Закрыть"
+          className="dm-press"
+          style={{ flexShrink: 0, display: 'grid', placeItems: 'center', width: 38, height: 38, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}
+        >
+          <Icon name="close" size={18} />
+        </button>
+      </div>
+      {/* Изображение */}
+      <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'grid', placeItems: 'center', padding: '0 16px 24px' }}>
+        <img
+          ref={imgRef}
+          src={url}
+          alt=""
+          onClick={(e) => e.stopPropagation()}
+          style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 10, objectFit: 'contain', willChange: 'transform' }}
+        />
+      </div>
     </div>
   );
 }
@@ -620,10 +843,13 @@ function MessageList({
   messages: ClientDm[];
   myId: string;
   peerLastReadAt: string | null;
-  onOpenImage: (url: string) => void;
+  onOpenImage: (url: string, rect: DOMRect) => void;
   onImageLoad: () => void;
 }) {
   const peerReadMs = peerLastReadAt ? new Date(peerLastReadAt).getTime() : 0;
+  // Анимируем только сообщения, появившиеся после открытия чата (не историю).
+  const mountTsRef = useRef(Date.now());
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let lastDay = '';
   return (
     <>
@@ -633,6 +859,7 @@ function MessageList({
         const showDay = day !== lastDay;
         lastDay = day;
         const read = mine && peerReadMs >= new Date(m.createdAt).getTime() && !m.pending;
+        const fresh = !reduceMotion && new Date(m.createdAt).getTime() >= mountTsRef.current - 2000;
         const status = !mine ? null : m.failed ? (
           <span style={{ color: '#ffd0d0' }} title="Не отправлено">!</span>
         ) : m.pending ? (
@@ -641,95 +868,160 @@ function MessageList({
           <Ticks read={read} />
         );
         return (
-          <div key={m.id}>
+          <div key={m.nonce ?? m.id}>
             {showDay && (
-              <div style={{ display: 'grid', placeItems: 'center', margin: '12px 0 8px' }}>
-                <span style={{ fontSize: 11, color: 'var(--text-3)', background: 'var(--bg-2)', padding: '3px 10px', borderRadius: 999 }}>
+              <div style={{ display: 'grid', placeItems: 'center', margin: '14px 0 14px' }}>
+                <span style={{ fontSize: 12.5, color: 'var(--text-3)', background: 'var(--bg-2)', padding: '4px 13px', borderRadius: 13 }}>
                   {day}
                 </span>
               </div>
             )}
-            <div style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', padding: '2px 0' }}>
+            <div style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', padding: '3px 0' }}>
               <div
                 style={{
-                  maxWidth: '74%',
-                  padding: m.voiceUrl ? '7px 9px' : m.imageUrl ? 4 : '8px 12px',
-                  borderRadius: 16,
-                  borderBottomRightRadius: mine ? 4 : 16,
-                  borderBottomLeftRadius: mine ? 16 : 4,
-                  background: mine ? 'var(--accent)' : 'var(--bg-3)',
-                  color: mine ? '#fff' : 'var(--text-0)',
-                  opacity: m.pending ? 0.65 : 1,
-                  overflow: 'hidden',
+                  maxWidth: '76%',
+                  display: 'flex',
+                  transformOrigin: mine ? 'right bottom' : 'left bottom',
+                  ...(fresh ? { animation: 'dmBubbleIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both' } : null),
                 }}
               >
-                {m.voiceUrl ? (
-                  <VoicePlayer
-                    messageId={m.id}
-                    url={m.voiceUrl}
-                    durationSec={m.voiceDurationSec ?? 0}
-                    peaks={m.voicePeaks ?? []}
-                    mine={mine}
-                    played={!!m.voicePlayed}
-                    pending={m.pending}
-                    clock={fmtTime(m.createdAt)}
-                    statusSlot={status}
-                  />
-                ) : m.imageUrl ? (
-                  <>
-                    <img
-                      src={m.imageUrl}
-                      alt=""
-                      loading="lazy"
-                      onLoad={onImageLoad}
-                      onClick={() => onOpenImage(m.imageUrl!)}
-                      style={{
-                        display: 'block',
-                        maxWidth: 'min(260px, 72vw)',
-                        maxHeight: 340,
-                        width: 'auto',
-                        height: 'auto',
-                        borderRadius: 12,
-                        cursor: 'pointer',
-                      }}
-                    />
-                    {m.body && (
-                      <span style={{ display: 'block', padding: '6px 8px 0', fontSize: 14, lineHeight: 1.42, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                        {m.body}
-                      </span>
+              {(() => {
+                const isImage = !!m.imageUrl;
+                const isVoice = !!m.voiceUrl;
+                const bareImage = isImage && !m.body;
+                const timeColor = mine ? ON_ACCENT_DIM : 'var(--text-3)';
+                return (
+                  <div
+                    style={{
+                      position: 'relative',
+                      maxWidth: '100%',
+                      padding: isVoice ? '9px 13px 8px 9px' : bareImage ? 0 : isImage ? 4 : '8px 13px 6px',
+                      borderRadius: mine ? R_BUBBLE_OUT : R_BUBBLE_IN,
+                      background: bareImage ? 'transparent' : mine ? ACCENT_GRAD : 'var(--bg-3)',
+                      border: !mine && !bareImage ? '1px solid var(--line-2)' : 'none',
+                      color: mine ? '#fff' : 'var(--text-0)',
+                      boxShadow: mine && !bareImage ? OUT_SHADOW : 'none',
+                      opacity: m.pending ? 0.7 : 1,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {isVoice ? (
+                      <VoicePlayer
+                        messageId={m.id}
+                        url={m.voiceUrl!}
+                        durationSec={m.voiceDurationSec ?? 0}
+                        peaks={m.voicePeaks ?? []}
+                        mine={mine}
+                        played={!!m.voicePlayed}
+                        pending={m.pending}
+                        clock={fmtTime(m.createdAt)}
+                        statusSlot={status}
+                      />
+                    ) : isImage ? (
+                      <>
+                        <img
+                          src={m.imageUrl}
+                          alt=""
+                          loading="lazy"
+                          onLoad={onImageLoad}
+                          onClick={(e) => onOpenImage(m.imageUrl!, e.currentTarget.getBoundingClientRect())}
+                          style={{
+                            display: 'block',
+                            maxWidth: 'min(260px, 72vw)',
+                            maxHeight: 340,
+                            width: 'auto',
+                            height: 'auto',
+                            borderRadius: bareImage ? 'inherit' : 12,
+                            cursor: 'pointer',
+                          }}
+                        />
+                        {m.body && (
+                          <span style={{ display: 'block', padding: '6px 9px 0', fontSize: 15, lineHeight: 1.32, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            {m.body}
+                          </span>
+                        )}
+                        {bareImage ? (
+                          // Время поверх фото — тёмный чип в углу.
+                          <span style={{ position: 'absolute', bottom: 8, right: 8, display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: '#fff', padding: '3px 8px', background: 'rgba(0,0,0,0.45)', borderRadius: 11 }}>
+                            {fmtTime(m.createdAt)}
+                            {status}
+                          </span>
+                        ) : (
+                          <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 500, color: timeColor, padding: '3px 7px 1px' }}>
+                            {fmtTime(m.createdAt)}
+                            {status}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontSize: 15, lineHeight: 1.32, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body}</span>
+                        <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 1, fontSize: 11, fontWeight: 500, color: timeColor }}>
+                          {fmtTime(m.createdAt)}
+                          {status}
+                        </span>
+                      </>
                     )}
-                    <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 3, fontSize: 10, color: mine ? 'rgba(255,255,255,0.78)' : 'var(--text-3)', padding: '3px 8px 1px' }}>
-                      {fmtTime(m.createdAt)}
-                      {status}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span style={{ fontSize: 14, lineHeight: 1.42, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body}</span>
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 3,
-                        float: 'right',
-                        marginLeft: 10,
-                        marginTop: 6,
-                        fontSize: 10,
-                        color: mine ? 'rgba(255,255,255,0.75)' : 'var(--text-3)',
-                        transform: 'translateY(2px)',
-                      }}
-                    >
-                      {fmtTime(m.createdAt)}
-                      {status}
-                    </span>
-                  </>
-                )}
+                  </div>
+                );
+              })()}
               </div>
             </div>
           </div>
         );
       })}
     </>
+  );
+}
+
+/** Анимированное многоточие индикатора «печатает…» (три бегущие точки). */
+function TypingDots() {
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'flex-end', gap: 2.5, paddingBottom: 1 }}>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          style={{
+            width: 3.5,
+            height: 3.5,
+            borderRadius: 999,
+            background: 'currentColor',
+            ...(reduceMotion ? null : { animation: `dmTypingDot 1.1s ease-in-out ${i * 0.16}s infinite` }),
+          }}
+        />
+      ))}
+    </span>
+  );
+}
+
+/** Круглая кнопка действия в шапке чата (видео/звонок). Пока без обработчика —
+ *  функционал телефонии добавим позже, сейчас только оформление по макету. */
+function HeaderActionButton({ icon, label }: { icon: IconName; label: string }) {
+  return (
+    <button
+      type="button"
+      // Телефония ещё не реализована — кнопки заглушены до появления функционала.
+      disabled
+      aria-disabled
+      aria-label={`${label} — скоро`}
+      title={`${label} — скоро`}
+      style={{
+        width: 37,
+        height: 37,
+        flexShrink: 0,
+        borderRadius: 999,
+        border: '1px solid var(--line-1)',
+        background: 'var(--bg-3)',
+        color: 'var(--text-0)',
+        display: 'grid',
+        placeItems: 'center',
+        cursor: 'not-allowed',
+        opacity: 0.4,
+      }}
+    >
+      <Icon name={icon} size={18} />
+    </button>
   );
 }
 
@@ -758,7 +1050,7 @@ const MIN_VOICE_MS = 700;
 /** На сколько нужно увести палец влево, чтобы отменить запись. */
 const CANCEL_SWIPE_PX = 70;
 /** На сколько нужно увести палец вверх, чтобы зафиксировать запись (hands-free). */
-const LOCK_LIFT_PX = 60;
+const LOCK_LIFT_PX = 40;
 
 function Composer({
   peer,
@@ -781,6 +1073,7 @@ function Composer({
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [locked, setLocked] = useState(false);
   const [lockProgress, setLockProgress] = useState(0);
+  const [recExiting, setRecExiting] = useState(false); // полоса записи «уезжает» при отмене
   const sendTyping = useDmStore((s) => s.sendTyping);
   const recorder = useVoiceRecorder();
   const isMobile = useIsMobile();
@@ -789,11 +1082,9 @@ function Composer({
   const typingActiveRef = useRef(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdRef = useRef<{ startX: number; startY: number; active: boolean }>({ startX: 0, startY: 0, active: false });
-  const cancelArmedRef = useRef(false);
   const lockedRef = useRef(false);
 
   const armCancel = (v: boolean): void => {
-    cancelArmedRef.current = v;
     setCancelArmed(v);
   };
 
@@ -821,6 +1112,18 @@ function Composer({
       armCancel(false);
     }
   }, [recorder.recording]);
+
+  // Пока идёт запись — сигналим собеседнику «записывает голосовое…», обновляя
+  // сигнал (TTL 6с), чтобы индикатор не истёк на длинной записи.
+  useEffect(() => {
+    if (!recorder.recording) return;
+    sendTyping(peer.id, true, 'voice');
+    const iv = window.setInterval(() => sendTyping(peer.id, true, 'voice'), 3000);
+    return () => {
+      window.clearInterval(iv);
+      sendTyping(peer.id, false, 'voice');
+    };
+  }, [recorder.recording, peer.id, sendTyping]);
 
   const handleRecorded = async (res: RecordResult): Promise<void> => {
     if (res.durationMs < MIN_VOICE_MS) {
@@ -858,66 +1161,107 @@ function Composer({
   };
   const cancelRecord = async (): Promise<void> => {
     if (!recorder.recording) return;
+    // Полоса записи «уезжает» (см. recExiting), запись отменяется, затем размонтаж.
+    setRecExiting(true);
     await recorder.cancel();
+    window.setTimeout(() => setRecExiting(false), 240);
   };
 
   const onMicDown = async (e: ReactPointerEvent): Promise<void> => {
     if (voiceBusy) return;
     e.preventDefault();
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    const pid = e.pointerId;
     holdRef.current = { startX: e.clientX, startY: e.clientY, active: true };
     lockedRef.current = false;
     setLocked(false);
     setLockProgress(0);
     armCancel(false);
+
+    // Жест ведём через слушатели на window, а не на кнопке: события приходят,
+    // даже когда палец уходит далеко за пределы кнопки (захват указателя на
+    // мобильных ненадёжен и обрывается, как только палец покидает элемент).
+    const move = (ev: PointerEvent): void => {
+      if (ev.pointerId === pid) onMicMove(ev.clientX, ev.clientY);
+    };
+    const up = (ev: PointerEvent): void => {
+      if (ev.pointerId !== pid) return;
+      detachWin();
+      void onMicUp(ev.clientX, ev.clientY);
+    };
+    const cancelH = (ev: PointerEvent): void => {
+      if (ev.pointerId !== pid) return;
+      detachWin();
+      void onMicCancel();
+    };
+    function detachWin(): void {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancelH);
+    }
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancelH);
+
     const ok = await recorder.start();
     if (!ok) {
       holdRef.current.active = false;
+      detachWin();
       return;
     }
-    // Палец отпустили раньше, чем стартанул рекордер — завершаем сразу.
-    // (Но НЕ когда жест перешёл в фиксацию — там запись должна продолжаться.)
+    // Палец отпустили раньше, чем стартанул рекордер — отбрасываем (слишком
+    // быстрый тап, аудио нет). Но НЕ когда жест перешёл в фиксацию.
     if (!holdRef.current.active && !lockedRef.current) {
-      const res = await recorder.stop();
-      if (res && !cancelArmedRef.current) await handleRecorded(res);
+      await recorder.cancel();
     }
   };
 
-  const onMicMove = (e: ReactPointerEvent): void => {
-    if (!holdRef.current.active || lockedRef.current) return;
-    const dy = holdRef.current.startY - e.clientY; // вверх — положительно
+  // Во время удержания — только визуальная обратная связь (подсветка фиксации /
+  // отмены). Решение (зафиксировать/отменить/отправить) принимаем ТОЛЬКО на
+  // отпускании пальца — чтобы ничего не размонтировалось посреди жеста (иначе
+  // ломается захват указателя и сбивается отсчёт записи).
+  const onMicMove = (clientX: number, clientY: number): void => {
+    if (!holdRef.current.active) return;
+    const dy = holdRef.current.startY - clientY; // вверх — положительно
+    const dx = holdRef.current.startX - clientX; // влево — положительно
+    // Шкала следует за пальцем в обе стороны: повёл вверх — заполняется, повёл
+    // обратно вниз — опустошается (можно «передумать» и не фиксировать).
     setLockProgress(Math.max(0, Math.min(1, dy / LOCK_LIFT_PX)));
-    if (dy > LOCK_LIFT_PX) {
-      // Протянули вверх — фиксируем запись: палец можно отпустить.
+    armCancel(dy < LOCK_LIFT_PX * 0.5 && dx > CANCEL_SWIPE_PX);
+  };
+
+  const onMicUp = async (clientX: number, clientY: number): Promise<void> => {
+    if (!holdRef.current.active) return;
+    holdRef.current.active = false;
+    const dy = holdRef.current.startY - clientY;
+    const dx = holdRef.current.startX - clientX;
+    setLockProgress(0);
+    // 1) Отпустили выше порога → фиксируем. Если передумал — успел опуститься
+    //    ниже порога, и сюда не попадём (уйдёт в отправку).
+    if (dy >= LOCK_LIFT_PX) {
       lockedRef.current = true;
       setLocked(true);
       armCancel(false);
-      // ВАЖНО: снять захват указателя и завершить жест. Иначе MicButton
-      // размонтируется с активным pointer-capture, и тап по кнопке «отправить»
-      // (тем же пальцем) не доходит до клика — запись не отправляется.
-      holdRef.current.active = false;
-      try {
-        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-      } catch {
-        /* указатель уже отпущен — игнорируем */
-      }
       return;
     }
-    armCancel(holdRef.current.startX - e.clientX > CANCEL_SWIPE_PX);
+    // 2) Свайп влево → отмена.
+    if (dx > CANCEL_SWIPE_PX) {
+      armCancel(false);
+      await cancelRecord();
+      return;
+    }
+    // 3) Иначе — стоп и отправка.
+    armCancel(false);
+    const res = await recorder.stop();
+    if (res) await handleRecorded(res);
   };
 
-  const onMicUp = async (): Promise<void> => {
+  // Прерывание жеста браузером (например, увод системой) — отбрасываем запись.
+  const onMicCancel = async (): Promise<void> => {
     if (!holdRef.current.active) return;
     holdRef.current.active = false;
-    if (lockedRef.current) return; // запись зафиксирована — продолжаем без пальца
-    if (cancelArmedRef.current) {
-      await recorder.cancel();
-      armCancel(false);
-      return;
-    }
-    const res = await recorder.stop();
+    setLockProgress(0);
     armCancel(false);
-    if (res) await handleRecorded(res);
+    await cancelRecord();
   };
 
   useEffect(() => {
@@ -1004,7 +1348,19 @@ function Composer({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 16px', borderTop: '1px solid var(--line-1)', flexShrink: 0 }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        padding: '10px 14px',
+        borderTop: '1px solid var(--line-1)',
+        background: 'var(--glass-bg)',
+        backdropFilter: 'blur(var(--glass-blur))',
+        WebkitBackdropFilter: 'blur(var(--glass-blur))',
+        flexShrink: 0,
+      }}
+    >
       {(attach || uploadErr) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {attach && (
@@ -1038,8 +1394,14 @@ function Composer({
             e.target.value = '';
           }}
         />
-        {recorder.recording ? (
-          <RecordingBar elapsedMs={recorder.elapsedMs} cancelArmed={cancelArmed} hold={isMobile && !locked} />
+        {recorder.recording || recExiting ? (
+          <RecordingBar
+            elapsedMs={recorder.elapsedMs}
+            cancelArmed={cancelArmed}
+            hold={isMobile && !locked}
+            getLevel={recorder.getLevel}
+            exiting={recExiting && !recorder.recording}
+          />
         ) : (
           <>
             <button
@@ -1047,9 +1409,10 @@ function Composer({
               disabled={voiceBusy}
               aria-label="Прикрепить изображение"
               title="Прикрепить изображение"
-              style={{ display: 'grid', placeItems: 'center', width: 42, height: 42, flexShrink: 0, borderRadius: 'var(--r-lg)', border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-1)', cursor: voiceBusy ? 'default' : 'pointer' }}
+              className="dm-press"
+              style={{ display: 'grid', placeItems: 'center', width: 42, height: 42, flexShrink: 0, borderRadius: 999, border: 'none', background: 'var(--bg-3)', color: 'var(--text-0)', cursor: voiceBusy ? 'default' : 'pointer' }}
             >
-              <Icon name="image" size={20} />
+              <Icon name="image" size={19} />
             </button>
             <textarea
               ref={taRef}
@@ -1071,12 +1434,12 @@ function Composer({
                 resize: 'none',
                 maxHeight: 140,
                 minHeight: 42,
-                padding: '11px 14px',
-                borderRadius: 'var(--r-lg)',
+                padding: '11px 16px',
+                borderRadius: 'var(--r-xl)',
                 border: '1px solid var(--line-2)',
                 background: 'var(--bg-2)',
                 color: 'var(--text-0)',
-                fontSize: 14,
+                fontSize: 15,
                 fontFamily: 'inherit',
                 lineHeight: 1.4,
                 outline: 'none',
@@ -1084,21 +1447,16 @@ function Composer({
             />
           </>
         )}
-        {recorder.recording ? (
+        {recExiting && !recorder.recording ? (
+          // Запись отменяется — полоса уезжает, справа держим место.
+          <div style={{ width: 44, flexShrink: 0 }} />
+        ) : recorder.recording ? (
           isMobile && !locked ? (
             // Мобилка (удержание): микрофон + подсказка фиксации; отпускание =
             // отправить, свайп влево = отмена, протяжка вверх = зафиксировать.
             <>
               <LockHint progress={lockProgress} />
-              <MicButton
-                recording
-                cancelArmed={cancelArmed}
-                busy={voiceBusy}
-                onPointerDown={onMicDown}
-                onPointerMove={onMicMove}
-                onPointerUp={onMicUp}
-                onPointerCancel={onMicUp}
-              />
+              <MicButton recording cancelArmed={cancelArmed} busy={voiceBusy} lift={lockProgress} onPointerDown={onMicDown} />
             </>
           ) : (
             // Десктоп или зафиксированная запись: отдельные «отмена» и «отправить».
@@ -1111,7 +1469,8 @@ function Composer({
                 aria-label="Отправить голосовое"
                 disabled={voiceBusy}
                 onClick={() => void stopAndSend()}
-                style={{ width: 42, height: 42, padding: 0, flexShrink: 0 }}
+                className="dm-press"
+                style={{ width: 44, height: 44, padding: 0, flexShrink: 0, borderRadius: 999, background: ACCENT_GRAD_BTN, boxShadow: BTN_GLOW }}
               >
                 {''}
               </Button>
@@ -1124,20 +1483,13 @@ function Composer({
             icon="send"
             aria-label="Отправить"
             onClick={submit}
-            style={{ width: 42, height: 42, padding: 0, flexShrink: 0 }}
+            className="dm-press"
+            style={{ width: 44, height: 44, padding: 0, flexShrink: 0, borderRadius: 999, background: ACCENT_GRAD_BTN, boxShadow: BTN_GLOW }}
           >
             {''}
           </Button>
         ) : isMobile ? (
-          <MicButton
-            recording={false}
-            cancelArmed={false}
-            busy={voiceBusy}
-            onPointerDown={onMicDown}
-            onPointerMove={onMicMove}
-            onPointerUp={onMicUp}
-            onPointerCancel={onMicUp}
-          />
+          <MicButton recording={false} cancelArmed={false} busy={voiceBusy} onPointerDown={onMicDown} />
         ) : (
           // Десктоп в покое: клик начинает запись.
           <IconButton icon="mic" label="Записать голосовое" busy={voiceBusy} onClick={() => void startClickRecord()} />
@@ -1148,31 +1500,113 @@ function Composer({
   );
 }
 
-/** Полоса активной записи: пульсирующая точка + таймер + подсказка. */
-function RecordingBar({ elapsedMs, cancelArmed, hold }: { elapsedMs: number; cancelArmed: boolean; hold: boolean }) {
+/** Полоса активной записи: пульсирующая точка + таймер + живая волна + подсказка. */
+function RecordingBar({
+  elapsedMs,
+  cancelArmed,
+  hold,
+  getLevel,
+  exiting,
+}: {
+  elapsedMs: number;
+  cancelArmed: boolean;
+  hold: boolean;
+  getLevel: () => number;
+  exiting?: boolean;
+}) {
   const s = Math.floor(elapsedMs / 1000);
   const mm = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-  // На ПК запись по клику — подсказки про свайп нет, просто «Идёт запись…».
-  const hint = hold ? (cancelArmed ? 'Отпустите для отмены' : '‹ отмена · вверх — зафиксировать') : 'Идёт запись…';
   return (
     <div
       style={{
         flex: 1,
-        minHeight: 42,
+        minWidth: 0,
+        minHeight: 44,
         display: 'flex',
         alignItems: 'center',
         gap: 10,
         padding: '0 14px',
-        borderRadius: 'var(--r-lg)',
-        border: '1px solid var(--line-2)',
-        background: 'var(--bg-2)',
+        borderRadius: 'var(--r-xl)',
+        border: '1px solid var(--accent)',
+        background: 'var(--accent-soft)',
+        // Плавный «уезд» при отмене (GPU: transform + opacity).
+        transformOrigin: 'left center',
+        opacity: exiting ? 0 : 1,
+        transform: exiting ? 'translateX(-14px) scale(0.96)' : 'none',
+        transition: 'opacity .22s ease, transform .24s cubic-bezier(0.4, 0, 0.2, 1)',
       }}
     >
-      <span style={{ width: 10, height: 10, borderRadius: 999, background: '#ff4d4f', animation: 'vellinPulse 1s ease-in-out infinite', flexShrink: 0 }} />
-      <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 14, fontWeight: 600, color: 'var(--text-1)' }}>{mm}</span>
-      <span style={{ marginLeft: 'auto', fontSize: 12, whiteSpace: 'nowrap', color: cancelArmed ? '#ff6b6b' : 'var(--text-3)' }}>
-        {hint}
+      <span style={{ width: 9, height: 9, borderRadius: 999, background: '#ff453a', animation: 'vellinPulse 1.1s ease-in-out infinite', flexShrink: 0 }} />
+      <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 14, fontWeight: 600, color: 'var(--text-0)', minWidth: 32, flexShrink: 0 }}>{mm}</span>
+      <LiveWaveform getLevel={getLevel} dim={cancelArmed} />
+      <span style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0, color: cancelArmed ? '#ff6b6b' : 'var(--text-2)' }}>
+        {cancelArmed ? 'Отпустите для отмены' : hold ? '‹ отмена' : 'Идёт запись…'}
       </span>
+    </div>
+  );
+}
+
+/** Живая волна записи: бежит влево, высота столбиков = громкость микрофона. */
+function LiveWaveform({ getLevel, dim }: { getLevel: () => number; dim?: boolean }) {
+  const BARS = 32;
+  const [levels, setLevels] = useState<number[]>(() => Array(BARS).fill(0.05));
+  const lastPushRef = useRef(0);
+  useEffect(() => {
+    let raf = 0;
+    let mounted = true;
+    const tick = (t: number): void => {
+      if (!mounted) return;
+      // Добавляем новый столбик ~каждые 55мс — получается ровная бегущая волна.
+      if (t - lastPushRef.current >= 55) {
+        lastPushRef.current = t;
+        const lvl = getLevel();
+        setLevels((prev) => {
+          const next = prev.slice(1);
+          next.push(Math.max(0.06, lvl));
+          return next;
+        });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      mounted = false;
+      cancelAnimationFrame(raf);
+    };
+  }, [getLevel]);
+  return (
+    <div
+      style={{
+        flex: 1,
+        minWidth: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 2,
+        height: 26,
+        overflow: 'hidden',
+        opacity: dim ? 0.4 : 1,
+        transition: 'opacity .15s ease',
+      }}
+    >
+      {levels.map((lv, i) => (
+        <span
+          key={i}
+          style={{
+            flex: '1 1 0',
+            minWidth: 2,
+            maxWidth: 5,
+            height: '100%',
+            borderRadius: 3,
+            background: 'var(--accent-hi)',
+            // scaleY вместо height — анимация на композиторе, без layout-трэша.
+            transform: `scaleY(${Math.max(0.08, 0.08 + lv * 0.92)})`,
+            transformOrigin: 'center',
+            transition: 'transform .09s ease-out',
+            willChange: 'transform',
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -1200,10 +1634,10 @@ function IconButton({
         width: 42,
         height: 42,
         padding: 0,
-        borderRadius: 'var(--r-lg)',
+        borderRadius: 999,
         border: '1px solid var(--line-2)',
-        background: 'var(--bg-2)',
-        color: 'var(--text-1)',
+        background: 'var(--bg-3)',
+        color: 'var(--text-0)',
         display: 'grid',
         placeItems: 'center',
         cursor: busy ? 'default' : 'pointer',
@@ -1220,43 +1654,38 @@ function MicButton({
   recording,
   cancelArmed,
   busy,
+  lift = 0,
   onPointerDown,
-  onPointerMove,
-  onPointerUp,
-  onPointerCancel,
 }: {
   recording: boolean;
   cancelArmed: boolean;
   busy: boolean;
+  /** Подъём кнопки за пальцем при протяжке к замку (0..1). */
+  lift?: number;
   onPointerDown: (e: ReactPointerEvent) => void;
-  onPointerMove: (e: ReactPointerEvent) => void;
-  onPointerUp: (e: ReactPointerEvent) => void;
-  onPointerCancel: (e: ReactPointerEvent) => void;
 }) {
   return (
     <button
       onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerCancel}
       onContextMenu={(e) => e.preventDefault()}
       disabled={busy}
       aria-label={recording ? 'Запись — отпустите, чтобы отправить' : 'Записать голосовое'}
       title="Удерживайте, чтобы записать"
       style={{
         flexShrink: 0,
-        width: 42,
-        height: 42,
+        width: 44,
+        height: 44,
         padding: 0,
-        borderRadius: 'var(--r-lg)',
-        border: recording ? 'none' : '1px solid var(--line-2)',
-        background: recording ? (cancelArmed ? '#ff4d4f' : 'var(--accent)') : 'var(--bg-2)',
-        color: recording ? '#fff' : 'var(--text-1)',
+        borderRadius: 999,
+        border: 'none',
+        background: cancelArmed ? '#ff4d4f' : ACCENT_GRAD_BTN,
+        color: '#fff',
         display: 'grid',
         placeItems: 'center',
         cursor: busy ? 'default' : 'pointer',
-        transform: recording ? 'scale(1.08)' : 'none',
-        transition: 'transform .15s ease, background .15s ease',
+        transform: `translateY(${-lift * 12}px) scale(${recording ? 1.08 : 1})`,
+        transition: 'transform .12s ease-out, background .15s ease',
+        boxShadow: BTN_GLOW,
         touchAction: 'none',
         userSelect: 'none',
         WebkitUserSelect: 'none',
@@ -1268,7 +1697,12 @@ function MicButton({
   );
 }
 
-/** Подсказка фиксации записи: «потяни вверх», подсвечивается у порога. */
+/**
+ * Аффорданс фиксации записи: вертикальный «жёлоб» с замком над кнопкой
+ * микрофона. По мере протяжки вверх (progress 0→1) снизу поднимается акцентная
+ * заливка (scaleY — без layout), у порога замок «защёлкивается» (scale-bump),
+ * а пульсирующая стрелка-подсказка гаснет.
+ */
 function LockHint({ progress }: { progress: number }) {
   const p = Math.min(1, progress);
   const active = p >= 1;
@@ -1277,34 +1711,57 @@ function LockHint({ progress }: { progress: number }) {
       aria-hidden
       style={{
         position: 'absolute',
-        right: 0,
+        right: 1,
         bottom: '100%',
-        marginBottom: 10,
-        width: 42,
+        marginBottom: 8,
+        width: 44,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 6,
+        gap: 5,
         pointerEvents: 'none',
       }}
     >
       <div
         style={{
-          width: 34,
-          height: 46,
-          borderRadius: 18,
-          background: active ? 'var(--accent)' : 'var(--bg-3)',
-          border: '1px solid var(--line-2)',
-          display: 'grid',
-          placeItems: 'center',
-          opacity: 0.55 + 0.45 * p,
-          transform: `translateY(${-6 * p}px)`,
-          transition: 'background .15s ease',
+          position: 'relative',
+          width: 38,
+          height: 64,
+          borderRadius: 19,
+          background: 'var(--bg-3)',
+          border: `1px solid ${active ? 'transparent' : 'var(--line-2)'}`,
+          overflow: 'hidden',
+          boxShadow: active ? BTN_GLOW : 'var(--shadow-1)',
+          transition: 'box-shadow .2s ease, border-color .2s ease',
         }}
       >
-        <Icon name="pin" size={16} style={{ color: active ? '#fff' : 'var(--text-2)' }} />
+        {/* Заливка снизу вверх — scaleY от нижнего края (на композиторе). */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: ACCENT_GRAD_BTN,
+            transform: `scaleY(${p})`,
+            transformOrigin: 'bottom',
+            transition: 'transform .08s linear',
+          }}
+        />
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+          <Icon
+            name="lock"
+            size={17}
+            style={{
+              color: active || p > 0.5 ? '#fff' : 'var(--text-1)',
+              transform: `scale(${active ? 1.18 : 1})`,
+              transition: 'transform .2s cubic-bezier(0.23, 1, 0.32, 1), color .15s ease',
+            }}
+          />
+        </div>
       </div>
-      <Icon name="chevron" size={14} style={{ transform: 'rotate(-90deg)', color: 'var(--text-3)', animation: 'vellinPulse 1.2s ease-in-out infinite' }} />
+      {/* Пульсирующая стрелка вверх (внешний span — анимация, чтобы не конфликтовать с rotate). */}
+      <span style={{ display: 'block', opacity: 0.9 - p * 0.9, animation: 'vellinNudgeUp 1s ease-in-out infinite' }}>
+        <Icon name="chevron" size={16} style={{ display: 'block', transform: 'rotate(-90deg)', color: 'var(--accent-hi)' }} />
+      </span>
     </div>
   );
 }
