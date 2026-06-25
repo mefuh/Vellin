@@ -337,13 +337,14 @@ function ConversationRow({
   return (
     <Link
       to={`/messages/${encodeURIComponent(c.peer.username)}`}
+      className="dm-row"
+      data-active={active}
       style={{
         display: 'flex',
         alignItems: 'center',
         gap: 13,
         padding: '11px 10px',
         borderRadius: 18,
-        background: active ? 'var(--accent-soft)' : 'transparent',
         color: 'inherit',
         textDecoration: 'none',
       }}
@@ -435,6 +436,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
 
   const thread = useDmStore((s) => (peerId ? s.threads[peerId] : undefined));
   const typingUntil = useDmStore((s) => (peerId ? s.typing[peerId] : undefined));
+  const typingKind = useDmStore((s) => (peerId ? s.typingKind[peerId] : undefined));
   const peerPresence = usePresenceStore((s) => (peerId ? s.byId[peerId] : undefined));
   const watch = usePresenceStore((s) => s.watch);
   const unwatch = usePresenceStore((s) => s.unwatch);
@@ -586,7 +588,17 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
   const isTyping = typingUntil != null && typingUntil > Date.now();
   const room = peerPresence?.currentRoom ?? null;
   const subtitle = isTyping ? (
-    <span style={{ color: 'var(--accent-hi)' }}>печатает…</span>
+    <span style={{ color: 'var(--accent-hi)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+      {typingKind === 'voice' ? (
+        <>
+          <Icon name="mic" size={13} style={{ marginRight: -1 }} />
+          записывает голосовое
+        </>
+      ) : (
+        'печатает'
+      )}
+      <TypingDots />
+    </span>
   ) : online ? (
     room ? (
       <span style={{ color: 'var(--accent-hi)' }}>смотрит «{room.name}»</span>
@@ -801,6 +813,7 @@ function Lightbox({ url, rect, peer, onClose }: { url: string; rect: DOMRect | n
         <button
           onClick={requestClose}
           aria-label="Закрыть"
+          className="dm-press"
           style={{ flexShrink: 0, display: 'grid', placeItems: 'center', width: 38, height: 38, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}
         >
           <Icon name="close" size={18} />
@@ -961,14 +974,38 @@ function MessageList({
   );
 }
 
+/** Анимированное многоточие индикатора «печатает…» (три бегущие точки). */
+function TypingDots() {
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'flex-end', gap: 2.5, paddingBottom: 1 }}>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          style={{
+            width: 3.5,
+            height: 3.5,
+            borderRadius: 999,
+            background: 'currentColor',
+            ...(reduceMotion ? null : { animation: `dmTypingDot 1.1s ease-in-out ${i * 0.16}s infinite` }),
+          }}
+        />
+      ))}
+    </span>
+  );
+}
+
 /** Круглая кнопка действия в шапке чата (видео/звонок). Пока без обработчика —
  *  функционал телефонии добавим позже, сейчас только оформление по макету. */
 function HeaderActionButton({ icon, label }: { icon: IconName; label: string }) {
   return (
     <button
       type="button"
-      aria-label={label}
-      title={label}
+      // Телефония ещё не реализована — кнопки заглушены до появления функционала.
+      disabled
+      aria-disabled
+      aria-label={`${label} — скоро`}
+      title={`${label} — скоро`}
       style={{
         width: 37,
         height: 37,
@@ -979,7 +1016,8 @@ function HeaderActionButton({ icon, label }: { icon: IconName; label: string }) 
         color: 'var(--text-0)',
         display: 'grid',
         placeItems: 'center',
-        cursor: 'pointer',
+        cursor: 'not-allowed',
+        opacity: 0.4,
       }}
     >
       <Icon name={icon} size={18} />
@@ -1074,6 +1112,18 @@ function Composer({
       armCancel(false);
     }
   }, [recorder.recording]);
+
+  // Пока идёт запись — сигналим собеседнику «записывает голосовое…», обновляя
+  // сигнал (TTL 6с), чтобы индикатор не истёк на длинной записи.
+  useEffect(() => {
+    if (!recorder.recording) return;
+    sendTyping(peer.id, true, 'voice');
+    const iv = window.setInterval(() => sendTyping(peer.id, true, 'voice'), 3000);
+    return () => {
+      window.clearInterval(iv);
+      sendTyping(peer.id, false, 'voice');
+    };
+  }, [recorder.recording, peer.id, sendTyping]);
 
   const handleRecorded = async (res: RecordResult): Promise<void> => {
     if (res.durationMs < MIN_VOICE_MS) {
@@ -1359,6 +1409,7 @@ function Composer({
               disabled={voiceBusy}
               aria-label="Прикрепить изображение"
               title="Прикрепить изображение"
+              className="dm-press"
               style={{ display: 'grid', placeItems: 'center', width: 42, height: 42, flexShrink: 0, borderRadius: 999, border: 'none', background: 'var(--bg-3)', color: 'var(--text-0)', cursor: voiceBusy ? 'default' : 'pointer' }}
             >
               <Icon name="image" size={19} />
@@ -1418,6 +1469,7 @@ function Composer({
                 aria-label="Отправить голосовое"
                 disabled={voiceBusy}
                 onClick={() => void stopAndSend()}
+                className="dm-press"
                 style={{ width: 44, height: 44, padding: 0, flexShrink: 0, borderRadius: 999, background: ACCENT_GRAD_BTN, boxShadow: BTN_GLOW }}
               >
                 {''}
@@ -1431,6 +1483,7 @@ function Composer({
             icon="send"
             aria-label="Отправить"
             onClick={submit}
+            className="dm-press"
             style={{ width: 44, height: 44, padding: 0, flexShrink: 0, borderRadius: 999, background: ACCENT_GRAD_BTN, boxShadow: BTN_GLOW }}
           >
             {''}

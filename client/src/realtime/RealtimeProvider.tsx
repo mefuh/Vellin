@@ -78,7 +78,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
           useDmStore.getState().applyVoicePlayed(msg.messageId);
           break;
         case 'dm_typing':
-          useDmStore.getState().applyTyping(msg.fromUserId, msg.typing);
+          useDmStore.getState().applyTyping(msg.fromUserId, msg.typing, msg.kind);
           break;
         case 'dm_error':
           useDmStore.getState().applyError(msg.nonce);

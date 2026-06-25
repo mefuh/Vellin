@@ -204,6 +204,54 @@ input[type='date']::-webkit-datetime-edit {
   }
 }
 
+/* Бегущие точки индикатора «печатает…». */
+@keyframes dmTypingDot {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+/* Строка списка диалогов: плавный ховер + лёгкий отклик на нажатие. */
+.dm-row {
+  transition:
+    background-color 0.16s ease,
+    transform 0.12s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .dm-row:hover {
+    background-color: var(--bg-2);
+  }
+}
+.dm-row[data-active='true'] {
+  background-color: var(--accent-soft);
+}
+.dm-row:active {
+  transform: scale(0.985);
+}
+
+/* Нажимаемые кнопки: тактильный отклик (scale на :active). */
+.dm-press {
+  transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.dm-press:active {
+  transform: scale(0.92);
+}
+
+/* Сниженная анимация: убираем движение, оставляем смену цвета. */
+@media (prefers-reduced-motion: reduce) {
+  .dm-press:active,
+  .dm-row:active {
+    transform: none;
+  }
+}
+
 /* Подсказка-стрелка «потяни вверх» у аффорданса фиксации записи. */
 @keyframes vellinNudgeUp {
   0%,

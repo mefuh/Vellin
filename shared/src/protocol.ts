@@ -494,6 +494,8 @@ export interface UserS2CDmTyping {
   conversationId: string;
   fromUserId: string;
   typing: boolean;
+  /** Что именно делает собеседник: печатает текст или записывает голосовое. */
+  kind?: 'text' | 'voice';
 }
 /** Собеседник прослушал моё голосовое — обновить индикатор «прослушано». */
 export interface UserS2CDmVoicePlayed {
@@ -575,6 +577,8 @@ export interface UserC2SDmTyping {
   t: 'dm_typing';
   toUserId: string;
   typing: boolean;
+  /** Текст (по умолчанию) или запись голосового. */
+  kind?: 'text' | 'voice';
 }
 /** Отметить переписку с `peerId` прочитанной (до текущего момента). */
 export interface UserC2SDmRead {
