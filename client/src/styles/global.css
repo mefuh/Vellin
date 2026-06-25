@@ -191,6 +191,19 @@ input[type='date']::-webkit-datetime-edit {
 }
 
 /* Эквалайзер активной записи голосового. */
+/* Появление нового пузыря сообщения (текст/голос/фото): мягко всплывает снизу
+   с лёгким масштабом — «живо», без рывка. transform-origin задаётся по стороне. */
+@keyframes dmBubbleIn {
+  from {
+    opacity: 0;
+    transform: translateY(9px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* Подсказка-стрелка «потяни вверх» у аффорданса фиксации записи. */
 @keyframes vellinNudgeUp {
   0%,

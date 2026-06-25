@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -424,7 +425,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
   const [peerId, setPeerId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<{ url: string; rect: DOMRect | null } | null>(null);
 
   const setThread = useDmStore((s) => s.setThread);
   const setActivePeer = useDmStore((s) => s.setActivePeer);
@@ -680,7 +681,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
           messages={thread.messages}
           myId={myId}
           peerLastReadAt={thread.peerLastReadAt}
-          onOpenImage={setLightbox}
+          onOpenImage={(url, rect) => setLightbox({ url, rect })}
           onImageLoad={() => {
             if (pinnedRef.current) scrollToBottom();
           }}
@@ -695,43 +696,100 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
         onSend={(body, image, voice) => sendMessage(peer, body, image, voice)}
       />
 
-      {lightbox && <Lightbox url={lightbox} peer={peer} onClose={() => setLightbox(null)} />}
+      {lightbox && <Lightbox url={lightbox.url} rect={lightbox.rect} peer={peer} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
 
 /** Полноэкранный просмотр изображения (по образцу макета): чёрный фон, шапка с
  *  собеседником и кнопкой закрытия. Механика открытия/закрытия не меняется. */
-function Lightbox({ url, peer, onClose }: { url: string; peer: PublicUser; onClose: () => void }) {
+/** Кривые перехода фото: открытие — мягкий «вылет», закрытие — собранный заход. */
+const PHOTO_OPEN_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
+const PHOTO_CLOSE_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
+const PHOTO_MS = 320;
+
+/**
+ * Просмотр фото с hero-зумом «из миниатюры» (FLIP): картинка раскрывается из
+ * того места в ленте, где её тапнули, подложка плавно затемняется; при закрытии
+ * — обратный заход в ту же точку. Источник — DOMRect миниатюры (`rect`).
+ */
+function Lightbox({ url, rect, peer, onClose }: { url: string; rect: DOMRect | null; peer: PublicUser; onClose: () => void }) {
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [shown, setShown] = useState(false); // затемнение + ui
+  const closingRef = useRef(false);
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /** Трансформа, помещающая полноэкранную картинку обратно в исходную миниатюру. */
+  const transformToSource = useCallback((): string | null => {
+    const img = imgRef.current;
+    if (!img || !rect) return null;
+    const f = img.getBoundingClientRect();
+    if (f.width < 1 || f.height < 1) return null;
+    const scale = rect.width / f.width;
+    const tx = rect.left + rect.width / 2 - (f.left + f.width / 2);
+    const ty = rect.top + rect.height / 2 - (f.top + f.height / 2);
+    return `translate(${tx}px, ${ty}px) scale(${scale})`;
+  }, [rect]);
+
+  // Открытие: ставим картинку в позицию миниатюры и пускаем к центру.
+  useLayoutEffect(() => {
+    const img = imgRef.current;
+    if (img && !reduceMotion) {
+      const from = transformToSource();
+      if (from) {
+        img.style.transition = 'none';
+        img.style.transform = from;
+        void img.offsetWidth; // reflow — зафиксировать стартовую позицию
+        requestAnimationFrame(() => {
+          img.style.transition = `transform ${PHOTO_MS}ms ${PHOTO_OPEN_EASE}`;
+          img.style.transform = 'translate(0, 0) scale(1)';
+        });
+      }
+    }
+    requestAnimationFrame(() => setShown(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const requestClose = useCallback((): void => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setShown(false);
+    const img = imgRef.current;
+    const to = reduceMotion ? null : transformToSource();
+    if (img && to) {
+      img.style.transition = `transform ${PHOTO_MS}ms ${PHOTO_CLOSE_EASE}`;
+      img.style.transform = to;
+      window.setTimeout(onClose, PHOTO_MS);
+    } else {
+      window.setTimeout(onClose, reduceMotion ? 0 : 180);
+    }
+  }, [onClose, reduceMotion, transformToSource]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') requestClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [requestClose]);
+
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: '#000',
-        display: 'flex',
-        flexDirection: 'column',
-        zIndex: 1200,
-      }}
-    >
+    <div onClick={requestClose} style={{ position: 'fixed', inset: 0, zIndex: 1200, display: 'flex', flexDirection: 'column' }}>
+      {/* Затемнение-подложка (плавно) */}
+      <div style={{ position: 'absolute', inset: 0, background: '#000', opacity: shown ? 1 : 0, transition: `opacity ${PHOTO_MS}ms ease`, pointerEvents: 'none' }} />
       {/* Шапка: собеседник + закрыть */}
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
+          position: 'relative',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 12,
           padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px',
           background: 'linear-gradient(180deg, rgba(0,0,0,0.65), transparent)',
+          opacity: shown ? 1 : 0,
+          transition: `opacity ${PHOTO_MS}ms ease`,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
@@ -741,7 +799,7 @@ function Lightbox({ url, peer, onClose }: { url: string; peer: PublicUser; onClo
           </div>
         </div>
         <button
-          onClick={onClose}
+          onClick={requestClose}
           aria-label="Закрыть"
           style={{ flexShrink: 0, display: 'grid', placeItems: 'center', width: 38, height: 38, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}
         >
@@ -749,12 +807,13 @@ function Lightbox({ url, peer, onClose }: { url: string; peer: PublicUser; onClo
         </button>
       </div>
       {/* Изображение */}
-      <div style={{ flex: 1, minHeight: 0, display: 'grid', placeItems: 'center', padding: '0 16px 24px' }}>
+      <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'grid', placeItems: 'center', padding: '0 16px 24px' }}>
         <img
+          ref={imgRef}
           src={url}
           alt=""
           onClick={(e) => e.stopPropagation()}
-          style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 10, objectFit: 'contain' }}
+          style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 10, objectFit: 'contain', willChange: 'transform' }}
         />
       </div>
     </div>
@@ -771,10 +830,13 @@ function MessageList({
   messages: ClientDm[];
   myId: string;
   peerLastReadAt: string | null;
-  onOpenImage: (url: string) => void;
+  onOpenImage: (url: string, rect: DOMRect) => void;
   onImageLoad: () => void;
 }) {
   const peerReadMs = peerLastReadAt ? new Date(peerLastReadAt).getTime() : 0;
+  // Анимируем только сообщения, появившиеся после открытия чата (не историю).
+  const mountTsRef = useRef(Date.now());
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let lastDay = '';
   return (
     <>
@@ -784,6 +846,7 @@ function MessageList({
         const showDay = day !== lastDay;
         lastDay = day;
         const read = mine && peerReadMs >= new Date(m.createdAt).getTime() && !m.pending;
+        const fresh = !reduceMotion && new Date(m.createdAt).getTime() >= mountTsRef.current - 2000;
         const status = !mine ? null : m.failed ? (
           <span style={{ color: '#ffd0d0' }} title="Не отправлено">!</span>
         ) : m.pending ? (
@@ -792,7 +855,7 @@ function MessageList({
           <Ticks read={read} />
         );
         return (
-          <div key={m.id}>
+          <div key={m.nonce ?? m.id}>
             {showDay && (
               <div style={{ display: 'grid', placeItems: 'center', margin: '14px 0 14px' }}>
                 <span style={{ fontSize: 12.5, color: 'var(--text-3)', background: 'var(--bg-2)', padding: '4px 13px', borderRadius: 13 }}>
@@ -801,6 +864,14 @@ function MessageList({
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', padding: '3px 0' }}>
+              <div
+                style={{
+                  maxWidth: '76%',
+                  display: 'flex',
+                  transformOrigin: mine ? 'right bottom' : 'left bottom',
+                  ...(fresh ? { animation: 'dmBubbleIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both' } : null),
+                }}
+              >
               {(() => {
                 const isImage = !!m.imageUrl;
                 const isVoice = !!m.voiceUrl;
@@ -810,7 +881,7 @@ function MessageList({
                   <div
                     style={{
                       position: 'relative',
-                      maxWidth: '76%',
+                      maxWidth: '100%',
                       padding: isVoice ? '9px 13px 8px 9px' : bareImage ? 0 : isImage ? 4 : '8px 13px 6px',
                       borderRadius: mine ? R_BUBBLE_OUT : R_BUBBLE_IN,
                       background: bareImage ? 'transparent' : mine ? ACCENT_GRAD : 'var(--bg-3)',
@@ -840,7 +911,7 @@ function MessageList({
                           alt=""
                           loading="lazy"
                           onLoad={onImageLoad}
-                          onClick={() => onOpenImage(m.imageUrl!)}
+                          onClick={(e) => onOpenImage(m.imageUrl!, e.currentTarget.getBoundingClientRect())}
                           style={{
                             display: 'block',
                             maxWidth: 'min(260px, 72vw)',
@@ -881,6 +952,7 @@ function MessageList({
                   </div>
                 );
               })()}
+              </div>
             </div>
           </div>
         );
@@ -963,6 +1035,7 @@ function Composer({
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [locked, setLocked] = useState(false);
   const [lockProgress, setLockProgress] = useState(0);
+  const [recExiting, setRecExiting] = useState(false); // полоса записи «уезжает» при отмене
   const sendTyping = useDmStore((s) => s.sendTyping);
   const recorder = useVoiceRecorder();
   const isMobile = useIsMobile();
@@ -1038,7 +1111,10 @@ function Composer({
   };
   const cancelRecord = async (): Promise<void> => {
     if (!recorder.recording) return;
+    // Полоса записи «уезжает» (см. recExiting), запись отменяется, затем размонтаж.
+    setRecExiting(true);
     await recorder.cancel();
+    window.setTimeout(() => setRecExiting(false), 240);
   };
 
   const onMicDown = async (e: ReactPointerEvent): Promise<void> => {
@@ -1120,7 +1196,7 @@ function Composer({
     // 2) Свайп влево → отмена.
     if (dx > CANCEL_SWIPE_PX) {
       armCancel(false);
-      await recorder.cancel();
+      await cancelRecord();
       return;
     }
     // 3) Иначе — стоп и отправка.
@@ -1135,7 +1211,7 @@ function Composer({
     holdRef.current.active = false;
     setLockProgress(0);
     armCancel(false);
-    await recorder.cancel();
+    await cancelRecord();
   };
 
   useEffect(() => {
@@ -1268,8 +1344,14 @@ function Composer({
             e.target.value = '';
           }}
         />
-        {recorder.recording ? (
-          <RecordingBar elapsedMs={recorder.elapsedMs} cancelArmed={cancelArmed} hold={isMobile && !locked} getLevel={recorder.getLevel} />
+        {recorder.recording || recExiting ? (
+          <RecordingBar
+            elapsedMs={recorder.elapsedMs}
+            cancelArmed={cancelArmed}
+            hold={isMobile && !locked}
+            getLevel={recorder.getLevel}
+            exiting={recExiting && !recorder.recording}
+          />
         ) : (
           <>
             <button
@@ -1314,12 +1396,14 @@ function Composer({
             />
           </>
         )}
-        {recorder.recording ? (
+        {recExiting && !recorder.recording ? (
+          // Запись отменяется — полоса уезжает, справа держим место.
+          <div style={{ width: 44, flexShrink: 0 }} />
+        ) : recorder.recording ? (
           isMobile && !locked ? (
             // Мобилка (удержание): микрофон + подсказка фиксации; отпускание =
             // отправить, свайп влево = отмена, протяжка вверх = зафиксировать.
             <>
-              {/* ВРЕМЕННО: отладка фиксации — макс. подъём пальца и прогресс. */}
               <LockHint progress={lockProgress} />
               <MicButton recording cancelArmed={cancelArmed} busy={voiceBusy} lift={lockProgress} onPointerDown={onMicDown} />
             </>
@@ -1369,11 +1453,13 @@ function RecordingBar({
   cancelArmed,
   hold,
   getLevel,
+  exiting,
 }: {
   elapsedMs: number;
   cancelArmed: boolean;
   hold: boolean;
   getLevel: () => number;
+  exiting?: boolean;
 }) {
   const s = Math.floor(elapsedMs / 1000);
   const mm = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -1390,6 +1476,11 @@ function RecordingBar({
         borderRadius: 'var(--r-xl)',
         border: '1px solid var(--accent)',
         background: 'var(--accent-soft)',
+        // Плавный «уезд» при отмене (GPU: transform + opacity).
+        transformOrigin: 'left center',
+        opacity: exiting ? 0 : 1,
+        transform: exiting ? 'translateX(-14px) scale(0.96)' : 'none',
+        transition: 'opacity .22s ease, transform .24s cubic-bezier(0.4, 0, 0.2, 1)',
       }}
     >
       <span style={{ width: 9, height: 9, borderRadius: 999, background: '#ff453a', animation: 'vellinPulse 1.1s ease-in-out infinite', flexShrink: 0 }} />
