@@ -1,4 +1,5 @@
 import { Icon } from '../../shared';
+import { ACCENT_GRAD } from './chatTheme';
 import { useVoicePlayerStore } from '../../stores/voicePlayerStore';
 import type { ClientDm } from '../../stores/dmStore';
 
@@ -44,8 +45,10 @@ export function VoiceNowPlaying({
           height: 54,
           padding: '0 8px 0 6px',
           borderRadius: 14,
-          background: 'var(--bg-2)',
-          border: '1px solid var(--line-1)',
+          background: 'var(--glass-bg)',
+          backdropFilter: 'blur(var(--glass-blur))',
+          WebkitBackdropFilter: 'blur(var(--glass-blur))',
+          border: '1px solid var(--line-2)',
           overflow: 'hidden',
           pointerEvents: 'auto',
           boxShadow: 'var(--shadow-2)',
@@ -82,7 +85,7 @@ export function VoiceNowPlaying({
         </button>
 
         {/* Линия прогресса */}
-        <div style={{ position: 'absolute', left: 0, bottom: 0, height: 3, width: `${frac * 100}%`, background: 'var(--accent)', transition: 'width .12s linear', borderTopRightRadius: 3 }} />
+        <div style={{ position: 'absolute', left: 0, bottom: 0, height: 3, width: `${frac * 100}%`, background: ACCENT_GRAD, transition: 'width .12s linear', borderTopRightRadius: 3 }} />
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -9,6 +9,17 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
   version: string;
 };
 
+// Локальный HTTPS для тестов с телефона (микрофон/getUserMedia требует
+// «защищённого контекста»). Включается ТОЛЬКО если в client/.certs/ лежат
+// сертификаты mkcert — иначе обычный http-дев не меняется. Каталог .certs/
+// не коммитится (см. .gitignore).
+const devKey = new URL('./.certs/dev-key.pem', import.meta.url);
+const devCert = new URL('./.certs/dev-cert.pem', import.meta.url);
+const httpsConfig =
+  existsSync(devKey) && existsSync(devCert)
+    ? { key: readFileSync(devKey), cert: readFileSync(devCert) }
+    : undefined;
+
 export default defineConfig({
   plugins: [react()],
   define: {
@@ -17,6 +28,10 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    https: httpsConfig,
+    // Разрешаем доступ с любых хостов — нужно для тестов с телефона по LAN/через
+    // туннель, иначе Vite отвечает «host not allowed».
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: 'http://localhost:3001',

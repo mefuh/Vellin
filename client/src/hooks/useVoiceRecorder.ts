@@ -35,19 +35,48 @@ export function useVoiceRecorder() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cancelledRef = useRef(false);
   const resolveRef = useRef<((r: RecordResult | null) => void) | null>(null);
+  // Анализатор для живой волны во время записи (амплитуда микрофона в реальном
+  // времени). Не подключаем к destination — только читаем уровень.
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const levelBufRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
 
   const cleanup = useCallback(() => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    analyserRef.current = null;
+    levelBufRef.current = null;
+    if (audioCtxRef.current) {
+      void audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current = null;
+    }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     recorderRef.current = null;
   }, []);
 
+  /** Текущий уровень микрофона 0..1 (RMS, поджатый для речи). 0 — нет записи. */
+  const getLevel = useCallback((): number => {
+    const a = analyserRef.current;
+    if (!a) return 0;
+    const buf = levelBufRef.current ?? (levelBufRef.current = new Uint8Array(a.fftSize));
+    a.getByteTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const v = (buf[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / buf.length); // 0..1, у речи обычно мало
+    return Math.max(0, Math.min(1, rms * 3.4));
+  }, []);
+
   const start = useCallback(async (): Promise<boolean> => {
     setError(null);
+    // Уже идёт запись — не пересоздаём рекордер (иначе сброс отсчёта = «слишком
+    // короткая» при отправке).
+    if (recorderRef.current && recorderRef.current.state === 'recording') return true;
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       setError('Запись не поддерживается в этом браузере');
       return false;
@@ -55,6 +84,22 @@ export function useVoiceRecorder() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+      // Живая волна: ответвляем поток в AnalyserNode (без вывода на динамики).
+      try {
+        const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (AC) {
+          const ctx = new AC();
+          const source = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 256;
+          source.connect(analyser);
+          audioCtxRef.current = ctx;
+          analyserRef.current = analyser;
+          levelBufRef.current = new Uint8Array(analyser.fftSize);
+        }
+      } catch {
+        /* анализатор опционален — без него просто не будет живой волны */
+      }
       const mimeType = pickMimeType();
       const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       chunksRef.current = [];
@@ -121,5 +166,5 @@ export function useVoiceRecorder() {
     };
   }, [cleanup]);
 
-  return { recording, elapsedMs, error, setError, start, stop, cancel };
+  return { recording, elapsedMs, error, setError, start, stop, cancel, getLevel };
 }

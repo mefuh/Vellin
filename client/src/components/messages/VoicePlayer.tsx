@@ -27,10 +27,11 @@ const MINE: Palette = {
   pillBg: 'rgba(255,255,255,0.2)',
   pillColor: '#fff',
 };
+// Входящее голосовое монохромное (как в макете) — без акцента, читаемо в любой теме.
 const THEIRS: Palette = {
-  btnBg: 'var(--accent)',
-  btnIcon: '#fff',
-  waveActive: 'var(--accent)',
+  btnBg: 'var(--bg-5)',
+  btnIcon: 'var(--text-0)',
+  waveActive: 'var(--text-0)',
   waveIdle: 'var(--line-3, #9aa3b2)',
   timeColor: 'var(--text-3)',
   pillBg: 'var(--bg-2)',
@@ -101,8 +102,8 @@ export function VoicePlayer({
         disabled={pending}
         style={{
           flexShrink: 0,
-          width: 40,
-          height: 40,
+          width: 42,
+          height: 42,
           borderRadius: 999,
           border: 'none',
           background: pal.btnBg,
@@ -110,9 +111,12 @@ export function VoicePlayer({
           display: 'grid',
           placeItems: 'center',
           cursor: pending ? 'default' : 'pointer',
+          // Лёгкое свечение у играющего голосового (как в макете).
+          boxShadow: playing ? `0 0 0 4px ${mine ? 'rgba(255,255,255,0.16)' : 'var(--accent-soft)'}` : 'none',
+          transition: 'box-shadow .2s ease',
         }}
       >
-        <Icon name={playing ? 'pause' : 'play'} size={18} />
+        <Icon name={playing ? 'pause' : 'play'} size={16} />
       </button>
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -155,7 +159,7 @@ export function VoicePlayer({
 
         {/* Время + скорость + индикаторы */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: pal.timeColor }}>
-          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 11.5, fontWeight: 600 }}>
             {fmtDur(isCurrent && (playing || posSec > 0) ? posSec : dur)}
           </span>
           {incomingUnplayed && (

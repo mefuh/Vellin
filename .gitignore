@@ -31,3 +31,6 @@ client/.vite
 # Editor / assistant scratch
 CLAUDE.md
 .claude/
+
+# Локальные dev-сертификаты mkcert (HTTPS для теста с телефона)
+client/.certs/
