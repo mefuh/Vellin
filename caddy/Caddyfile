@@ -32,10 +32,23 @@
 	# to the prebuilt client assets baked into the Caddy image.
 	handle {
 		root * /srv
+
+		# Хэшированные ассеты (имя файла меняется при изменении контента) —
+		# кэшируем максимально долго и помечаем immutable.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		# Оболочка (index.html, манифест, иконки) и SPA-fallback — без долгого
+		# кэша: всегда ревалидируем по ETag. Иначе iOS в режиме web-app залипает
+		# на старом index.html (он ссылается на старый JS) и обновления не видны.
+		@shell not path /assets/*
+		header @shell Cache-Control "no-cache"
+
 		# Корректный MIME для манифеста — иначе iOS 16.4+ может не прочитать
 		# scope/display из манифеста и выкидывать переходы в Safari.
 		@manifest path /manifest.webmanifest
 		header @manifest Content-Type "application/manifest+json"
+
 		try_files {path} /index.html
 		file_server
 	}
