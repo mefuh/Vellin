@@ -99,6 +99,7 @@ export function VoicePlayer({
         onClick={() => !pending && toggle(messageId, url, durationSec)}
         onMouseDown={(e) => e.preventDefault()}
         aria-label={playing ? 'Пауза' : 'Воспроизвести'}
+        className="dm-press"
         disabled={pending}
         style={{
           flexShrink: 0,

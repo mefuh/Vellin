@@ -241,7 +241,7 @@ input[type='date']::-webkit-datetime-edit {
   transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .dm-press:active {
-  transform: scale(0.92);
+  transform: scale(0.96);
 }
 
 /* Сниженная анимация: убираем движение, оставляем смену цвета. */
@@ -249,6 +249,10 @@ input[type='date']::-webkit-datetime-edit {
   .dm-press:active,
   .dm-row:active {
     transform: none;
+  }
+  /* Инлайновые анимации появления (кнопки, панель записи, превью) — без движения. */
+  .dm-anim {
+    animation: none !important;
   }
 }
 
@@ -260,5 +264,100 @@ input[type='date']::-webkit-datetime-edit {
   }
   50% {
     transform: translateY(-4px);
+  }
+}
+
+/* Появление действия-кнопки (отправить/голосовое): из чуть уменьшенного — не из
+   scale(0). Ровно один «pop» при подмене иконки. transform-origin — центр. */
+@keyframes dmActionPop {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Панель записи «выезжает» снизу с затуханием (ease-out задаётся в shorthand). */
+@keyframes dmRecIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Отмена записи: панель схлопывается на месте и растворяется (scale + затухание,
+   transform-origin по центру). Без сдвигов — ничего не «уезжает», чистое удаление. */
+@keyframes dmRecDiscard {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+}
+
+/* Бегущий блик скелетона загрузки (constant motion → linear).
+   Двигаем оверлей через transform (GPU), а не background-position (paint). */
+@keyframes dmSkeleton {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Поле ввода сообщения: мягкая реакция на фокус (рамка + свечение + фон).
+   Текст в поле остаётся выделяемым, даже если контейнер композера помечен
+   .dm-noselect. */
+.dm-input {
+  user-select: text;
+  -webkit-user-select: text;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
+}
+.dm-input:focus {
+  border-color: var(--accent);
+  background-color: var(--bg-1);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Служебный хром (хедер, композер, панель записи, мини-плеер) — не выделяется.
+   Текст сообщений остаётся выделяемым: класс вешаем только на не-текстовые зоны. */
+.dm-noselect {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Скелетон: серый блок с пробегающим бликом-оверлеем (transform, на GPU).
+   Фазу блика по рядам сдвигаем через --skel-delay (наследуется в ::after). */
+.dm-skel {
+  position: relative;
+  border-radius: 12px;
+  background: var(--bg-2);
+  overflow: hidden;
+}
+.dm-skel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, var(--bg-3) 50%, transparent 80%);
+  transform: translateX(-100%);
+  animation: dmSkeleton 1.4s linear infinite;
+  animation-delay: var(--skel-delay, 0s);
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dm-skel::after {
+    animation: none;
   }
 }

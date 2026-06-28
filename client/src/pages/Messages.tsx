@@ -15,6 +15,7 @@ import { useDmStore, type ClientDm, type ThreadState } from '../stores/dmStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { useVisualViewport } from '../hooks/useVisualViewport';
+import { usePresence } from '../hooks/usePresence';
 import { dmApi } from '../api/dm';
 import { ApiHttpError } from '../api/client';
 import { lastSeenLabel } from '../utils/lastSeen';
@@ -223,6 +224,7 @@ function ConversationList({
             onClick={() => navigate('/friends')}
             aria-label="Написать"
             title="Написать"
+            className="dm-press"
             style={{
               width: 38,
               height: 38,
@@ -272,6 +274,7 @@ function ConversationList({
             <button
               onClick={() => setQuery('')}
               aria-label="Очистить"
+              className="dm-press"
               style={{ border: 'none', background: 'transparent', color: 'var(--text-3)', display: 'grid', placeItems: 'center', cursor: 'pointer', padding: 0 }}
             >
               <Icon name="close" size={15} />
@@ -337,7 +340,7 @@ function ConversationRow({
   return (
     <Link
       to={`/messages/${encodeURIComponent(c.peer.username)}`}
-      className="dm-row"
+      className="dm-row dm-noselect"
       data-active={active}
       style={{
         display: 'flex',
@@ -404,6 +407,39 @@ function ConversationRow({
         </div>
       </div>
     </Link>
+  );
+}
+
+/** Скелетон ленты на время загрузки переписки: чередующиеся «пузыри-заглушки»
+ *  с пробегающим бликом (вместо голого «Загрузка…»). */
+function ThreadSkeleton() {
+  // Чередуем стороны и ширины, чтобы заглушка читалась как настоящая переписка.
+  const rows: { mine: boolean; w: number; h: number }[] = [
+    { mine: false, w: 58, h: 38 },
+    { mine: false, w: 42, h: 38 },
+    { mine: true, w: 64, h: 56 },
+    { mine: false, w: 50, h: 38 },
+    { mine: true, w: 38, h: 38 },
+    { mine: true, w: 54, h: 38 },
+    { mine: false, w: 60, h: 48 },
+  ];
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 10, padding: '16px max(12px, 3%) 20px' }}>
+      {rows.map((r, i) => (
+        <div key={i} style={{ display: 'flex', justifyContent: r.mine ? 'flex-end' : 'flex-start' }}>
+          <div
+            className="dm-skel"
+            style={{
+              width: `${r.w}%`,
+              height: r.h,
+              borderRadius: r.mine ? R_BUBBLE_OUT : R_BUBBLE_IN,
+              // Сдвиг фазы блика по рядам — пробегающая волна вместо синхронного мерцания.
+              ...({ '--skel-delay': `${i * 0.12}s` } as CSSProperties),
+            }}
+          />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -580,7 +616,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     );
   }
   if (!thread || !peerId) {
-    return <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--text-3)' }}>Загрузка…</div>;
+    return <ThreadSkeleton />;
   }
 
   const peer = thread.peer;
@@ -613,6 +649,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       {/* Шапка чата */}
       <header
+        className="dm-noselect"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -629,6 +666,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
           <button
             onClick={() => navigate('/messages')}
             aria-label="Назад"
+            className="dm-press"
             style={{ display: 'grid', placeItems: 'center', width: 36, height: 38, flexShrink: 0, borderRadius: 'var(--r-md)', border: 'none', background: 'transparent', color: ACCENT_TEXT, cursor: 'pointer' }}
           >
             <Icon name="chevron" size={22} stroke={2.4} style={{ transform: 'rotate(180deg)' }} />
@@ -882,7 +920,7 @@ function MessageList({
                   maxWidth: '76%',
                   display: 'flex',
                   transformOrigin: mine ? 'right bottom' : 'left bottom',
-                  ...(fresh ? { animation: 'dmBubbleIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both' } : null),
+                  ...(fresh ? { animation: 'dmBubbleIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) both' } : null),
                 }}
               >
               {(() => {
@@ -1045,6 +1083,9 @@ interface Attachment {
   preview: string;
 }
 
+/** Появление акцентной кнопки-действия (отправить/голосовое) — один мягкий «pop». */
+const ACTION_POP = 'dmActionPop 0.18s cubic-bezier(0.22, 1, 0.36, 1) both';
+
 /** Минимальная длительность записи, ниже — считаем случайным тапом. */
 const MIN_VOICE_MS = 700;
 /** На сколько нужно увести палец влево, чтобы отменить запись. */
@@ -1079,6 +1120,13 @@ function Composer({
   const isMobile = useIsMobile();
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Превью вложения: присутствие для симметричных появления/исчезания. Во время
+  // выхода показываем последнее вложение (presence держит его смонтированным).
+  const attachPresence = usePresence(attach != null, 220);
+  const lastAttachRef = useRef<Attachment | null>(null);
+  if (attach) lastAttachRef.current = attach;
+  const shownAttach = attach ?? lastAttachRef.current;
   const typingActiveRef = useRef(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdRef = useRef<{ startX: number; startY: number; active: boolean }>({ startX: 0, startY: 0, active: false });
@@ -1161,10 +1209,11 @@ function Composer({
   };
   const cancelRecord = async (): Promise<void> => {
     if (!recorder.recording) return;
-    // Полоса записи «уезжает» (см. recExiting), запись отменяется, затем размонтаж.
+    // Полоса записи «смахивается в корзину» (см. recExiting в RecordingBar):
+    // схлопывается влево + роняется + blur. Размонтаж после завершения discard.
     setRecExiting(true);
     await recorder.cancel();
-    window.setTimeout(() => setRecExiting(false), 240);
+    window.setTimeout(() => setRecExiting(false), 260);
   };
 
   const onMicDown = async (e: ReactPointerEvent): Promise<void> => {
@@ -1297,18 +1346,20 @@ function Composer({
       const res = await dmApi.uploadImage(file);
       setAttach({ url: res.url, width: res.width, height: res.height, preview });
     } catch (e) {
-      URL.revokeObjectURL(preview);
       setAttach(null);
       setUploadErr(e instanceof ApiHttpError ? e.payload.message : 'Не удалось загрузить изображение');
+      // Освобождаем objectURL после обратной анимации (превью ещё видно при выходе).
+      window.setTimeout(() => URL.revokeObjectURL(preview), 280);
     } finally {
       setUploading(false);
     }
   };
 
   const clearAttach = (): void => {
-    if (attach?.preview) URL.revokeObjectURL(attach.preview);
+    const url = attach?.preview;
     setAttach(null);
     setUploadErr(null);
+    if (url) window.setTimeout(() => URL.revokeObjectURL(url), 280);
   };
 
   const canSend = (text.trim().length > 0 || (attach != null && attach.url !== '')) && !uploading;
@@ -1349,6 +1400,7 @@ function Composer({
 
   return (
     <div
+      className="dm-noselect"
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -1361,19 +1413,35 @@ function Composer({
         flexShrink: 0,
       }}
     >
-      {(attach || uploadErr) && (
+      {(attachPresence.mounted || uploadErr) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {attach && (
-            <div style={{ position: 'relative', width: 64, height: 64, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--line-2)', flexShrink: 0 }}>
-              <img src={attach.preview} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: uploading ? 0.5 : 1 }} />
+          {attachPresence.mounted && shownAttach && (
+            <div
+              style={{
+                position: 'relative',
+                width: 64,
+                height: 64,
+                borderRadius: 10,
+                overflow: 'hidden',
+                border: '1px solid var(--line-2)',
+                flexShrink: 0,
+                transformOrigin: 'bottom left',
+                // Симметрия: появление снизу с лёгким масштабом ↔ обратный уход.
+                opacity: attachPresence.open ? 1 : 0,
+                transform: reduceMotion ? undefined : attachPresence.open ? 'translateY(0) scale(1)' : 'translateY(7px) scale(0.95)',
+                transition: reduceMotion ? 'opacity .18s ease' : 'opacity .2s ease, transform .22s cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+            >
+              <img src={shownAttach.preview} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: uploading ? 0.5 : 1, transition: 'opacity .2s ease' }} />
               {uploading && (
-                <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+                <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.25)' }}>
                   <Spinner />
                 </div>
               )}
               <button
                 onClick={clearAttach}
                 aria-label="Убрать изображение"
+                className="dm-press"
                 style={{ position: 'absolute', top: 2, right: 2, width: 18, height: 18, borderRadius: 999, border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', display: 'grid', placeItems: 'center', cursor: 'pointer' }}
               >
                 <Icon name="close" size={12} />
@@ -1429,6 +1497,7 @@ function Composer({
               }}
               rows={1}
               placeholder="Сообщение…"
+              className="dm-input"
               style={{
                 flex: 1,
                 resize: 'none',
@@ -1469,30 +1538,23 @@ function Composer({
                 aria-label="Отправить голосовое"
                 disabled={voiceBusy}
                 onClick={() => void stopAndSend()}
-                className="dm-press"
-                style={{ width: 44, height: 44, padding: 0, flexShrink: 0, borderRadius: 999, background: ACCENT_GRAD_BTN, boxShadow: BTN_GLOW }}
+                className="dm-press dm-anim"
+                style={{ width: 44, height: 44, padding: 0, flexShrink: 0, borderRadius: 999, background: ACCENT_GRAD_BTN, boxShadow: BTN_GLOW, animation: ACTION_POP }}
               >
                 {''}
               </Button>
             </>
           )
-        ) : canSend ? (
-          <Button
-            variant="primary"
-            size="md"
-            icon="send"
-            aria-label="Отправить"
-            onClick={submit}
-            className="dm-press"
-            style={{ width: 44, height: 44, padding: 0, flexShrink: 0, borderRadius: 999, background: ACCENT_GRAD_BTN, boxShadow: BTN_GLOW }}
-          >
-            {''}
-          </Button>
-        ) : isMobile ? (
-          <MicButton recording={false} cancelArmed={false} busy={voiceBusy} onPointerDown={onMicDown} />
         ) : (
-          // Десктоп в покое: клик начинает запись.
-          <IconButton icon="mic" label="Записать голосовое" busy={voiceBusy} onClick={() => void startClickRecord()} />
+          // Покой: микрофон ⇄ отправка плавным кросс-фейдом (в обе стороны).
+          <ComposerAction
+            canSend={canSend}
+            isMobile={isMobile}
+            voiceBusy={voiceBusy}
+            onSend={submit}
+            onMicDown={onMicDown}
+            onDesktopRecord={() => void startClickRecord()}
+          />
         )}
       </div>
       {recorder.error && <span style={{ fontSize: 12, color: 'var(--accent-hi)' }}>{recorder.error}</span>}
@@ -1514,10 +1576,19 @@ function RecordingBar({
   getLevel: () => number;
   exiting?: boolean;
 }) {
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const s = Math.floor(elapsedMs / 1000);
   const mm = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  // Вход и выход — две взаимоисключающие keyframe-анимации (без гонки transition
+  // c fill-кадром входа). Выход = растворение на месте (см. dmRecDiscard).
+  const anim = reduceMotion
+    ? undefined
+    : exiting
+      ? 'dmRecDiscard 0.22s cubic-bezier(0.22, 1, 0.36, 1) both'
+      : 'dmRecIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) both';
   return (
     <div
+      className="dm-noselect"
       style={{
         flex: 1,
         minWidth: 0,
@@ -1529,16 +1600,17 @@ function RecordingBar({
         borderRadius: 'var(--r-xl)',
         border: '1px solid var(--accent)',
         background: 'var(--accent-soft)',
-        // Плавный «уезд» при отмене (GPU: transform + opacity).
-        transformOrigin: 'left center',
-        opacity: exiting ? 0 : 1,
-        transform: exiting ? 'translateX(-14px) scale(0.96)' : 'none',
-        transition: 'opacity .22s ease, transform .24s cubic-bezier(0.4, 0, 0.2, 1)',
+        transformOrigin: 'center',
+        // reduce-motion: без движения — просто исчезновение.
+        opacity: reduceMotion && exiting ? 0 : 1,
+        transition: reduceMotion ? 'opacity .18s ease' : undefined,
+        animation: anim,
+        willChange: 'transform, opacity',
       }}
     >
-      <span style={{ width: 9, height: 9, borderRadius: 999, background: '#ff453a', animation: 'vellinPulse 1.1s ease-in-out infinite', flexShrink: 0 }} />
+      <span style={{ width: 9, height: 9, borderRadius: 999, background: '#ff453a', animation: exiting ? undefined : 'vellinPulse 1.1s ease-in-out infinite', flexShrink: 0 }} />
       <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 14, fontWeight: 600, color: 'var(--text-0)', minWidth: 32, flexShrink: 0 }}>{mm}</span>
-      <LiveWaveform getLevel={getLevel} dim={cancelArmed} />
+      <LiveWaveform getLevel={getLevel} dim={cancelArmed} collapsed={exiting} />
       <span style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0, color: cancelArmed ? '#ff6b6b' : 'var(--text-2)' }}>
         {cancelArmed ? 'Отпустите для отмены' : hold ? '‹ отмена' : 'Идёт запись…'}
       </span>
@@ -1546,8 +1618,9 @@ function RecordingBar({
   );
 }
 
-/** Живая волна записи: бежит влево, высота столбиков = громкость микрофона. */
-function LiveWaveform({ getLevel, dim }: { getLevel: () => number; dim?: boolean }) {
+/** Живая волна записи: бежит влево, высота столбиков = громкость микрофона.
+ *  `collapsed` — при отмене все столбики опадают к базовой линии (флэтлайн). */
+function LiveWaveform({ getLevel, dim, collapsed }: { getLevel: () => number; dim?: boolean; collapsed?: boolean }) {
   const BARS = 32;
   const [levels, setLevels] = useState<number[]>(() => Array(BARS).fill(0.05));
   const lastPushRef = useRef(0);
@@ -1600,9 +1673,10 @@ function LiveWaveform({ getLevel, dim }: { getLevel: () => number; dim?: boolean
             borderRadius: 3,
             background: 'var(--accent-hi)',
             // scaleY вместо height — анимация на композиторе, без layout-трэша.
-            transform: `scaleY(${Math.max(0.08, 0.08 + lv * 0.92)})`,
+            // При отмене опадаем к базовой линии (флэтлайн «разрядки»).
+            transform: `scaleY(${collapsed ? 0.08 : Math.max(0.08, 0.08 + lv * 0.92)})`,
             transformOrigin: 'center',
-            transition: 'transform .09s ease-out',
+            transition: collapsed ? 'transform .22s cubic-bezier(0.4, 0, 1, 1)' : 'transform .09s ease-out',
             willChange: 'transform',
           }}
         />
@@ -1646,6 +1720,69 @@ function IconButton({
     >
       <Icon name={icon} size={20} />
     </button>
+  );
+}
+
+/**
+ * Хвостовое действие композера в покое: плавный кросс-фейд микрофон ⇄ отправка.
+ * Оба слоя всегда смонтированы в одном 44px-слоте и переключаются по `canSend`
+ * через opacity+scale в обе стороны (симметрично, прерываемо). Неактивный слой
+ * убираем из фокуса/AT через `visibility:hidden` с задержкой по выходу.
+ */
+function ComposerAction({
+  canSend,
+  isMobile,
+  voiceBusy,
+  onSend,
+  onMicDown,
+  onDesktopRecord,
+}: {
+  canSend: boolean;
+  isMobile: boolean;
+  voiceBusy: boolean;
+  onSend: () => void;
+  onMicDown: (e: ReactPointerEvent) => void;
+  onDesktopRecord: () => void;
+}) {
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const layer = (active: boolean): CSSProperties => ({
+    position: 'absolute',
+    inset: 0,
+    display: 'grid',
+    placeItems: 'center',
+    opacity: active ? 1 : 0,
+    transform: reduceMotion ? undefined : active ? 'scale(1)' : 'scale(0.9)',
+    visibility: active ? 'visible' : 'hidden',
+    pointerEvents: active ? 'auto' : 'none',
+    // visibility переключаем мгновенно на входе и с задержкой на выходе — чтобы
+    // ушедший слой не ловил фокус, но успел доиграть прозрачность.
+    transition: reduceMotion
+      ? `opacity .15s ease, visibility 0s ${active ? '0s' : '.15s'}`
+      : `opacity .18s ease, transform .18s cubic-bezier(0.22, 1, 0.36, 1), visibility 0s ${active ? '0s' : '.18s'}`,
+  });
+  return (
+    <div style={{ position: 'relative', width: 44, height: 44, flexShrink: 0 }}>
+      <div style={layer(!canSend)}>
+        {isMobile ? (
+          <MicButton recording={false} cancelArmed={false} busy={voiceBusy} onPointerDown={onMicDown} />
+        ) : (
+          <IconButton icon="mic" label="Записать голосовое" busy={voiceBusy} onClick={onDesktopRecord} />
+        )}
+      </div>
+      <div style={layer(canSend)}>
+        <Button
+          variant="primary"
+          size="md"
+          icon="send"
+          aria-label="Отправить"
+          onClick={onSend}
+          className="dm-press"
+          style={{ width: 44, height: 44, padding: 0, borderRadius: 999, background: ACCENT_GRAD_BTN, boxShadow: BTN_GLOW }}
+        >
+          {''}
+        </Button>
+      </div>
+    </div>
   );
 }
 
