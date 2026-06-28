@@ -473,10 +473,40 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
   // «Прилипание» к низу: true, пока пользователь у нижнего края ленты.
   const pinnedRef = useRef(true);
 
+  // На мобилке шапка и композер — полупрозрачные оверлеи, а лента скроллится ПОД
+  // ними (как в Telegram). Меряем их высоту, чтобы дать ленте верхний/нижний
+  // отступ — крайние сообщения не прячутся под барами, но в прокрутке заходят.
+  const headerRef = useRef<HTMLElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const [headerH, setHeaderH] = useState(0);
+  const [composerH, setComposerH] = useState(0);
+
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, []);
+
+  // Замер высоты шапки/композера (оверлеи) → отступы ленты. ResizeObserver ловит
+  // рост композера (многострочный ввод, превью фото) и смену safe-area.
+  useLayoutEffect(() => {
+    if (!isMobile) {
+      setHeaderH(0);
+      setComposerH(0);
+      return;
+    }
+    const measure = (): void => {
+      const h = headerRef.current?.offsetHeight ?? 0;
+      const c = composerRef.current?.offsetHeight ?? 0;
+      setHeaderH(h);
+      setComposerH(c);
+      if (pinnedRef.current) scrollToBottom();
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (headerRef.current) ro.observe(headerRef.current);
+    if (composerRef.current) ro.observe(composerRef.current);
+    return () => ro.disconnect();
+  }, [isMobile, peerId, scrollToBottom]);
 
   // Раз в 30с форсим ре-рендер, чтобы относительное «был в сети …» дотикивало.
   const [, setTick] = useState(0);
@@ -636,110 +666,198 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     lastSeenLabel(peerPresence?.lastSeenAt ?? thread.lastSeenAt, thread.gender)
   );
 
+  // Внутренности шапки — одинаковы для мобилки и десктопа (меняется лишь
+  // позиционирование контейнера: оверлей vs flex-строка).
+  const headerInner = (
+    <>
+      {isMobile && (
+        <button
+          onClick={() => navigate('/messages')}
+          aria-label="Назад"
+          className="dm-press"
+          style={{
+            display: 'grid',
+            placeItems: 'center',
+            width: 40,
+            height: 40,
+            flexShrink: 0,
+            borderRadius: 999,
+            border: 'none',
+            // Круглая стеклянная кнопка — в тон имени-пилюле, «парит» над лентой.
+            background: 'var(--glass-bg)',
+            backdropFilter: 'blur(var(--glass-blur))',
+            WebkitBackdropFilter: 'blur(var(--glass-blur))',
+            boxShadow: '0 3px 12px rgba(0,0,0,0.32)',
+            color: ACCENT_TEXT,
+            cursor: 'pointer',
+          }}
+        >
+          <Icon name="chevron" size={22} stroke={2.4} style={{ transform: 'rotate(180deg)' }} />
+        </button>
+      )}
+      <Link
+        to={`/u/${encodeURIComponent(peer.username)}`}
+        style={
+          isMobile
+            ? {
+                // Стеклянный овальный блок — чтобы имя/статус не сливались с
+                // лентой, которая скроллится под прозрачной шапкой.
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 9,
+                color: 'inherit',
+                textDecoration: 'none',
+                minWidth: 0,
+                maxWidth: '72%',
+                background: 'var(--glass-bg)',
+                backdropFilter: 'blur(var(--glass-blur))',
+                WebkitBackdropFilter: 'blur(var(--glass-blur))',
+                borderRadius: 999,
+                padding: '4px 14px 4px 4px',
+                boxShadow: '0 3px 12px rgba(0,0,0,0.32)',
+              }
+            : { display: 'flex', alignItems: 'center', gap: 11, color: 'inherit', textDecoration: 'none', minWidth: 0, flex: 1 }
+        }
+      >
+        <Avatar name={peer.username} seed={peer.avatarSeed} src={peer.avatarUrl} size={isMobile ? 36 : 40} status={online ? 'online' : 'offline'} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {peer.username}
+          </div>
+          <div
+            style={{
+              fontSize: 12.5,
+              fontWeight: 500,
+              marginTop: 1,
+              color: isTyping || online ? ACCENT_TEXT_SOFT : 'var(--text-2)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {subtitle}
+          </div>
+        </div>
+      </Link>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        <HeaderActionButton icon="video" label="Видеозвонок" />
+        <HeaderActionButton icon="phone" label="Позвонить" />
+      </div>
+    </>
+  );
+
+  const messagesInner = (
+    <>
+      {thread.hasMore && (
+        <div style={{ display: 'grid', placeItems: 'center', paddingBottom: 8 }}>
+          <Button size="sm" variant="ghost" disabled={loadingMore} onClick={() => void loadEarlier()}>
+            {loadingMore ? 'Загрузка…' : 'Показать раньше'}
+          </Button>
+        </div>
+      )}
+      {thread.messages.length === 0 && (
+        <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+          Нет сообщений. Напишите первым!
+        </div>
+      )}
+      <MessageList
+        messages={thread.messages}
+        myId={myId}
+        peerLastReadAt={thread.peerLastReadAt}
+        onOpenImage={(url, rect) => setLightbox({ url, rect })}
+        onImageLoad={() => {
+          if (pinnedRef.current) scrollToBottom();
+        }}
+      />
+    </>
+  );
+
+  const composerEl = (
+    <Composer peer={peer} eligibility={thread.eligibility} onSend={(body, image, voice) => sendMessage(peer, body, image, voice)} />
+  );
+
+  // Общий низ скролл-обработчика: «прилипание» к низу ленты.
+  const onScroll = (e: { currentTarget: HTMLDivElement }): void => {
+    const el = e.currentTarget;
+    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+
+  // Базовый layout шапки (без фона). Фон/стекло добавляет только десктоп —
+  // на мобилке шапка прозрачная, элементы «парят» над лентой.
+  const headerBase: CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+    padding: '8px 10px',
+    paddingTop: 'calc(env(safe-area-inset-top, 0px) + 8px)',
+  };
+
+  // Мобилка: лента на всю высоту скроллится ПОД полупрозрачными шапкой и
+  // композером (как в Telegram) — сквозь блюр видно сообщения.
+  if (isMobile) {
+    const lightboxEl = lightbox && (
+      <Lightbox url={lightbox.url} rect={lightbox.rect} peer={peer} onClose={() => setLightbox(null)} />
+    );
+    return (
+      <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            overflowY: 'auto',
+            paddingTop: headerH + 6,
+            paddingBottom: composerH + 6,
+            paddingLeft: 'max(12px, 3%)',
+            paddingRight: 'max(12px, 3%)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+          }}
+        >
+          {messagesInner}
+        </div>
+        <VoiceNowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} topOffset={headerH} />
+        <header ref={headerRef} className="dm-noselect" style={{ ...headerBase, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }}>
+          {headerInner}
+        </header>
+        <div ref={composerRef} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 5 }}>
+          {composerEl}
+        </div>
+        {lightboxEl}
+      </div>
+    );
+  }
+
+  // Десктоп: классическая flex-раскладка в панели.
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      {/* Шапка чата */}
       <header
         className="dm-noselect"
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '11px 12px',
-          // PWA standalone: на мобилке чат во весь экран — уводим шапку из-под
-          // статус-бара (на десктопе/в сайдбаре inset = 0, без изменений).
-          paddingTop: 'calc(env(safe-area-inset-top, 0px) + 11px)',
-          borderBottom: '1px solid var(--line-1)',
+          ...headerBase,
           background: 'var(--glass-bg)',
           backdropFilter: 'blur(var(--glass-blur))',
           WebkitBackdropFilter: 'blur(var(--glass-blur))',
+          borderBottom: '1px solid var(--line-1)',
           flexShrink: 0,
         }}
       >
-        {isMobile && (
-          <button
-            onClick={() => navigate('/messages')}
-            aria-label="Назад"
-            className="dm-press"
-            style={{ display: 'grid', placeItems: 'center', width: 36, height: 38, flexShrink: 0, borderRadius: 'var(--r-md)', border: 'none', background: 'transparent', color: ACCENT_TEXT, cursor: 'pointer' }}
-          >
-            <Icon name="chevron" size={22} stroke={2.4} style={{ transform: 'rotate(180deg)' }} />
-          </button>
-        )}
-        <Link
-          to={`/u/${encodeURIComponent(peer.username)}`}
-          style={{ display: 'flex', alignItems: 'center', gap: 11, color: 'inherit', textDecoration: 'none', minWidth: 0, flex: 1 }}
-        >
-          <Avatar name={peer.username} seed={peer.avatarSeed} src={peer.avatarUrl} size={40} status={online ? 'online' : 'offline'} />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {peer.username}
-            </div>
-            <div
-              style={{
-                fontSize: 12.5,
-                fontWeight: 500,
-                marginTop: 1,
-                color: isTyping || online ? ACCENT_TEXT_SOFT : 'var(--text-2)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {subtitle}
-            </div>
-          </div>
-        </Link>
-        {/* Действия (звонок/видео — оформление; функционал добавим позже). */}
-        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-          <HeaderActionButton icon="video" label="Видеозвонок" />
-          <HeaderActionButton icon="phone" label="Позвонить" />
-        </div>
+        {headerInner}
       </header>
-
-      {/* Лента сообщений + плавающий мини-плеер «сейчас играет» (оверлей, чтобы
-          его появление не сдвигало ленту и не вызывало автоскролл к сообщению). */}
       <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <VoiceNowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} />
         <div
           ref={scrollRef}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-          }}
+          onScroll={onScroll}
           style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px max(12px, 3%)', display: 'flex', flexDirection: 'column', gap: 2 }}
         >
-        {thread.hasMore && (
-          <div style={{ display: 'grid', placeItems: 'center', paddingBottom: 8 }}>
-            <Button size="sm" variant="ghost" disabled={loadingMore} onClick={() => void loadEarlier()}>
-              {loadingMore ? 'Загрузка…' : 'Показать раньше'}
-            </Button>
-          </div>
-        )}
-        {thread.messages.length === 0 && (
-          <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--text-3)', fontSize: 13 }}>
-            Нет сообщений. Напишите первым!
-          </div>
-        )}
-        <MessageList
-          messages={thread.messages}
-          myId={myId}
-          peerLastReadAt={thread.peerLastReadAt}
-          onOpenImage={(url, rect) => setLightbox({ url, rect })}
-          onImageLoad={() => {
-            if (pinnedRef.current) scrollToBottom();
-          }}
-        />
+          {messagesInner}
         </div>
       </div>
-
-      {/* Ввод */}
-      <Composer
-        peer={peer}
-        eligibility={thread.eligibility}
-        onSend={(body, image, voice) => sendMessage(peer, body, image, voice)}
-      />
-
+      {composerEl}
       {lightbox && <Lightbox url={lightbox.url} rect={lightbox.rect} peer={peer} onClose={() => setLightbox(null)} />}
     </div>
   );
@@ -1059,7 +1177,9 @@ function HeaderActionButton({ icon, label }: { icon: IconName; label: string }) 
 
 /** Галочки доставки: одна (отправлено) / две (прочитано). */
 function Ticks({ read, faint, color }: { read: boolean; faint?: boolean; color?: string }) {
-  const stroke = color ?? (faint ? 'rgba(255,255,255,0.5)' : read ? '#bfe3ff' : 'rgba(255,255,255,0.78)');
+  // Прочитано — две белые галочки (раньше были голубые), отправлено — одна
+  // приглушённо-белая. В списке диалогов цвет задаётся через проп `color`.
+  const stroke = color ?? (faint ? 'rgba(255,255,255,0.5)' : read ? '#ffffff' : 'rgba(255,255,255,0.7)');
   const w = read ? 17 : 12;
   return (
     <svg width={w} height="11" viewBox={`0 0 ${w} 11`} fill="none" style={{ display: 'block' }}>
@@ -1399,14 +1519,16 @@ function Composer({
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
-        padding: '10px 14px',
-        // Нижний отступ учитывает «дом-индикатор» (safe-area). При открытой
-        // клавиатуре inset = 0 — двойного зазора не будет.
-        paddingBottom: 'calc(10px + env(safe-area-inset-bottom, 0px))',
-        borderTop: '1px solid var(--line-1)',
-        background: 'var(--glass-bg)',
-        backdropFilter: 'blur(var(--glass-blur))',
-        WebkitBackdropFilter: 'blur(var(--glass-blur))',
+        padding: '6px 14px',
+        // Поднимаем ряд выше дна: env(safe-area) + запас, чтобы скругления экрана
+        // не срезали угловые кнопки. При открытой клавиатуре inset = 0.
+        paddingBottom: 'calc(30px + env(safe-area-inset-bottom, 0px))',
+        // Мобилка: фона нет совсем — элементы «парят» над лентой (она скроллится
+        // под ними). Десктоп в панели сохраняет стеклянный бар с границей.
+        borderTop: isMobile ? 'none' : '1px solid var(--line-1)',
+        background: isMobile ? 'transparent' : 'var(--glass-bg)',
+        backdropFilter: isMobile ? undefined : 'blur(var(--glass-blur))',
+        WebkitBackdropFilter: isMobile ? undefined : 'blur(var(--glass-blur))',
         flexShrink: 0,
       }}
     >
@@ -1448,7 +1570,7 @@ function Composer({
           {uploadErr && <span style={{ fontSize: 12, color: 'var(--accent-hi)' }}>{uploadErr}</span>}
         </div>
       )}
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: 8 }}>
         <input
           ref={fileRef}
           type="file"
@@ -1475,9 +1597,9 @@ function Composer({
               aria-label="Прикрепить изображение"
               title="Прикрепить изображение"
               className="dm-press"
-              style={{ display: 'grid', placeItems: 'center', width: 42, height: 42, flexShrink: 0, borderRadius: 999, border: 'none', background: 'var(--bg-3)', color: 'var(--text-0)', cursor: voiceBusy ? 'default' : 'pointer' }}
+              style={{ display: 'grid', placeItems: 'center', width: 40, height: 40, flexShrink: 0, borderRadius: 999, border: 'none', background: 'var(--bg-3)', color: 'var(--text-0)', cursor: voiceBusy ? 'default' : 'pointer', boxShadow: '0 3px 10px rgba(0,0,0,0.38)' }}
             >
-              <Icon name="image" size={19} />
+              <Icon name="image" size={18} />
             </button>
             <textarea
               ref={taRef}
@@ -1499,11 +1621,15 @@ function Composer({
                 flex: 1,
                 resize: 'none',
                 maxHeight: 140,
-                minHeight: 42,
-                padding: '11px 16px',
-                borderRadius: 'var(--r-xl)',
+                minHeight: 40,
+                padding: '9px 16px',
+                // Полная «пилюля» как в Telegram.
+                borderRadius: 20,
                 border: '1px solid var(--line-2)',
-                background: 'var(--bg-2)',
+                // Полупрозрачное стекло — сквозь поле слегка видно ленту.
+                background: 'var(--glass-bg)',
+                backdropFilter: 'blur(var(--glass-blur))',
+                WebkitBackdropFilter: 'blur(var(--glass-blur))',
                 color: 'var(--text-0)',
                 fontSize: 15,
                 fontFamily: 'inherit',
@@ -1758,7 +1884,7 @@ function ComposerAction({
       : `opacity .18s ease, transform .18s cubic-bezier(0.22, 1, 0.36, 1), visibility 0s ${active ? '0s' : '.18s'}`,
   });
   return (
-    <div style={{ position: 'relative', width: 44, height: 44, flexShrink: 0 }}>
+    <div style={{ position: 'relative', width: 40, height: 40, flexShrink: 0 }}>
       <div style={layer(!canSend)}>
         {isMobile ? (
           <MicButton recording={false} cancelArmed={false} busy={voiceBusy} onPointerDown={onMicDown} />
@@ -1774,7 +1900,7 @@ function ComposerAction({
           aria-label="Отправить"
           onClick={onSend}
           className="dm-press"
-          style={{ width: 44, height: 44, padding: 0, borderRadius: 999, background: ACCENT_GRAD_BTN, boxShadow: BTN_GLOW }}
+          style={{ width: 40, height: 40, padding: 0, borderRadius: 999, background: ACCENT_GRAD_BTN, boxShadow: BTN_GLOW }}
         >
           {''}
         </Button>
@@ -1807,8 +1933,8 @@ function MicButton({
       title="Удерживайте, чтобы записать"
       style={{
         flexShrink: 0,
-        width: 44,
-        height: 44,
+        width: 40,
+        height: 40,
         padding: 0,
         borderRadius: 999,
         border: 'none',
@@ -1819,7 +1945,8 @@ function MicButton({
         cursor: busy ? 'default' : 'pointer',
         transform: `translateY(${-lift * 12}px) scale(${recording ? 1.08 : 1})`,
         transition: 'transform .12s ease-out, background .15s ease',
-        boxShadow: BTN_GLOW,
+        // Свечение акцента + мягкая тень — кнопка «парит» над лентой.
+        boxShadow: `${BTN_GLOW}, 0 3px 10px rgba(0,0,0,0.4)`,
         touchAction: 'none',
         userSelect: 'none',
         WebkitUserSelect: 'none',

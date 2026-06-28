@@ -14,10 +14,13 @@ export function VoiceNowPlaying({
   messages,
   peerUsername,
   myId,
+  topOffset = 0,
 }: {
   messages: ClientDm[];
   peerUsername: string;
   myId: string;
+  /** Сдвиг сверху (px) — чтобы мини-плеер встал под шапкой-оверлеем. */
+  topOffset?: number;
 }) {
   const currentId = useVoicePlayerStore((s) => s.currentId);
   const playing = useVoicePlayerStore((s) => s.playing);
@@ -76,7 +79,7 @@ export function VoiceNowPlaying({
       ref={rootRef}
       style={{
         position: 'absolute',
-        top: 8,
+        top: topOffset + 8,
         left: 0,
         right: 0,
         padding: '0 12px',

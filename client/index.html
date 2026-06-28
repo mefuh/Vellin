@@ -3,10 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <!-- Без viewport-fit=cover: web-view = «безопасный прямоугольник» (под
-         статус-баром, над home-indicator). Так layout не уезжает под системные
-         панели и не нужно вручную возиться с safe-area по всему приложению. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover — web-view во весь экран, а env(safe-area-inset-*)
+         даёт реальные отступы под «чёлку»/home-indicator. Без cover они = 0, и
+         нижние/верхние элементы режутся скруглением экрана. Отступы вешаем точечно
+         на плавающие элементы (шапка, композер, док). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0a0807" />
 
     <!-- PWA: единый источник для display/scope/start_url/иконок. Без scope:'/'
@@ -17,7 +18,7 @@
          standalone включается именно этим мета). Заголовок/иконка/статус-бар. -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Vellin" />
     <meta name="application-name" content="Vellin" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
