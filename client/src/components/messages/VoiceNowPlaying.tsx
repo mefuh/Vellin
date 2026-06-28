@@ -88,6 +88,7 @@ export function VoiceNowPlaying({
       }}
     >
       <div
+        className="dm-noselect"
         style={{
           position: 'relative',
           display: 'flex',
@@ -108,6 +109,7 @@ export function VoiceNowPlaying({
         <button
           onClick={toggleCurrent}
           aria-label={playing ? 'Пауза' : 'Воспроизвести'}
+          className="dm-press"
           style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 999, border: 'none', background: 'transparent', color: 'var(--text-0)', display: 'grid', placeItems: 'center', cursor: 'pointer' }}
         >
           <Icon name={playing ? 'pause' : 'play'} size={20} />
@@ -123,6 +125,7 @@ export function VoiceNowPlaying({
         <button
           onClick={cycleRate}
           aria-label="Скорость воспроизведения"
+          className="dm-press"
           style={{ flexShrink: 0, padding: '4px 9px', borderRadius: 8, border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--text-1)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontVariantNumeric: 'tabular-nums' }}
         >
           {rate}X
@@ -130,6 +133,7 @@ export function VoiceNowPlaying({
         <button
           onClick={stop}
           aria-label="Закрыть плеер"
+          className="dm-press"
           style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 999, border: 'none', background: 'transparent', color: 'var(--text-2)', display: 'grid', placeItems: 'center', cursor: 'pointer' }}
         >
           <Icon name="close" size={18} />
