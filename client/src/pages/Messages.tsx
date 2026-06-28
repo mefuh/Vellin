@@ -210,9 +210,9 @@ function ConversationList({
         style={{
           flexShrink: 0,
           padding: compact ? '14px 14px 12px' : '8px 16px 12px',
-          background: 'var(--glass-bg)',
-          backdropFilter: 'blur(var(--glass-blur))',
-          WebkitBackdropFilter: 'blur(var(--glass-blur))',
+          // Прозрачный фон — заголовок совпадает с контейнером (bg-0 на мобилке,
+          // bg-1 в сайдбаре). Стекло/блюр тут не нужны: блок не лежит над скроллом.
+          background: 'transparent',
           borderBottom: '1px solid var(--line-1)',
         }}
       >
