@@ -99,29 +99,24 @@ export function Messages() {
   if (isMobile) {
     // Мобайл: либо список, либо открытый чат на весь экран.
     if (username) {
-      // Высоту берём из visual viewport — тогда композер «едет» вместе с
-      // выезжающей клавиатурой и не прячется за ней. Фоллбэк — 100svh.
-      const wrapStyle: CSSProperties = vp
-        ? {
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: vp.height,
-            transform: `translateY(${vp.offsetTop}px)`,
-            background: 'var(--bg-0)',
-            color: 'var(--text-0)',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          }
-        : {
-            minHeight: '100svh',
-            background: 'var(--bg-0)',
-            color: 'var(--text-0)',
-            display: 'flex',
-            flexDirection: 'column',
-          };
+      // Чат — на весь экран (100dvh), а под выехавшую клавиатуру отдаём ровно её
+      // высоту нижним паддингом. Высоту НЕ берём из visualViewport.height
+      // напрямую (в standalone оно приходит короче экрана → панель «всплывала»);
+      // нужна только дельта-клавиатура (keyboardHeight).
+      const kb = vp?.keyboardHeight ?? 0;
+      const wrapStyle: CSSProperties = {
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100dvh',
+        paddingBottom: kb ? `${kb}px` : undefined,
+        background: 'var(--bg-0)',
+        color: 'var(--text-0)',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      };
       return <div style={wrapStyle}>{chat}</div>;
     }
     return (
@@ -1409,6 +1404,9 @@ function Composer({
         flexDirection: 'column',
         gap: 8,
         padding: '10px 14px',
+        // Нижний отступ учитывает «дом-индикатор» (safe-area). При открытой
+        // клавиатуре inset = 0 — двойного зазора не будет.
+        paddingBottom: 'calc(10px + env(safe-area-inset-bottom, 0px))',
         borderTop: '1px solid var(--line-1)',
         background: 'var(--glass-bg)',
         backdropFilter: 'blur(var(--glass-blur))',
