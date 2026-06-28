@@ -655,6 +655,9 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
           alignItems: 'center',
           gap: 6,
           padding: '11px 12px',
+          // PWA standalone: на мобилке чат во весь экран — уводим шапку из-под
+          // статус-бара (на десктопе/в сайдбаре inset = 0, без изменений).
+          paddingTop: 'calc(env(safe-area-inset-top, 0px) + 11px)',
           borderBottom: '1px solid var(--line-1)',
           background: 'var(--glass-bg)',
           backdropFilter: 'blur(var(--glass-blur))',
