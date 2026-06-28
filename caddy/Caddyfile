@@ -32,6 +32,10 @@
 	# to the prebuilt client assets baked into the Caddy image.
 	handle {
 		root * /srv
+		# Корректный MIME для манифеста — иначе iOS 16.4+ может не прочитать
+		# scope/display из манифеста и выкидывать переходы в Safari.
+		@manifest path /manifest.webmanifest
+		header @manifest Content-Type "application/manifest+json"
 		try_files {path} /index.html
 		file_server
 	}
