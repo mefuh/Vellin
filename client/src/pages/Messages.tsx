@@ -14,7 +14,6 @@ import { useAuthStore } from '../stores/authStore';
 import { useDmStore, type ClientDm, type ThreadState } from '../stores/dmStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useIsMobile } from '../hooks/useMediaQuery';
-import { useVisualViewport } from '../hooks/useVisualViewport';
 import { usePresence } from '../hooks/usePresence';
 import { dmApi } from '../api/dm';
 import { ApiHttpError } from '../api/client';
@@ -60,9 +59,8 @@ export function Messages() {
   const conversations = useDmStore((s) => s.conversations);
   const setConversations = useDmStore((s) => s.setConversations);
 
-  // Открытый чат на мобилке занимает весь экран и подстраивается под клавиатуру.
+  // Открытый чат на мобилке занимает весь экран (фикс-контейнер, см. ниже).
   const chatOpen = isMobile && !!username;
-  const vp = useVisualViewport(chatOpen);
 
   useEffect(() => {
     let alive = true;
@@ -99,18 +97,16 @@ export function Messages() {
   if (isMobile) {
     // Мобайл: либо список, либо открытый чат на весь экран.
     if (username) {
-      // Чат — на весь экран (100dvh), а под выехавшую клавиатуру отдаём ровно её
-      // высоту нижним паддингом. Высоту НЕ берём из visualViewport.height
-      // напрямую (в standalone оно приходит короче экрана → панель «всплывала»);
-      // нужна только дельта-клавиатура (keyboardHeight).
-      const kb = vp?.keyboardHeight ?? 0;
+      // Чат на весь экран. position:fixed; inset:0 = ровно текущий вьюпорт
+      // (безопасный web-view без cover). Когда вылезает клавиатура, web-view
+      // ужимается — fixed-контейнер ужимается вместе с ним, и композер сам
+      // встаёт над клавиатурой. Без ручного расчёта высоты клавиатуры.
       const wrapStyle: CSSProperties = {
         position: 'fixed',
         top: 0,
         left: 0,
-        width: '100%',
-        height: '100dvh',
-        paddingBottom: kb ? `${kb}px` : undefined,
+        right: 0,
+        bottom: 0,
         background: 'var(--bg-0)',
         color: 'var(--text-0)',
         display: 'flex',
