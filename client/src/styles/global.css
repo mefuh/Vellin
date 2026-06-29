@@ -5,7 +5,7 @@ body,
 #root {
   margin: 0;
   padding: 0;
-  height: 100%;
+  min-height: 100%;
   background: var(--bg-0);
   font-family: var(--font-ui);
   color: var(--text-0);
@@ -14,17 +14,16 @@ body,
   letter-spacing: -0.01em;
 }
 
-/* Скроллится ТОЛЬКО #root, а не body. На iOS standalone (PWA) скролл самого body
-   заставляет position:fixed-элементы (плавающий нижний док) дёргаться и вставать
-   на разную высоту между вкладками. Единый скролл-контейнер фиксирует док/шапку
-   намертво относительно вьюпорта. */
-html,
-body {
-  overflow: hidden;
+/* Скроллит сам документ (body). НЕ делаем #root отдельным скролл-контейнером:
+   на iOS WebKit position:fixed внутри прокручиваемого overflow-контейнера
+   позиционируется как absolute относительно контента — из-за этого нижний док
+   уезжал вверх (к центру), а фикс-чат получал неверные размеры/рамки. С обычным
+   скроллом документа fixed надёжно цепляется за вьюпорт. */
+html {
+  height: 100%;
 }
-#root {
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+body {
+  /* Гасим «резинку» — она дёргает fixed-элементы на iOS. */
   overscroll-behavior-y: none;
 }
 
