@@ -790,7 +790,6 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     justifyContent: 'space-between',
     gap: 6,
     padding: '8px 10px',
-    paddingTop: 'calc(env(safe-area-inset-top, 0px) + 8px)',
   };
 
   // Мобилка: лента на всю высоту скроллится ПОД полупрозрачными шапкой и
@@ -1526,9 +1525,8 @@ function Composer({
         flexDirection: 'column',
         gap: 8,
         padding: '6px 14px',
-        // Поднимаем ряд выше дна: env(safe-area) + запас, чтобы скругления экрана
-        // не срезали угловые кнопки. При открытой клавиатуре inset = 0.
-        paddingBottom: 'calc(30px + env(safe-area-inset-bottom, 0px))',
+        // Без cover web-view уже над home-indicator — достаточно обычного отступа.
+        paddingBottom: 14,
         // Мобилка: фона нет совсем — элементы «парят» над лентой (она скроллится
         // под ними). Десктоп в панели сохраняет стеклянный бар с границей.
         borderTop: isMobile ? 'none' : '1px solid var(--line-1)',

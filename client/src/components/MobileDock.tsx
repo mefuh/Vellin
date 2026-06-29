@@ -118,7 +118,7 @@ export function MobileDock() {
       style={{
         position: 'fixed',
         left: '50%',
-        bottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)',
+        bottom: 12,
         transform: visible ? 'translateX(-50%) translateY(0)' : 'translateX(-50%) translateY(160%)',
         opacity: visible ? 1 : 0,
         pointerEvents: visible ? 'auto' : 'none',
