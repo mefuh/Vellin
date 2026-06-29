@@ -48,14 +48,19 @@ export function AppHeader({ active }: { active?: DockPage }) {
     <>
       <header
         style={{
+          // Закреплённая сверху шапка со сплошным фоном: зона статус-бара
+          // (env safe-area) залита фоном, контент не просвечивает за ней, шапка
+          // не «съезжает». На десктопе inset = 0 — обычная закреплённая шапка.
+          position: 'sticky',
+          top: 0,
+          zIndex: 50,
           minHeight: 72,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '0 max(20px, 4vw)',
-          // PWA standalone (black-translucent): уводим контент из-под статус-бара.
-          // На обычном вебе/десктопе inset = 0 — без изменений.
           paddingTop: 'env(safe-area-inset-top, 0px)',
+          background: 'var(--bg-0)',
           borderBottom: '1px solid var(--line-1)',
         }}
       >
