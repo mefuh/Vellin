@@ -52,12 +52,11 @@ export function AppHeader({ active }: { active?: DockPage }) {
           // контент скроллится внутри). Сплошной фон закрывает зону статус-бара
           // (env safe-area), контент за ней не просвечивает.
           flexShrink: 0,
-          minHeight: 72,
+          height: 72,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '0 max(20px, 4vw)',
-          paddingTop: 'env(safe-area-inset-top, 0px)',
           background: 'var(--bg-0)',
           borderBottom: '1px solid var(--line-1)',
         }}
