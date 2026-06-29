@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Avatar, Icon, type IconName } from '../shared';
 import { useAuthStore } from '../stores/authStore';
@@ -107,7 +108,10 @@ export function MobileDock() {
 
   if (!isMobile || !isUser) return null;
 
-  return (
+  // Портал прямо в <body>: position:fixed гарантированно считается от вьюпорта,
+  // а не от случайного предка с transform/filter/contain (из-за которого док
+  // оказывался по центру экрана). body — без таких предков.
+  return createPortal(
     <nav
       ref={navRef}
       aria-hidden={!visible}
@@ -219,7 +223,8 @@ export function MobileDock() {
           </button>
         );
       })}
-    </nav>
+    </nav>,
+    document.body,
   );
 }
 
