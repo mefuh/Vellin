@@ -101,7 +101,11 @@ export function Friends() {
         {header}
         <main style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 14px 104px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <h1 style={{ fontSize: 24, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>Друзья</h1>
-          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+          {/* flexShrink:0 — ряд вкладок это фиксированный «хром», а не контент.
+              Из-за overflowX:auto он скролл-контейнер, и его min-height:auto = 0,
+              поэтому без этого flex-колонка <main> сжимала кнопки по высоте, когда
+              список длинный (вкладка «Друзья» переполняла колонку). */}
+          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, flexShrink: 0 }}>
             {NAV.map((n) => tabButton(n, false))}
           </div>
           {content}
