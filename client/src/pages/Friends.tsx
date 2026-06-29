@@ -97,9 +97,9 @@ export function Friends() {
 
   if (isMobile) {
     return (
-      <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
+      <div style={{ height: '100svh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
         {header}
-        <main style={{ padding: '20px 14px 104px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <main style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 14px 104px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <h1 style={{ fontSize: 24, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>Друзья</h1>
           <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
             {NAV.map((n) => tabButton(n, false))}

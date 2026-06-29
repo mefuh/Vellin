@@ -48,12 +48,10 @@ export function AppHeader({ active }: { active?: DockPage }) {
     <>
       <header
         style={{
-          // Закреплённая сверху шапка со сплошным фоном: зона статус-бара
-          // (env safe-area) залита фоном, контент не просвечивает за ней, шапка
-          // не «съезжает». На десктопе inset = 0 — обычная закреплённая шапка.
-          position: 'sticky',
-          top: 0,
-          zIndex: 50,
+          // Шапка — верхний flex-элемент app-shell (страница = ровно вьюпорт,
+          // контент скроллится внутри). Сплошной фон закрывает зону статус-бара
+          // (env safe-area), контент за ней не просвечивает.
+          flexShrink: 0,
           minHeight: 72,
           display: 'flex',
           alignItems: 'center',

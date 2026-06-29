@@ -396,9 +396,15 @@ export function PublicProfile() {
   );
 
   return (
-    <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
+    <div
+      style={
+        isMobile
+          ? { height: '100svh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)' }
+          : { minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }
+      }
+    >
       {header}
-      {body}
+      {isMobile ? <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>{body}</div> : body}
     </div>
   );
 }

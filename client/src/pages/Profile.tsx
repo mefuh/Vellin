@@ -58,13 +58,17 @@ export function Profile() {
   // ── Мобильная версия: всё стопкой (не трогаем) ─────────────────────────
   if (isMobile) {
     return (
-      <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
+      <div style={{ height: '100svh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
         {header}
         <main
           style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: 'auto',
             padding: '20px 14px 104px',
             maxWidth: 760,
             margin: '0 auto',
+            width: '100%',
             display: 'flex',
             flexDirection: 'column',
             gap: 16,

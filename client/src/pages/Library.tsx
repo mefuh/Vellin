@@ -58,10 +58,10 @@ export function Library() {
   };
 
   return (
-    <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
+    <div style={{ height: '100svh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
       <AppHeader active="library" />
 
-      <main style={{ padding: `32px max(24px, 4vw) ${isMobile ? 104 : 80}px`, display: 'flex', flexDirection: 'column', gap: 28 }}>
+      <main style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: `32px max(24px, 4vw) ${isMobile ? 104 : 80}px`, display: 'flex', flexDirection: 'column', gap: 28 }}>
         <section
           style={{
             display: 'flex',
