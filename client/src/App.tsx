@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import { Landing } from './pages/Landing';
@@ -41,6 +42,50 @@ function AdminProtectedRoute({ children }: { children: React.ReactElement }) {
   if (!token) return <Navigate to="/login" replace />;
   if (!user?.isAdmin) return <Navigate to="/library" replace />;
   return children;
+}
+
+/** Временный диагностический индикатор (display-mode, высоты вьюпорта, safe-area).
+ *  Нужен, чтобы по скрину точно понять геометрию на устройстве. Удалить после. */
+function DebugBar() {
+  const [s, setS] = useState('');
+  useEffect(() => {
+    const probe = document.createElement('div');
+    probe.style.cssText =
+      'position:fixed;left:0;bottom:0;width:1px;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);visibility:hidden;pointer-events:none;';
+    document.body.appendChild(probe);
+    const tick = (): void => {
+      const cs = getComputedStyle(probe);
+      const dm = matchMedia('(display-mode: standalone)').matches ? 'PWA' : 'web';
+      const vv = window.visualViewport;
+      setS(`${dm} iH${window.innerHeight} vv${vv ? Math.round(vv.height) : '-'} top${cs.paddingTop} bot${cs.paddingBottom}`);
+    };
+    tick();
+    window.addEventListener('resize', tick);
+    window.visualViewport?.addEventListener('resize', tick);
+    return () => {
+      window.removeEventListener('resize', tick);
+      window.visualViewport?.removeEventListener('resize', tick);
+      probe.remove();
+    };
+  }, []);
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        left: 6,
+        top: 'calc(env(safe-area-inset-top, 0px) + 2px)',
+        zIndex: 99999,
+        background: 'rgba(0,0,0,0.7)',
+        color: '#39ff14',
+        font: '10px/1.3 monospace',
+        padding: '1px 5px',
+        borderRadius: 4,
+        pointerEvents: 'none',
+      }}
+    >
+      {s}
+    </div>
+  );
 }
 
 export function App() {
@@ -137,6 +182,7 @@ export function App() {
       <Route path="*" element={<NotFound />} />
       </Routes>
       <MobileDock />
+      <DebugBar />
     </RealtimeProvider>
   );
 }
