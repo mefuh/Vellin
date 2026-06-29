@@ -799,6 +799,10 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     const lightboxEl = lightbox && (
       <Lightbox url={lightbox.url} rect={lightbox.rect} peer={peer} onClose={() => setLightbox(null)} />
     );
+    // Градиентная маска: у верхнего/нижнего краёв сообщения плавно растворяются,
+    // заходя за прозрачные шапку и композер (вместо сырого «вытекания» за
+    // статус-бар и под панель ввода). Без подложки — просто fade.
+    const fadeMask = `linear-gradient(to bottom, transparent 0, #000 ${headerH}px, #000 calc(100% - ${composerH}px), transparent 100%)`;
     return (
       <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
         <div
@@ -815,6 +819,8 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
             display: 'flex',
             flexDirection: 'column',
             gap: 2,
+            WebkitMaskImage: fadeMask,
+            maskImage: fadeMask,
           }}
         >
           {messagesInner}
