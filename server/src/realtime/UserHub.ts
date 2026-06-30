@@ -40,6 +40,8 @@ class UserHub {
   private readonly watchersOf = new Map<string, Set<UserConnection>>();
   /** Соединения с открытой библиотекой — получают live-обновления превью комнат. */
   private readonly librarySubs = new Set<UserConnection>();
+  /** Фокус соединения: какой диалог открыт и видима ли вкладка (для подавления push). */
+  private readonly focusByConn = new Map<UserConnection, { conversationId: string | null; visible: boolean }>();
   private friendResolver: FriendResolver | null = null;
   private lastSeenWriter: LastSeenWriter | null = null;
   private onlinePrivacyResolver: OnlinePrivacyResolver | null = null;
@@ -76,6 +78,7 @@ class UserHub {
       this.watchedByConn.delete(conn);
     }
     this.librarySubs.delete(conn);
+    this.focusByConn.delete(conn);
     const set = this.conns.get(conn.userId);
     if (!set) return;
     set.delete(conn);
@@ -152,6 +155,26 @@ class UserHub {
   /** Очистить комнату, только если пользователь всё ещё «в» этой комнате. */
   clearRoom(userId: string, slug: string): void {
     if (this.rooms.get(userId)?.slug === slug) this.setRoom(userId, null);
+  }
+
+  /** Запомнить фокус соединения (открытый диалог + видимость вкладки). */
+  setFocus(conn: UserConnection, conversationId: string | null, visible: boolean): void {
+    this.focusByConn.set(conn, { conversationId, visible });
+  }
+
+  /**
+   * Читает ли пользователь ПРЯМО СЕЙЧАС указанный диалог: есть открытое
+   * соединение с видимой вкладкой и этим conversationId. Используется, чтобы не
+   * слать push о ЛС тому, кто уже в этом диалоге.
+   */
+  isViewingConversation(userId: string, conversationId: string): boolean {
+    const set = this.conns.get(userId);
+    if (!set) return false;
+    for (const c of set) {
+      const f = this.focusByConn.get(c);
+      if (f && f.visible && f.conversationId === conversationId) return true;
+    }
+    return false;
   }
 
   /** Подписать соединение на live-обновления библиотеки (открыта страница). */

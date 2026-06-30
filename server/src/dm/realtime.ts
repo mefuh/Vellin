@@ -4,6 +4,9 @@ import { userHub } from '../realtime/UserHub.js';
 import { removeNotifications } from '../realtime/notify.js';
 import { toAppNotification } from '../friends/mappers.js';
 import { logger } from '../utils/logger.js';
+import { notifyAsync } from '../push/notificationService.js';
+import { dmPushPreview } from '../push/payloads.js';
+import { resetDmCount } from '../push/grouping.js';
 import {
   DmError,
   markRead,
@@ -86,6 +89,15 @@ export async function handleDmSend(
     });
     const preview = body.trim() || (image ? '📷 Фото' : voice ? '🎤 Голосовое сообщение' : '');
     await pushDmNotification(toUserId, res.sender, res.conversationId, preview);
+    // Web-Push получателю — но НЕ если он прямо сейчас читает этот же диалог
+    // (видимая вкладка + открыт именно он). Прочее гейтится настройками внутри.
+    if (!userHub.isViewingConversation(toUserId, res.conversationId)) {
+      notifyAsync(toUserId, 'direct_message', {
+        username: res.sender.username,
+        message: dmPushPreview(body, !!image, !!voice),
+        conversationId: res.conversationId,
+      });
+    }
   } catch (err) {
     if (err instanceof DmError) {
       userHub.pushTo(senderId, { t: 'dm_error', nonce, reason: err.reason, message: err.message });
@@ -116,8 +128,10 @@ export async function handleDmRead(meId: string, peerId: string): Promise<void> 
       byUserId: meId,
       readAt: r.readAt,
     });
-    // Диалог прочитан — убираем его уведомление из колокольчика.
+    // Диалог прочитан — убираем его уведомление из колокольчика и сбрасываем
+    // счётчик группировки push (следующая серия начнётся заново).
     await removeNotifications(meId, { type: 'direct_message', actorId: peerId });
+    resetDmCount(meId, r.conversationId);
   } catch (err) {
     logger.error({ err, meId, peerId }, 'dm read failed');
   }

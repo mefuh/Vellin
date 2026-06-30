@@ -54,6 +54,11 @@ services:
       # Токен kinopoisk.dev для поиска фильмов/сериалов (избранное в профиле).
       # Без него эндпоинт поиска отдаёт 503. Значение — в .env.production.
       KINOPOISK_TOKEN: ${KINOPOISK_TOKEN:-}
+      # Web-Push (VAPID). Без пары ключей push-слой штатно отключается, остальное
+      # работает. Значения — в .env.production (приватный ключ — секрет сервера).
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@vellin.ru}
     volumes:
       - uploads:/data/uploads
 

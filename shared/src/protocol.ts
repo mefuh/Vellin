@@ -525,7 +525,8 @@ export type UserC2S =
   | UserC2SDmSend
   | UserC2SDmTyping
   | UserC2SDmRead
-  | UserC2SDmVoicePlayed;
+  | UserC2SDmVoicePlayed
+  | UserC2SPresenceFocus;
 
 export interface UserC2SPong {
   t: 'pong';
@@ -584,6 +585,16 @@ export interface UserC2SDmTyping {
 export interface UserC2SDmRead {
   t: 'dm_read';
   peerId: string;
+}
+/**
+ * Фокус приложения: какой диалог сейчас открыт и видима ли вкладка. Сервер
+ * использует это, чтобы НЕ слать push о ЛС, если получатель прямо сейчас читает
+ * именно этот диалог. `conversationId: null` — ни один диалог не открыт.
+ */
+export interface UserC2SPresenceFocus {
+  t: 'presence_focus';
+  conversationId: string | null;
+  visible: boolean;
 }
 
 // ── Type guards ────────────────────────────────────────────────────────

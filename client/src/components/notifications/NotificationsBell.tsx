@@ -132,12 +132,25 @@ export function NotificationsBell() {
         }}
       >
         <span style={{ fontWeight: 600, fontSize: 15 }}>Уведомления</span>
-        <button
-          onClick={() => void markAllRead()}
-          style={{ background: 'transparent', border: 'none', color: 'var(--text-2)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}
-        >
-          Прочитать все
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            onClick={() => void markAllRead()}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-2)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            Прочитать все
+          </button>
+          <button
+            onClick={() => {
+              closePanel();
+              navigate('/settings/notifications');
+            }}
+            title="Настройки уведомлений"
+            aria-label="Настройки уведомлений"
+            style={{ display: 'grid', placeItems: 'center', width: 26, height: 26, borderRadius: 'var(--r-sm)', border: 'none', background: 'transparent', color: 'var(--text-2)', cursor: 'pointer' }}
+          >
+            <Icon name="settings" size={16} />
+          </button>
+        </div>
       </div>
       <div style={{ overflowY: 'auto', padding: 8 }}>
         {notifications.length === 0 && (

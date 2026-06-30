@@ -121,6 +121,8 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         voiceDurationSec?: number;
         voicePeaks?: number[];
         messageId?: string;
+        conversationId?: string | null;
+        visible?: boolean;
       };
       if (m.t === 'watch_presence' && typeof m.userId === 'string') {
         userHub.watch(conn, m.userId);
@@ -160,6 +162,10 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         void handleDmRead(principal.userId, m.peerId);
       } else if (m.t === 'dm_voice_played' && typeof m.messageId === 'string') {
         void handleDmVoicePlayed(principal.userId, m.messageId);
+      } else if (m.t === 'presence_focus') {
+        // Какой диалог открыт + видима ли вкладка — для подавления push о ЛС.
+        const convId = typeof m.conversationId === 'string' ? m.conversationId : null;
+        userHub.setFocus(conn, convId, m.visible !== false);
       }
     });
     socket.on('close', () => {

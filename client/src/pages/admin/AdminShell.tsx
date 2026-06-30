@@ -13,6 +13,7 @@ const NAV: NavItem[] = [
   { to: '/admin/dashboard', label: 'Обзор', icon: 'grid' },
   { to: '/admin/users', label: 'Пользователи', icon: 'users' },
   { to: '/admin/rooms', label: 'Комнаты', icon: 'film' },
+  { to: '/admin/push', label: 'Push', icon: 'bell' },
 ];
 
 export function AdminShell() {

@@ -16,6 +16,11 @@ import { friendRoutes } from './friends/routes.js';
 import { dmRoutes } from './dm/routes.js';
 import { geoRoutes } from './geo/routes.js';
 import { titleRoutes } from './titles/routes.js';
+import { pushRoutes } from './push/routes.js';
+import { pushPublicRoutes } from './push/clickBeacon.js';
+import { adminPushRoutes } from './push/admin.js';
+import { seedDefaultTemplates } from './push/templates.js';
+import { startPushWorker } from './push/worker.js';
 import { ensureUploadsDir } from './auth/avatar.js';
 import { ensureDmImagesDir } from './dm/image.js';
 import { ensureDmVoiceDir, MAX_DM_VOICE_BYTES } from './dm/voice.js';
@@ -100,7 +105,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.code(500).send({ error: 'InternalServerError', message: 'Internal error', statusCode: 500 });
   });
 
-  app.get('/health', async () => ({ ok: true, version: '0.19.16' }));
+  app.get('/health', async () => ({ ok: true, version: '0.20.0' }));
 
   await app.register(
     async (api) => {
@@ -114,6 +119,9 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(dmRoutes);
       await api.register(geoRoutes);
       await api.register(titleRoutes);
+      await api.register(pushRoutes);
+      await api.register(pushPublicRoutes);
+      await api.register(adminPushRoutes);
     },
     { prefix: '/api' },
   );
@@ -136,6 +144,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await registerWebSocket(app);
+
+  // Засеять дефолтные шаблоны push (идемпотентно) и запустить фоновый воркер
+  // очереди отправки (no-op, если push выключен — нет VAPID-ключей).
+  void seedDefaultTemplates()
+    .then(() => startPushWorker())
+    .catch((err) => logger.error({ err }, 'push: init failed'));
 
   return app;
 }
