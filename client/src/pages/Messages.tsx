@@ -478,12 +478,36 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
   // отступ — крайние сообщения не прячутся под барами, но в прокрутке заходят.
   const headerRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [headerH, setHeaderH] = useState(0);
   const [composerH, setComposerH] = useState(0);
+
+  // Кнопка «к последнему сообщению»: видима, только когда пользователь ушёл вверх
+  // от конца ленты. Ref-дубль состояния — чтобы в onScroll дёргать setState лишь
+  // на пересечении порога (без ре-рендера на каждый пиксель прокрутки).
+  const [showJump, setShowJump] = useState(false);
+  const showJumpRef = useRef(false);
+
+  // Окно «жёсткого прилипания» к низу. Пока true (от открытия диалога до первого
+  // реального жеста прокрутки пользователя), любая поздняя догрузка медиа доводит
+  // ленту в самый конец — даже если фантомное scroll-событие сбросило pinnedRef.
+  // Это и устраняет «автоскролл не до конца» при асинхронной загрузке картинок/ГС.
+  const stickRef = useRef(true);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
+  }, []);
+
+  // Плавная прокрутка к концу по кнопке. После долёта onScroll сам спрячет кнопку.
+  const jumpToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    pinnedRef.current = true;
+    // Снова приклеиваемся к низу: поздняя догрузка медиа удержит конец в кадре.
+    stickRef.current = true;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    el.scrollTo({ top: el.scrollHeight, behavior: reduce ? 'auto' : 'smooth' });
   }, []);
 
   // Замер высоты шапки/композера (оверлеи) → отступы ленты. ResizeObserver ловит
@@ -507,6 +531,39 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     if (composerRef.current) ro.observe(composerRef.current);
     return () => ro.disconnect();
   }, [isMobile, peerId, scrollToBottom]);
+
+  // «Прилипание к низу» при изменении высоты ленты. Любой рост контента —
+  // догрузка картинки/голосового, перенос строк, шрифты — пока пользователь у
+  // низа (pinnedRef), мгновенно возвращает скролл в самый конец. Это и решает
+  // задачу «открыть на последнем сообщении после полной загрузки медиа» без
+  // setTimeout: первый же кадр и каждый последующий рост держат ленту внизу.
+  // RO наблюдает за внутренней обёрткой (её высота = высоте всех сообщений).
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    const sc = scrollRef.current;
+    if (!content || !sc) return;
+    const ro = new ResizeObserver(() => {
+      if (stickRef.current || pinnedRef.current) sc.scrollTop = sc.scrollHeight;
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [isMobile, peerId]);
+
+  // Первый реальный жест прокрутки (touchmove на тач, wheel на десктопе) отдаёт
+  // управление обычному pinnedRef — окно жёсткого прилипания закрываем.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const release = (): void => {
+      stickRef.current = false;
+    };
+    el.addEventListener('touchmove', release, { passive: true });
+    el.addEventListener('wheel', release, { passive: true });
+    return () => {
+      el.removeEventListener('touchmove', release);
+      el.removeEventListener('wheel', release);
+    };
+  }, [isMobile, peerId]);
 
   // Раз в 30с форсим ре-рендер, чтобы относительное «был в сети …» дотикивало.
   const [, setTick] = useState(0);
@@ -557,9 +614,12 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username]);
 
-  // При открытии диалога — всегда к низу.
+  // При открытии диалога — всегда к низу, кнопку «вниз» гасим.
   useEffect(() => {
     pinnedRef.current = true;
+    stickRef.current = true;
+    showJumpRef.current = false;
+    setShowJump(false);
     scrollToBottom();
   }, [peerId, scrollToBottom]);
 
@@ -747,7 +807,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
   );
 
   const messagesInner = (
-    <>
+    <div ref={contentRef} style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '1 0 auto' }}>
       {thread.hasMore && (
         <div style={{ display: 'grid', placeItems: 'center', paddingBottom: 8 }}>
           <Button size="sm" variant="ghost" disabled={loadingMore} onClick={() => void loadEarlier()}>
@@ -769,17 +829,72 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
           if (pinnedRef.current) scrollToBottom();
         }}
       />
-    </>
+    </div>
+  );
+
+  // Плавающая кнопка «к последнему сообщению» — круглая стеклянная, в стиле
+  // back-кнопки шапки. Всегда смонтирована, переключается через opacity/transform
+  // (плавно, GPU); когда скрыта — не кликается и не в табе.
+  const jumpButton = (
+    <button
+      onClick={jumpToBottom}
+      aria-label="К последнему сообщению"
+      aria-hidden={!showJump}
+      tabIndex={showJump ? 0 : -1}
+      className="dm-jump dm-press"
+      style={{
+        position: 'absolute',
+        right: isMobile ? 14 : 16,
+        // Мобилка: над прозрачным композером (его высота уже включает safe-area).
+        // Десктоп: композер — сосед снизу, поэтому достаточно отступа от низа ленты.
+        bottom: isMobile ? composerH + 12 : 16,
+        width: 44,
+        height: 44,
+        display: 'grid',
+        placeItems: 'center',
+        borderRadius: 999,
+        border: '1px solid var(--glass-bd)',
+        background: 'var(--glass-bg)',
+        backdropFilter: 'blur(var(--glass-blur)) saturate(1.4)',
+        WebkitBackdropFilter: 'blur(var(--glass-blur)) saturate(1.4)',
+        boxShadow: 'var(--shadow-3)',
+        color: 'var(--text-1)',
+        cursor: 'pointer',
+        zIndex: 6,
+        opacity: showJump ? 1 : 0,
+        transform: showJump ? 'translateY(0) scale(1)' : 'translateY(8px) scale(0.9)',
+        pointerEvents: showJump ? 'auto' : 'none',
+      }}
+    >
+      <Icon name="chevronD" size={22} stroke={2.2} />
+    </button>
   );
 
   const composerEl = (
     <Composer peer={peer} eligibility={thread.eligibility} onSend={(body, image, voice) => sendMessage(peer, body, image, voice)} />
   );
 
-  // Общий низ скролл-обработчика: «прилипание» к низу ленты.
+  // Общий обработчик прокрутки: «прилипание» к низу + видимость кнопки «вниз».
+  // Читаем только дешёвые layout-поля; setState кнопки — лишь на пересечении
+  // порога (showJumpRef), чтобы не ре-рендерить на каждый пиксель скролла.
   const onScroll = (e: { currentTarget: HTMLDivElement }): void => {
     const el = e.currentTarget;
-    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // Окно прилипания: держим «у низа», игнорируя фантомные сдвиги от догрузки.
+    if (stickRef.current) {
+      pinnedRef.current = true;
+      if (showJumpRef.current) {
+        showJumpRef.current = false;
+        setShowJump(false);
+      }
+      return;
+    }
+    pinnedRef.current = dist < 80;
+    const shouldShow = dist > 240;
+    if (shouldShow !== showJumpRef.current) {
+      showJumpRef.current = shouldShow;
+      setShowJump(shouldShow);
+    }
   };
 
   // Базовый layout шапки (без фона). Фон/стекло добавляет только десктоп —
@@ -811,13 +926,16 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
             position: 'absolute',
             inset: 0,
             overflowY: 'auto',
+            // Гасим browser scroll-anchoring: иначе при догрузке картинок в
+            // верхних сообщениях браузер «якорит» вид к середине и тянет туда
+            // прокрутку — отсюда был эффект «чат открылся посередине».
+            overflowAnchor: 'none',
             paddingTop: headerH + 6,
             paddingBottom: composerH + 6,
             paddingLeft: 'max(12px, 3%)',
             paddingRight: 'max(12px, 3%)',
             display: 'flex',
             flexDirection: 'column',
-            gap: 2,
             WebkitMaskImage: fadeMask,
             maskImage: fadeMask,
           }}
@@ -825,6 +943,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
           {messagesInner}
         </div>
         <VoiceNowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} topOffset={headerH} />
+        {jumpButton}
         <header ref={headerRef} className="dm-noselect" style={{ ...headerBase, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }}>
           {headerInner}
         </header>
@@ -857,10 +976,11 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px max(12px, 3%)', display: 'flex', flexDirection: 'column', gap: 2 }}
+          style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowAnchor: 'none', padding: '16px max(12px, 3%)', display: 'flex', flexDirection: 'column' }}
         >
           {messagesInner}
         </div>
+        {jumpButton}
       </div>
       {composerEl}
       {lightbox && <Lightbox url={lightbox.url} rect={lightbox.rect} peer={peer} onClose={() => setLightbox(null)} />}
