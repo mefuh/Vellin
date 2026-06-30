@@ -36,6 +36,15 @@ const schema = z.object({
    */
   KINOPOISK_TOKEN: z.string().optional(),
   /**
+   * VAPID-ключи для Web-Push. Генерируются `npx web-push generate-vapid-keys`.
+   * Публичный отдаётся клиенту (PushManager.subscribe), приватный — серверный
+   * секрет. Без пары push-слой выключается (эндпоинты деградируют корректно).
+   * VAPID_SUBJECT — контакт для push-сервисов (mailto: или https URL).
+   */
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().default('mailto:admin@vellin.ru'),
+  /**
    * Email главного администратора сервиса. Любой пользователь с таким email
    * автоматически получает isAdmin=true и доступ к /api/admin/*.
    * Сравнение case-insensitive с trim. Без значения панель недоступна никому.

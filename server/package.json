@@ -1,6 +1,6 @@
 {
   "name": "@vellin/server",
-  "version": "0.19.16",
+  "version": "0.20.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -31,12 +31,14 @@
     "nanoid": "^5.0.9",
     "pino": "^9.5.0",
     "pino-pretty": "^11.3.0",
+    "web-push": "^3.6.7",
     "ws": "^8.18.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
     "@types/node": "^22.10.1",
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.5.13",
     "prisma": "^5.22.0",
     "tsx": "^4.19.2",

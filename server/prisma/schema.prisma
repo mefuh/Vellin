@@ -45,6 +45,8 @@ model User {
   blocksMade             Block[]        @relation("Blocker")
   blockedBy              Block[]        @relation("Blocked")
   notifications          Notification[]
+  pushSubscriptions      PushSubscription[]
+  notificationPreference NotificationPreference?
   favoriteTitles         FavoriteTitle[]
   conversationsA         Conversation[]  @relation("ConvUserA")
   conversationsB         Conversation[]  @relation("ConvUserB")
@@ -117,6 +119,128 @@ model Notification {
   createdAt DateTime  @default(now())
 
   @@index([userId, createdAt])
+}
+
+/// Web-Push подписка одного устройства/браузера пользователя. endpoint —
+/// уникальный URL push-сервиса; p256dh/auth — ключи шифрования полезной
+/// нагрузки. Недействительные (404/410 от push-сервиса) деактивируются.
+model PushSubscription {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint     String   @unique
+  p256dh       String
+  auth         String
+  browser      String   @default("")
+  os           String   @default("")
+  deviceLabel  String   @default("")
+  userAgent    String?
+  active       Boolean  @default(true)
+  failureCount Int      @default(0)
+  createdAt    DateTime @default(now())
+  lastUsedAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([active])
+}
+
+/// Настройки уведомлений пользователя. pushEnabled — главный выключатель;
+/// categoriesJson — карта категория→bool (отсутствие ключа = включено), что
+/// позволяет добавлять новые категории без миграций.
+model NotificationPreference {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pushEnabled    Boolean  @default(true)
+  categoriesJson String   @default("{}")
+  updatedAt      DateTime @updatedAt
+}
+
+/// Редактируемый из админки шаблон push-уведомления по типу. Поля title/body/url
+/// поддерживают переменные вида {{username}}, {{roomName}}, {{message}}, {{movie}}.
+model NotificationTemplate {
+  id                 String   @id @default(cuid())
+  type               String   @unique // PushNotificationType
+  title              String
+  body               String
+  icon               String   @default("/icon-192.png")
+  badge              String   @default("/badge-72.png")
+  image              String?
+  url                String   @default("/")
+  sound              String?
+  ttl                Int      @default(86400)
+  urgency            String   @default("normal") // very-low | low | normal | high
+  requireInteraction Boolean  @default(false)
+  tag                String?
+  silent             Boolean  @default(false)
+  enabled            Boolean  @default(true)
+  updatedAt          DateTime @updatedAt
+  updatedBy          String?
+}
+
+/// Очередь push-отправки. Одна запись = доставка одного payload на ОДНУ
+/// подписку (per-device) — так ретраи чисты и без дублей. Воркер забирает
+/// батч `FOR UPDATE SKIP LOCKED`, отправляет, при временной ошибке переносит
+/// `nextAttemptAt` с экспоненциальным бэкоффом, при исчерпании попыток → dead.
+model PushJob {
+  id             String   @id @default(cuid())
+  userId         String
+  subscriptionId String
+  type           String // PushNotificationType
+  payloadJson    String
+  status         String   @default("pending") // pending | sending | sent | failed | dead
+  attempts       Int      @default(0)
+  maxAttempts    Int      @default(5)
+  nextAttemptAt  DateTime @default(now())
+  /// Ключ дедупликации/коалесинга — повторный enqueue с тем же ключом обновляет
+  /// pending-джоб, а не плодит новый (защита от спама/дублей).
+  dedupeKey      String?
+  createdAt      DateTime @default(now())
+  sentAt         DateTime?
+  lastError      String?
+
+  @@index([status, nextAttemptAt])
+  @@index([dedupeKey])
+  @@index([userId])
+}
+
+/// Журнал доставок push (для статистики/аналитики). Одна запись на попытку
+/// отправки на конкретную подписку с финальным статусом и причиной.
+model PushDelivery {
+  id             String    @id @default(cuid())
+  jobId          String?
+  userId         String
+  subscriptionId String?
+  type           String
+  status         String // sent | failed | expired | rejected | clicked
+  error          String?
+  browser        String?
+  os             String?
+  sentAt         DateTime  @default(now())
+  clickedAt      DateTime?
+
+  @@index([type, sentAt])
+  @@index([userId])
+  @@index([status, sentAt])
+}
+
+/// История массовых push-рассылок из админки (для аналитики/аудита). audienceJson
+/// хранит описание аудитории (all | role | userIds), totalTargets/sent/failed —
+/// итоги постановки в очередь.
+model PushBroadcast {
+  id           String   @id @default(cuid())
+  adminId      String
+  audienceJson String   @default("{}")
+  type         String // PushNotificationType (обычно system | news | marketing)
+  title        String
+  body         String
+  url          String   @default("/")
+  totalTargets Int      @default(0)
+  sent         Int      @default(0)
+  failed       Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 /// Личный диалог ровно между двумя пользователями. Пара канонически

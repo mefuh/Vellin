@@ -56,6 +56,8 @@ interface DmState {
   patchThread: (peerId: string, patch: Partial<ThreadState>) => void;
   prependMessages: (peerId: string, older: DirectMessageDTO[], hasMore: boolean) => void;
   setActivePeer: (peerId: string | null) => void;
+  /** Сообщить серверу фокус (открытый диалог + видимость) — для подавления push. */
+  reportFocus: (conversationId: string | null, visible: boolean) => void;
 
   /** Оптимистично отправить ЛС (текст и/или вложение — изображение/голосовое). */
   send: (
@@ -159,6 +161,7 @@ export const useDmStore = create<DmState>((set, get) => ({
     }),
 
   setActivePeer: (activePeerId) => set({ activePeerId }),
+  reportFocus: (conversationId, visible) => get()._send?.({ t: 'presence_focus', conversationId, visible }),
 
   send: (peer, body, image, voice) => {
     const text = body.trim();

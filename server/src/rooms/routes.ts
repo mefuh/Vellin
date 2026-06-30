@@ -28,6 +28,7 @@ import { requireAuth } from '../auth/middleware.js';
 import { signWsTicket } from '../auth/jwt.js';
 import { areFriends } from '../friends/service.js';
 import { createAndPush } from '../realtime/notify.js';
+import { notifyAsync } from '../push/notificationService.js';
 import {
   authorizeJoin,
   createRoom,
@@ -444,6 +445,16 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       await createAndPush(body.friendId, 'room_invite', principal.userId, {
         roomSlug: `${room.slug}?invite=${token}`,
         roomName: room.name,
+      });
+      // Web-Push приглашённому: имя приглашающего + название/ссылка комнаты.
+      const inviter = await prisma.user.findUnique({
+        where: { id: principal.userId },
+        select: { username: true },
+      });
+      notifyAsync(body.friendId, 'room_invite', {
+        username: inviter?.username ?? 'Кто-то',
+        roomName: room.name,
+        roomSlug: `${room.slug}?invite=${token}`,
       });
       reply.send({ ok: true } satisfies InviteFriendResponse);
     },

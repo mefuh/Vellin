@@ -11,12 +11,16 @@ import { Messages } from './pages/Messages';
 import { PublicProfile } from './pages/PublicProfile';
 import { Room } from './pages/Room';
 import { NotFound } from './pages/NotFound';
+import { NotificationSettings } from './pages/NotificationSettings';
 import { RealtimeProvider } from './realtime/RealtimeProvider';
 import { MobileDock } from './components/MobileDock';
+import { PushBridge } from './push/PushBridge';
+import { PushPrompt } from './push/PushPrompt';
 import { AdminShell } from './pages/admin/AdminShell';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminUsers } from './pages/admin/AdminUsers';
 import { AdminRooms } from './pages/admin/AdminRooms';
+import { AdminPush } from './pages/admin/AdminPush';
 
 function ProtectedRoute({ children }: { children: React.ReactElement }) {
   const token = useAuthStore((s) => s.token);
@@ -113,6 +117,14 @@ export function App() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/settings/notifications"
+          element={
+            <ProtectedRoute>
+              <NotificationSettings />
+            </ProtectedRoute>
+          }
+        />
       <Route
         path="/room/:slug"
         element={
@@ -133,10 +145,13 @@ export function App() {
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="users" element={<AdminUsers />} />
         <Route path="rooms" element={<AdminRooms />} />
+        <Route path="push" element={<AdminPush />} />
       </Route>
       <Route path="*" element={<NotFound />} />
       </Routes>
       <MobileDock />
+      <PushBridge />
+      <PushPrompt />
     </RealtimeProvider>
   );
 }

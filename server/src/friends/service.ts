@@ -12,9 +12,24 @@ import type {
 import { prisma } from '../db/prisma.js';
 import { userHub } from '../realtime/UserHub.js';
 import { createAndPush, pushFriendsChanged, removeNotifications } from '../realtime/notify.js';
+import { notifyAsync } from '../push/notificationService.js';
+import type { PushNotificationType } from '@vellin/shared';
 import { PUBLIC_USER_SELECT, toAppNotifications, toPublicUser } from './mappers.js';
 import { getFavorites } from '../titles/service.js';
 import { canSee, parsePrivacy, type ViewerContext } from '../privacy/privacy.js';
+
+/**
+ * Web-Push о событии дружбы: резолвит имя инициатора (actor) и шлёт push рядом с
+ * колокольчиком. Fire-and-forget — не блокирует основной поток заявки.
+ */
+async function pushFriendActor(
+  recipientId: string,
+  type: PushNotificationType,
+  actorId: string,
+): Promise<void> {
+  const u = await prisma.user.findUnique({ where: { id: actorId }, select: { username: true } });
+  if (u) notifyAsync(recipientId, type, { username: u.username, actorId });
+}
 
 /** Бизнес-ошибка с HTTP-кодом — глобальный errorHandler форматирует по statusCode. */
 export class FriendError extends Error {
@@ -242,6 +257,7 @@ export async function sendRequest(
       data: { status: 'accepted', respondedAt: new Date() },
     });
     await createAndPush(existing.requesterId, 'friend_accepted', requesterId, {});
+    void pushFriendActor(existing.requesterId, 'friend_accepted', requesterId);
     // Встречную заявку (она у нас, отправителя) приняли самим фактом отправки —
     // убираем её уведомление «… хочет добавить вас в друзья».
     await removeNotifications(requesterId, { type: 'friend_request', actorId: existing.requesterId });
@@ -262,6 +278,7 @@ export async function sendRequest(
     data: { requesterId, addresseeId: targetUser.id, status: 'pending' },
   });
   await createAndPush(targetUser.id, 'friend_request', requesterId, {});
+  void pushFriendActor(targetUser.id, 'friend_request', requesterId);
   pushFriendsChanged(targetUser.id);
   pushFriendsChanged(requesterId);
   return {
@@ -290,6 +307,7 @@ export async function respondRequest(
       data: { status: 'accepted', respondedAt: new Date() },
     });
     await createAndPush(fr.requesterId, 'friend_accepted', userId, {});
+    void pushFriendActor(fr.requesterId, 'friend_accepted', userId);
     // Заявка отыграна — убираем уведомление «… хочет добавить вас в друзья».
     await removeNotifications(userId, { type: 'friend_request', actorId: fr.requesterId });
     pushFriendsChanged(fr.requesterId);
