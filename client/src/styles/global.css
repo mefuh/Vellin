@@ -248,6 +248,20 @@ input[type='date']::-webkit-datetime-edit {
   transform: scale(0.985);
 }
 
+/* Кнопка «к последнему сообщению»: плавно появляется/исчезает (opacity + transform
+   на GPU). Движение задаётся инлайн (translateY/scale), здесь — только кривые. */
+.dm-jump {
+  transition:
+    opacity 0.2s ease,
+    transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dm-jump {
+    transition: opacity 0.2s ease;
+  }
+}
+
 /* Нажимаемые кнопки: тактильный отклик (scale на :active). */
 .dm-press {
   transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
