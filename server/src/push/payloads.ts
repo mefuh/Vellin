@@ -33,11 +33,12 @@ export function buildPayload(
  * Текст превью для push о ЛС: текст сообщения, либо «📷 Фотография» / «🎤
  * Голосовое сообщение» для вложений без текста.
  */
-export function dmPushPreview(body: string, hasImage: boolean, hasVoice: boolean): string {
+export function dmPushPreview(body: string, hasImage: boolean, hasVoice: boolean, hasVideo = false): string {
   const text = body.trim();
   if (text) return text.slice(0, 140);
   if (hasImage) return '📷 Фотография';
   if (hasVoice) return '🎤 Голосовое сообщение';
+  if (hasVideo) return '🎥 Видеосообщение';
   return 'Новое сообщение';
 }
 

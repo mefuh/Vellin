@@ -287,9 +287,19 @@ model DirectMessage {
   voicePeaksJson String?
   /// Когда получатель впервые прослушал голосовое (для индикатора «прослушано»). Null — нет.
   voicePlayedAt  DateTime?
+  /// Видеосообщение («кружок»): готовый mp4 (/api/uploads/dm-video/...). Null — не видео
+  /// или ещё транскодируется (тогда videoStatus='processing').
+  videoUrl       String?
+  /// Постер-кадр (jpg) видеосообщения — первый кадр для бабла.
+  videoThumbUrl  String?
+  /// Длительность видеосообщения, сек.
+  videoDurationSec Float?
+  /// Стадия: 'processing' | 'ready' | 'failed'. Null — не видеосообщение.
+  videoStatus    String?
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])
+  @@index([videoStatus])
 }
 
 /// Серверная запись о входе (устройство/браузер). JWT пользователя несёт

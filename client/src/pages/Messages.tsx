@@ -7,6 +7,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import type { DmConversation, PublicUser } from '@vellin/shared';
 import { Avatar, Button, Icon, type IconName } from '../shared';
@@ -21,8 +22,14 @@ import { lastSeenLabel } from '../utils/lastSeen';
 import { AppHeader } from '../components/AppHeader';
 import { VoicePlayer } from '../components/messages/VoicePlayer';
 import { VoiceNowPlaying } from '../components/messages/VoiceNowPlaying';
+import { VideoNoteNowPlaying } from '../components/messages/video/VideoNoteNowPlaying';
 import { useVoicePlayerStore } from '../stores/voicePlayerStore';
+import { useVideoNotePlayerStore } from '../stores/videoNotePlayerStore';
 import { useVoiceRecorder, type RecordResult } from '../hooks/useVoiceRecorder';
+import { useVideoRecorder } from '../hooks/useVideoRecorder';
+import { VideoMessageBubble } from '../components/messages/video/VideoMessageBubble';
+import { VideoRecordOverlay } from '../components/messages/video/VideoRecordOverlay';
+import { CameraPermissionScreen } from '../components/messages/video/CameraPermissionScreen';
 import { computeVoiceMeta } from '../utils/audioPeaks';
 import {
   ACCENT_GRAD,
@@ -666,6 +673,28 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     };
   }, [peerId, myId]);
 
+  // Авто-следующий видео-«кружок»: после полного проигрывания стартует следующий
+  // готовый кружок по порядку (как цепочка голосовых). Резолвер читает свежий тред.
+  useEffect(() => {
+    if (!peerId) return;
+    useVideoNotePlayerStore.getState().setNextResolver((currentId) => {
+      const t = useDmStore.getState().threads[peerId];
+      if (!t) return null;
+      const idx = t.messages.findIndex((m) => m.id === currentId);
+      if (idx < 0) return null;
+      for (let i = idx + 1; i < t.messages.length; i++) {
+        const m = t.messages[i];
+        if (m.videoUrl && m.videoStatus === 'ready') return m.id;
+      }
+      return null;
+    });
+    return () => {
+      const cur = useVideoNotePlayerStore.getState();
+      cur.setNextResolver(null);
+      cur.stop();
+    };
+  }, [peerId]);
+
   // При появлении/скрытии клавиатуры (resize visual viewport) держим ленту у
   // низа, чтобы последнее сообщение не пряталось за поднявшимся композером.
   useEffect(() => {
@@ -943,6 +972,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
           {messagesInner}
         </div>
         <VoiceNowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} topOffset={headerH} />
+        <VideoNoteNowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} topOffset={headerH} />
         {jumpButton}
         <header ref={headerRef} className="dm-noselect" style={{ ...headerBase, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }}>
           {headerInner}
@@ -973,6 +1003,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
       </header>
       <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <VoiceNowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} />
+        <VideoNoteNowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} />
         <div
           ref={scrollRef}
           onScroll={onScroll}
@@ -1161,6 +1192,10 @@ function MessageList({
                 }}
               >
               {(() => {
+                // Видео-«кружок» — самодостаточный круглый бабл (без прямоугольной подложки).
+                if (m.videoStatus) {
+                  return <VideoMessageBubble m={m} clock={fmtTime(m.createdAt)} status={status} />;
+                }
                 const isImage = !!m.imageUrl;
                 const isVoice = !!m.voiceUrl;
                 const bareImage = isImage && !m.body;
@@ -1327,6 +1362,10 @@ const ACTION_POP = 'dmActionPop 0.18s cubic-bezier(0.22, 1, 0.36, 1) both';
 
 /** Минимальная длительность записи, ниже — считаем случайным тапом. */
 const MIN_VOICE_MS = 700;
+/** Минимальная длительность видео-«кружка». */
+const MIN_VIDEO_MS = 600;
+/** Порог удержания: короче — это тап (переключение режима), дольше — запись. */
+const HOLD_START_MS = 160;
 /** На сколько нужно увести палец влево, чтобы отменить запись. */
 const CANCEL_SWIPE_PX = 70;
 /** На сколько нужно увести палец вверх, чтобы зафиксировать запись (hands-free). */
@@ -1550,6 +1589,160 @@ function Composer({
     setLockProgress(0);
     armCancel(false);
     await cancelRecord();
+  };
+
+  // ── Видеосообщения («кружки») ────────────────────────────────────────────
+  const sendVideoNote = useDmStore((s) => s.sendVideoNote);
+  const videoRecorder = useVideoRecorder();
+  const [recordMode, setRecordMode] = useState<'voice' | 'video'>('voice');
+  const [videoOverlay, setVideoOverlay] = useState(false);
+  const [videoLocked, setVideoLocked] = useState(false);
+  const [videoLockProgress, setVideoLockProgress] = useState(0);
+  const [showCamPerm, setShowCamPerm] = useState(false);
+  const startedRef = useRef(false);
+  const videoLockedRef = useRef(false);
+  const modeAtPressRef = useRef<'voice' | 'video'>('voice');
+  const toggleMode = (): void => setRecordMode((m) => (m === 'voice' ? 'video' : 'voice'));
+
+  const durationSecOf = (ms: number): number => Math.max(1, Math.round(ms / 100) / 10);
+  const resetVideoState = (): void => {
+    videoLockedRef.current = false;
+    setVideoLocked(false);
+    setVideoLockProgress(0);
+    setVideoOverlay(false);
+    armCancel(false);
+  };
+
+  // Отпускание без фиксации → стоп и отправка.
+  const videoStopAndSend = async (): Promise<void> => {
+    resetVideoState();
+    const res = await videoRecorder.stop();
+    if (!res) return;
+    if (res.durationMs < MIN_VIDEO_MS) {
+      setUploadErr('Слишком коротко — удерживайте дольше');
+      return;
+    }
+    setUploadErr(null);
+    sendVideoNote(peer, res.blob, res.mimeType, durationSecOf(res.durationMs));
+  };
+  const videoCancelRec = async (): Promise<void> => {
+    resetVideoState();
+    await videoRecorder.cancel();
+  };
+
+  const onVideoMove = (clientX: number, clientY: number): void => {
+    if (!holdRef.current.active) return;
+    const dy = holdRef.current.startY - clientY;
+    const dx = holdRef.current.startX - clientX;
+    setVideoLockProgress(Math.max(0, Math.min(1, dy / LOCK_LIFT_PX)));
+    armCancel(dy < LOCK_LIFT_PX * 0.5 && dx > CANCEL_SWIPE_PX);
+  };
+  const onVideoUp = async (clientX: number, clientY: number): Promise<void> => {
+    if (!holdRef.current.active) return;
+    holdRef.current.active = false;
+    const dy = holdRef.current.startY - clientY;
+    const dx = holdRef.current.startX - clientX;
+    setVideoLockProgress(0);
+    // Свайп вверх → фиксация (hands-free): запись продолжается, палец свободен.
+    if (dy >= LOCK_LIFT_PX) {
+      videoLockedRef.current = true;
+      setVideoLocked(true);
+      armCancel(false);
+      return;
+    }
+    if (dx > CANCEL_SWIPE_PX) {
+      armCancel(false);
+      await videoCancelRec();
+      return;
+    }
+    armCancel(false);
+    await videoStopAndSend();
+  };
+
+  async function beginRecording(mode: 'voice' | 'video'): Promise<void> {
+    startedRef.current = true;
+    if (mode === 'voice') {
+      const ok = await recorder.start();
+      if (!ok) {
+        startedRef.current = false;
+        holdRef.current.active = false;
+      }
+    } else {
+      const ok = await videoRecorder.start('user');
+      if (ok) {
+        setVideoOverlay(true);
+      } else {
+        startedRef.current = false;
+        holdRef.current.active = false;
+        if (videoRecorder.permission === 'denied' || videoRecorder.permission === 'unsupported') {
+          setShowCamPerm(true);
+        }
+      }
+    }
+  }
+
+  /**
+   * Единый жест кнопки записи: КОРОТКИЙ тап — переключение режима (микрофон ⇄
+   * видео, morph), УДЕРЖАНИЕ — запись текущего режима. Запись стартует не сразу,
+   * а через HOLD_START_MS, поэтому быстрый тап не пишет, а переключает режим.
+   */
+  const onRecordDown = (e: ReactPointerEvent): void => {
+    if (voiceBusy) return;
+    e.preventDefault();
+    const pid = e.pointerId;
+    holdRef.current = { startX: e.clientX, startY: e.clientY, active: true };
+    startedRef.current = false;
+    lockedRef.current = false;
+    setLocked(false);
+    setLockProgress(0);
+    armCancel(false);
+    const mode = recordMode;
+    modeAtPressRef.current = mode;
+
+    let holdTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      holdTimer = null;
+      void beginRecording(mode);
+    }, HOLD_START_MS);
+
+    const move = (ev: PointerEvent): void => {
+      if (ev.pointerId !== pid || !startedRef.current) return;
+      if (modeAtPressRef.current === 'voice') onMicMove(ev.clientX, ev.clientY);
+      else onVideoMove(ev.clientX, ev.clientY);
+    };
+    const up = (ev: PointerEvent): void => {
+      if (ev.pointerId !== pid) return;
+      detachWin();
+      if (holdTimer) {
+        // Отпустили раньше порога удержания — это ТАП: переключаем режим.
+        clearTimeout(holdTimer);
+        holdTimer = null;
+        holdRef.current.active = false;
+        toggleMode();
+        return;
+      }
+      if (modeAtPressRef.current === 'voice') void onMicUp(ev.clientX, ev.clientY);
+      else void onVideoUp(ev.clientX, ev.clientY);
+    };
+    const cancelH = (ev: PointerEvent): void => {
+      if (ev.pointerId !== pid) return;
+      detachWin();
+      if (holdTimer) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+        holdRef.current.active = false;
+        return;
+      }
+      if (modeAtPressRef.current === 'voice') void onMicCancel();
+      else void videoCancelRec();
+    };
+    function detachWin(): void {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancelH);
+    }
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancelH);
   };
 
   useEffect(() => {
@@ -1804,13 +1997,72 @@ function Composer({
             canSend={canSend}
             isMobile={isMobile}
             voiceBusy={voiceBusy}
+            recordMode={recordMode}
             onSend={submit}
-            onMicDown={onMicDown}
+            onRecordDown={onRecordDown}
             onDesktopRecord={() => void startClickRecord()}
           />
         )}
       </div>
       {recorder.error && <span style={{ fontSize: 12, color: 'var(--accent-hi)' }}>{recorder.error}</span>}
+      {(videoOverlay || videoRecorder.recording) && (
+        <VideoRecordOverlay stream={videoRecorder.stream} cancelArmed={cancelArmed} visible={videoOverlay} />
+      )}
+      {/* Управление записью видео — ТЕМ ЖЕ UI, что у голосовых (полоса + кнопки),
+          порталом поверх blur-оверлея. Удержание: полоса + микрофон-кнопка (визуал,
+          жест ведёт кнопка композера снизу) + аффорданс фиксации. Locked (hands-free):
+          «Отмена» + «Отправить» — отправка сразу, без промежуточного меню. */}
+      {videoRecorder.recording &&
+        createPortal(
+          <div
+            style={{
+              position: 'fixed',
+              left: 14,
+              right: 14,
+              bottom: 'calc(env(safe-area-inset-bottom, 0px) + 30px)',
+              zIndex: 1001,
+              display: 'flex',
+              alignItems: 'flex-end',
+              gap: 8,
+              pointerEvents: 'none',
+            }}
+          >
+            <RecordingBar elapsedMs={videoRecorder.elapsedMs} cancelArmed={cancelArmed} hold={isMobile && !videoLocked} getLevel={videoRecorder.getLevel} />
+            {isMobile && !videoLocked ? (
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                <LockHint progress={videoLockProgress} />
+                <MicButton recording cancelArmed={cancelArmed} busy={false} lift={videoLockProgress} recordMode="video" onPointerDown={() => {}} />
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, pointerEvents: 'auto' }}>
+                <IconButton icon="trash" label="Отменить запись" onClick={() => void videoCancelRec()} />
+                <Button
+                  variant="primary"
+                  size="md"
+                  icon="send"
+                  aria-label="Отправить видеосообщение"
+                  onClick={() => void videoStopAndSend()}
+                  className="dm-press dm-anim"
+                  style={{ width: 44, height: 44, padding: 0, flexShrink: 0, borderRadius: 999, background: ACCENT_GRAD_BTN, boxShadow: BTN_GLOW, animation: ACTION_POP }}
+                >
+                  {''}
+                </Button>
+              </div>
+            )}
+          </div>,
+          document.body,
+        )}
+      {showCamPerm && (
+        <CameraPermissionScreen
+          onClose={() => setShowCamPerm(false)}
+          onRetry={() => {
+            setShowCamPerm(false);
+            void videoRecorder.start('user').then((ok) => {
+              if (ok) setVideoOverlay(true);
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1986,15 +2238,17 @@ function ComposerAction({
   canSend,
   isMobile,
   voiceBusy,
+  recordMode,
   onSend,
-  onMicDown,
+  onRecordDown,
   onDesktopRecord,
 }: {
   canSend: boolean;
   isMobile: boolean;
   voiceBusy: boolean;
+  recordMode: 'voice' | 'video';
   onSend: () => void;
-  onMicDown: (e: ReactPointerEvent) => void;
+  onRecordDown: (e: ReactPointerEvent) => void;
   onDesktopRecord: () => void;
 }) {
   const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -2017,7 +2271,7 @@ function ComposerAction({
     <div style={{ position: 'relative', width: 40, height: 40, flexShrink: 0 }}>
       <div style={layer(!canSend)}>
         {isMobile ? (
-          <MicButton recording={false} cancelArmed={false} busy={voiceBusy} onPointerDown={onMicDown} />
+          <MicButton recording={false} cancelArmed={false} busy={voiceBusy} recordMode={recordMode} onPointerDown={onRecordDown} />
         ) : (
           <IconButton icon="mic" label="Записать голосовое" busy={voiceBusy} onClick={onDesktopRecord} />
         )}
@@ -2039,12 +2293,16 @@ function ComposerAction({
   );
 }
 
-/** Кнопка микрофона: зажать-и-держать для записи, свайп влево — отмена. */
+/**
+ * Кнопка записи: зажать-и-держать для записи текущего режима, короткий тап —
+ * переключение микрофон ⇄ видео (morph). Свайп влево при удержании — отмена.
+ */
 function MicButton({
   recording,
   cancelArmed,
   busy,
   lift = 0,
+  recordMode = 'voice',
   onPointerDown,
 }: {
   recording: boolean;
@@ -2052,16 +2310,31 @@ function MicButton({
   busy: boolean;
   /** Подъём кнопки за пальцем при протяжке к замку (0..1). */
   lift?: number;
+  recordMode?: 'voice' | 'video';
   onPointerDown: (e: ReactPointerEvent) => void;
 }) {
+  const isVideo = recordMode === 'video';
+  // Слой иконки: crossfade + лёгкий rotate/scale — «живой» morph микрофон⇄видео.
+  const iconLayer = (active: boolean): CSSProperties => ({
+    position: 'absolute',
+    inset: 0,
+    display: 'grid',
+    placeItems: 'center',
+    opacity: active ? 1 : 0,
+    transform: active ? 'rotate(0deg) scale(1)' : 'rotate(-40deg) scale(0.6)',
+    transition: 'opacity .2s ease, transform .28s cubic-bezier(0.34, 1.56, 0.64, 1)',
+  });
   return (
     <button
       onPointerDown={onPointerDown}
       onContextMenu={(e) => e.preventDefault()}
       disabled={busy}
-      aria-label={recording ? 'Запись — отпустите, чтобы отправить' : 'Записать голосовое'}
-      title="Удерживайте, чтобы записать"
+      aria-label={
+        recording ? 'Запись — отпустите, чтобы отправить' : isVideo ? 'Видеосообщение (тап — переключить)' : 'Голосовое (тап — переключить)'
+      }
+      title="Удерживайте, чтобы записать · тап — сменить режим"
       style={{
+        position: 'relative',
         flexShrink: 0,
         width: 40,
         height: 40,
@@ -2070,8 +2343,6 @@ function MicButton({
         border: 'none',
         background: cancelArmed ? '#ff4d4f' : ACCENT_GRAD_BTN,
         color: '#fff',
-        display: 'grid',
-        placeItems: 'center',
         cursor: busy ? 'default' : 'pointer',
         transform: `translateY(${-lift * 12}px) scale(${recording ? 1.08 : 1})`,
         transition: 'transform .12s ease-out, background .15s ease',
@@ -2083,7 +2354,20 @@ function MicButton({
         opacity: busy ? 0.6 : 1,
       }}
     >
-      <Icon name={cancelArmed ? 'trash' : 'mic'} size={20} />
+      {cancelArmed ? (
+        <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+          <Icon name="trash" size={20} />
+        </span>
+      ) : (
+        <>
+          <span style={iconLayer(!isVideo)}>
+            <Icon name="mic" size={20} />
+          </span>
+          <span style={iconLayer(isVideo)}>
+            <Icon name="video" size={20} />
+          </span>
+        </>
+      )}
     </button>
   );
 }

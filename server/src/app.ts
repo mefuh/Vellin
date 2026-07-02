@@ -23,7 +23,10 @@ import { seedDefaultTemplates } from './push/templates.js';
 import { startPushWorker } from './push/worker.js';
 import { ensureUploadsDir } from './auth/avatar.js';
 import { ensureDmImagesDir } from './dm/image.js';
-import { ensureDmVoiceDir, MAX_DM_VOICE_BYTES } from './dm/voice.js';
+import { ensureDmVoiceDir } from './dm/voice.js';
+import { ensureDmVideoDir, MAX_DM_VIDEO_BYTES } from './dm/videoNote.js';
+import { setVideoNoteBroadcaster, startVideoTranscodeWorker } from './dm/videoTranscode.js';
+import { broadcastVideoNoteUpdate } from './dm/realtime.js';
 import { registerWebSocket } from './ws/server.js';
 import { userHub } from './realtime/UserHub.js';
 import { getAcceptedFriendIds } from './friends/service.js';
@@ -64,10 +67,10 @@ export async function buildApp(): Promise<FastifyInstance> {
     options: { maxPayload: 64 * 1024 },
   });
   await app.register(multipart, {
-    // Глобальный потолок — максимум из всех загрузок (голосовое — 25 МБ);
+    // Глобальный потолок — максимум из всех загрузок (видеосообщение — 128 МБ);
     // конкретные лимиты enforce'ятся в маршрутах (аватар — 5 МБ, картинка ЛС —
-    // 10 МБ, голосовое — 25 МБ) через req.file({ limits }).
-    limits: { fileSize: MAX_DM_VOICE_BYTES, files: 1 },
+    // 10 МБ, голосовое — 25 МБ, видео — 128 МБ) через req.file({ limits }).
+    limits: { fileSize: MAX_DM_VIDEO_BYTES, files: 1 },
   });
 
   // Статика загруженных файлов (аватары). Отдаётся по /api/uploads/... —
@@ -76,6 +79,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await ensureUploadsDir();
   await ensureDmImagesDir();
   await ensureDmVoiceDir();
+  await ensureDmVideoDir();
   await app.register(fastifyStatic, {
     root: path.resolve(env.UPLOADS_DIR),
     prefix: '/api/uploads/',
@@ -105,7 +109,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.code(500).send({ error: 'InternalServerError', message: 'Internal error', statusCode: 500 });
   });
 
-  app.get('/health', async () => ({ ok: true, version: '0.20.0' }));
+  app.get('/health', async () => ({ ok: true, version: '0.21.0' }));
 
   await app.register(
     async (api) => {
@@ -150,6 +154,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   void seedDefaultTemplates()
     .then(() => startPushWorker())
     .catch((err) => logger.error({ err }, 'push: init failed'));
+
+  // Транскод видеосообщений: рассыльщик обновления (DI, чтобы не было цикла
+  // импортов) + восстановление незавершённых задач после рестарта.
+  setVideoNoteBroadcaster(broadcastVideoNoteUpdate);
+  startVideoTranscodeWorker();
 
   return app;
 }

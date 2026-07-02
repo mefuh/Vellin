@@ -331,6 +331,19 @@ input[type='date']::-webkit-datetime-edit {
   }
 }
 
+/* Пульсация красной точки записи видео. */
+@keyframes dmRecDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.82); }
+}
+/* Крутящийся индикатор загрузки/обработки видео (на GPU). */
+@keyframes dmSpin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dm-rec-dot { animation: none !important; }
+}
+
 /* Бегущий блик скелетона загрузки (constant motion → linear).
    Двигаем оверлей через transform (GPU), а не background-position (paint). */
 @keyframes dmSkeleton {

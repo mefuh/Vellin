@@ -120,6 +120,8 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         voiceUrl?: string;
         voiceDurationSec?: number;
         voicePeaks?: number[];
+        videoUploadId?: string;
+        videoDurationSec?: number;
         messageId?: string;
         conversationId?: string | null;
         visible?: boolean;
@@ -155,7 +157,14 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
                 peaks: Array.isArray(m.voicePeaks) ? m.voicePeaks : [],
               }
             : undefined;
-        void handleDmSend(principal.userId, m.toUserId, m.body, m.nonce, image, voice);
+        const video =
+          typeof m.videoUploadId === 'string'
+            ? {
+                uploadId: m.videoUploadId,
+                durationSec: typeof m.videoDurationSec === 'number' ? m.videoDurationSec : 0,
+              }
+            : undefined;
+        void handleDmSend(principal.userId, m.toUserId, m.body, m.nonce, image, voice, video);
       } else if (m.t === 'dm_typing' && typeof m.toUserId === 'string' && typeof m.typing === 'boolean') {
         handleDmTyping(principal.userId, m.toUserId, m.typing, m.kind === 'voice' ? 'voice' : 'text');
       } else if (m.t === 'dm_read' && typeof m.peerId === 'string') {

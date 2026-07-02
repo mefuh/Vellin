@@ -71,6 +71,10 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
           }
           break;
         }
+        case 'dm_message_updated':
+          // Видео-«кружок» дотранскодирован (processing→ready) — подменяем бабл.
+          useDmStore.getState().applyMessageUpdate(msg.message, msg.peer);
+          break;
         case 'dm_read':
           useDmStore.getState().applyRead(msg, myId);
           break;
