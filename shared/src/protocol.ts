@@ -410,6 +410,7 @@ export type UserS2C =
   | UserS2CRoomVideo
   | UserS2CFriendsChanged
   | UserS2CDmMessage
+  | UserS2CDmMessageUpdated
   | UserS2CDmRead
   | UserS2CDmTyping
   | UserS2CDmVoicePlayed
@@ -473,6 +474,18 @@ export interface UserS2CDmMessage {
   peer: PublicUser;
   unreadTotal: number;
 }
+/**
+ * Сообщение изменилось на сервере (без создания нового): используется для
+ * видео-«кружков» — по завершении транскода бабл переключается processing→ready
+ * (приходит готовый videoUrl/thumb/длительность). Клиент находит по id и заменяет.
+ */
+export interface UserS2CDmMessageUpdated {
+  t: 'dm_message_updated';
+  message: DirectMessageDTO;
+  /** Собеседник в этом диалоге глазами получателя (для вставки, если треда нет). */
+  peer: PublicUser;
+}
+
 /**
  * Переписку прочитали. Шлётся: (1) самому прочитавшему на остальные его
  * соединения — сбросить непрочитанные и бейдж (`unreadTotal` задан); (2)
@@ -565,6 +578,13 @@ export interface UserC2SDmSend {
   voiceDurationSec?: number;
   /** Амплитудная волна голосового (целые 0..100), считается клиентом при записи. */
   voicePeaks?: number[];
+  /**
+   * Идентификатор заранее загруженного сырого видео (через POST /dm/video-note).
+   * Сервер создаёт сообщение в статусе processing и транскодирует в mp4 в фоне.
+   */
+  videoUploadId?: string;
+  /** Длительность видеосообщения, сек (замер клиента при записи). */
+  videoDurationSec?: number;
   /** Клиентский идентификатор для сопоставления эха (оптимистичная отправка). */
   nonce: string;
 }

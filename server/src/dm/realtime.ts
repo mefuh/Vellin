@@ -2,7 +2,7 @@ import type { PublicUser } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 import { userHub } from '../realtime/UserHub.js';
 import { removeNotifications } from '../realtime/notify.js';
-import { toAppNotification } from '../friends/mappers.js';
+import { toAppNotification, PUBLIC_USER_SELECT, toPublicUser } from '../friends/mappers.js';
 import { logger } from '../utils/logger.js';
 import { notifyAsync } from '../push/notificationService.js';
 import { dmPushPreview } from '../push/payloads.js';
@@ -15,7 +15,11 @@ import {
   unreadTotal,
   type SendImage,
   type SendVoice,
+  type SendVideoNote,
+  type VideoNoteBroadcast,
 } from './service.js';
+import { promoteRawToMessage, deleteRawUpload } from './videoNote.js';
+import { enqueueTranscode } from './videoTranscode.js';
 
 function parseDmCount(json: string): number {
   try {
@@ -58,6 +62,22 @@ async function pushDmNotification(
   userHub.pushTo(recipientId, { t: 'notification', notification, unreadCount });
 }
 
+/**
+ * Рассылка обновления видеосообщения обоим участникам (по завершении транскода):
+ * подменяет processing→ready в баблах. Внедряется в транскод-воркер через DI.
+ */
+export async function broadcastVideoNoteUpdate(b: VideoNoteBroadcast): Promise<void> {
+  const [ua, ub] = await Promise.all([
+    prisma.user.findUnique({ where: { id: b.userAId }, select: PUBLIC_USER_SELECT }),
+    prisma.user.findUnique({ where: { id: b.userBId }, select: PUBLIC_USER_SELECT }),
+  ]);
+  if (!ua || !ub) return;
+  const peerA = toPublicUser(ub); // собеседник для userA
+  const peerB = toPublicUser(ua); // собеседник для userB
+  userHub.pushTo(b.userAId, { t: 'dm_message_updated', message: b.message, peer: peerA });
+  userHub.pushTo(b.userBId, { t: 'dm_message_updated', message: b.message, peer: peerB });
+}
+
 /** Обработать отправку ЛС: персист + доставка обоим + колокольчик получателю. */
 export async function handleDmSend(
   senderId: string,
@@ -66,9 +86,16 @@ export async function handleDmSend(
   nonce: string,
   image?: SendImage,
   voice?: SendVoice,
+  video?: SendVideoNote,
 ): Promise<void> {
   try {
-    const res = await sendMessage(senderId, toUserId, body, image, voice);
+    const res = await sendMessage(senderId, toUserId, body, image, voice, video);
+    // Видео: привязать сырой файл к сообщению и поставить в очередь транскода.
+    if (video) {
+      const ok = await promoteRawToMessage(video.uploadId, res.message.id);
+      if (ok) enqueueTranscode(res.message.id);
+      else await deleteRawUpload(video.uploadId).catch(() => {});
+    }
     const [recipUnread, senderUnread] = await Promise.all([
       unreadTotal(toUserId),
       unreadTotal(senderId),
@@ -87,14 +114,16 @@ export async function handleDmSend(
       peer: res.recipient,
       unreadTotal: senderUnread,
     });
-    const preview = body.trim() || (image ? '📷 Фото' : voice ? '🎤 Голосовое сообщение' : '');
+    const preview =
+      body.trim() ||
+      (image ? '📷 Фото' : voice ? '🎤 Голосовое сообщение' : video ? '🎥 Видеосообщение' : '');
     await pushDmNotification(toUserId, res.sender, res.conversationId, preview);
     // Web-Push получателю — но НЕ если он прямо сейчас читает этот же диалог
     // (видимая вкладка + открыт именно он). Прочее гейтится настройками внутри.
     if (!userHub.isViewingConversation(toUserId, res.conversationId)) {
       notifyAsync(toUserId, 'direct_message', {
         username: res.sender.username,
-        message: dmPushPreview(body, !!image, !!voice),
+        message: dmPushPreview(body, !!image, !!voice, !!video),
         conversationId: res.conversationId,
       });
     }

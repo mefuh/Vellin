@@ -40,13 +40,21 @@ function parseVoicePeaks(json: string | null): number[] | undefined {
   }
 }
 
-function toDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
+export function dmRowToDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
   return {
     id: m.id,
     conversationId: m.conversationId,
     senderId: m.senderId,
     body: m.body,
     createdAt: m.createdAt.toISOString(),
+    ...(m.videoStatus
+      ? {
+          videoStatus: m.videoStatus as 'processing' | 'ready' | 'failed',
+          ...(m.videoUrl ? { videoUrl: m.videoUrl } : {}),
+          ...(m.videoThumbUrl ? { videoThumbUrl: m.videoThumbUrl } : {}),
+          ...(m.videoDurationSec != null ? { videoDurationSec: m.videoDurationSec } : {}),
+        }
+      : {}),
     ...(m.imageUrl
       ? {
           imageUrl: m.imageUrl,
@@ -179,6 +187,12 @@ export interface SendVoice {
   peaks: number[];
 }
 
+/** Видеосообщение при отправке: сырое видео уже загружено (uploadId), длительность. */
+export interface SendVideoNote {
+  uploadId: string;
+  durationSec: number;
+}
+
 /**
  * Сохранить личное сообщение от `meId` к `peerId` (текст и/или вложение —
  * изображение или голосовое). Бросает {@link DmError}, если писать нельзя.
@@ -191,9 +205,10 @@ export async function sendMessage(
   rawBody: string,
   image?: SendImage,
   voice?: SendVoice,
+  video?: SendVideoNote,
 ): Promise<SendResult> {
   const body = rawBody.trim();
-  if (!body && !image && !voice) throw new DmError('ok', 'Пустое сообщение');
+  if (!body && !image && !voice && !video) throw new DmError('ok', 'Пустое сообщение');
   if (body.length > MAX_DM_BODY) throw new DmError('ok', 'Сообщение слишком длинное');
   if (image && !isDmImageUrl(image.url)) throw new DmError('ok', 'Некорректное изображение');
   if (voice && !isDmVoiceUrl(voice.url)) throw new DmError('ok', 'Некорректное голосовое');
@@ -226,6 +241,9 @@ export async function sendMessage(
             voicePeaksJson: JSON.stringify(sanitizeVoicePeaks(voice.peaks) ?? []),
           }
         : {}),
+      ...(video
+        ? { videoStatus: 'processing', videoDurationSec: video.durationSec }
+        : {}),
     },
   });
   // lastMessageAt + отправитель «прочитал» собственное сообщение.
@@ -237,10 +255,62 @@ export async function sendMessage(
   const me = await prisma.user.findUnique({ where: { id: meId }, select: PUBLIC_USER_SELECT });
   return {
     conversationId: conv.id,
-    message: toDto(message),
+    message: dmRowToDto(message),
     sender: me ? toPublicUser(me) : { id: meId, username: '', avatarSeed: '', avatarUrl: null, kind: 'user' },
     recipient: { id: peer.id, username: peer.username, avatarSeed: peer.avatarSeed, avatarUrl: peer.avatarUrl, kind: 'user' },
   };
+}
+
+/** Данные для рассылки обновления видеосообщения обоим участникам. */
+export interface VideoNoteBroadcast {
+  message: DirectMessageDTO;
+  userAId: string;
+  userBId: string;
+}
+
+async function loadForBroadcast(messageId: string): Promise<VideoNoteBroadcast | null> {
+  const m = await prisma.directMessage.findUnique({
+    where: { id: messageId },
+    include: { conversation: { select: { userAId: true, userBId: true } } },
+  });
+  if (!m) return null;
+  return { message: dmRowToDto(m), userAId: m.conversation.userAId, userBId: m.conversation.userBId };
+}
+
+/** Отметить видеосообщение готовым (после транскода) и вернуть данные для рассылки. */
+export async function markVideoReady(
+  messageId: string,
+  res: { videoUrl: string; thumbUrl: string; durationSec: number },
+): Promise<VideoNoteBroadcast | null> {
+  await prisma.directMessage
+    .update({
+      where: { id: messageId },
+      data: {
+        videoUrl: res.videoUrl,
+        videoThumbUrl: res.thumbUrl,
+        videoDurationSec: res.durationSec > 0 ? res.durationSec : undefined,
+        videoStatus: 'ready',
+      },
+    })
+    .catch(() => {});
+  return loadForBroadcast(messageId);
+}
+
+/** Отметить видеосообщение проваленным (транскод не удался). */
+export async function markVideoFailed(messageId: string): Promise<VideoNoteBroadcast | null> {
+  await prisma.directMessage
+    .update({ where: { id: messageId }, data: { videoStatus: 'failed' } })
+    .catch(() => {});
+  return loadForBroadcast(messageId);
+}
+
+/** id всех сообщений в статусе processing (для восстановления транскода на старте). */
+export async function processingVideoMessageIds(): Promise<string[]> {
+  const rows = await prisma.directMessage.findMany({
+    where: { videoStatus: 'processing' },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
 }
 
 export interface MarkReadResult {
@@ -433,7 +503,7 @@ export async function getThreadByUsername(
   return {
     conversationId: conv.id,
     peer,
-    messages: page.map((m) => toDto(m)),
+    messages: page.map((m) => dmRowToDto(m)),
     hasMore,
     peerLastReadAt: peerRead ? peerRead.toISOString() : null,
     online,

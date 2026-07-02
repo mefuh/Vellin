@@ -7,6 +7,7 @@ import type {
   PublicUser,
   UserC2S,
 } from '@vellin/shared';
+import { uploadVideoNote } from '../api/dmVideo';
 
 /** Сообщение с клиентскими флагами оптимистичной отправки. */
 export interface ClientDm extends DirectMessageDTO {
@@ -14,6 +15,10 @@ export interface ClientDm extends DirectMessageDTO {
   pending?: boolean;
   /** Отправка не удалась. */
   failed?: boolean;
+  /** Видео ещё загружается на сервер (до транскода) — показываем прогресс. */
+  _uploading?: boolean;
+  /** Прогресс загрузки видео 0..1. */
+  _progress?: number;
 }
 
 /** Состояние одного открытого диалога (по id собеседника). */
@@ -66,6 +71,10 @@ interface DmState {
     image?: { url: string; width: number; height: number },
     voice?: { url: string; durationSec: number; peaks: number[] },
   ) => void;
+  /** Оптимистично отправить видеосообщение («кружок»): аплоад blob → dm_send. */
+  sendVideoNote: (peer: PublicUser, blob: Blob, mimeType: string, durationSec: number) => void;
+  /** Обновление существующего сообщения из WS (видео: processing→ready). */
+  applyMessageUpdate: (message: DirectMessageDTO, peer: PublicUser) => void;
   /** Входящее/эхо сообщение из WS. */
   applyIncoming: (message: DirectMessageDTO, peer: PublicUser, unreadTotal: number, myId: string) => void;
   /** Ошибка отправки по nonce. */
@@ -206,6 +215,69 @@ export const useDmStore = create<DmState>((set, get) => ({
       ...(voice ? { voiceUrl: voice.url, voiceDurationSec: voice.durationSec, voicePeaks: voice.peaks } : {}),
     });
   },
+
+  sendVideoNote: (peer, blob, mimeType, durationSec) => {
+    const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimistic: ClientDm = {
+      id: nonce,
+      conversationId: get().threads[peer.id]?.conversationId ?? '',
+      senderId: 'me',
+      body: '',
+      createdAt: new Date().toISOString(),
+      videoStatus: 'processing',
+      videoDurationSec: durationSec,
+      nonce,
+      pending: true,
+      _uploading: true,
+      _progress: 0,
+    };
+    set((s) => {
+      const cur = s.threads[peer.id];
+      const thread: ThreadState = cur
+        ? { ...cur, messages: [...cur.messages, optimistic] }
+        : {
+            peer,
+            conversationId: '',
+            messages: [optimistic],
+            hasMore: false,
+            peerLastReadAt: null,
+            online: false,
+            lastSeenAt: null,
+            gender: null,
+            eligibility: { canMessage: true, reason: 'ok' },
+            loading: false,
+            loaded: true,
+          };
+      return { threads: { ...s.threads, [peer.id]: thread } };
+    });
+
+    const patch = (p: Partial<ClientDm>): void =>
+      set((s) => {
+        const t = s.threads[peer.id];
+        if (!t) return s;
+        return {
+          threads: {
+            ...s.threads,
+            [peer.id]: { ...t, messages: t.messages.map((m) => (m.nonce === nonce ? { ...m, ...p } : m)) },
+          },
+        };
+      });
+
+    uploadVideoNote(blob, mimeType, (frac) => patch({ _progress: frac }))
+      .then(({ uploadId }) => {
+        patch({ _uploading: false });
+        get()._send?.({ t: 'dm_send', toUserId: peer.id, body: '', nonce, videoUploadId: uploadId, videoDurationSec: durationSec });
+      })
+      .catch(() => patch({ pending: false, failed: true, _uploading: false }));
+  },
+
+  applyMessageUpdate: (message, peer) =>
+    set((s) => {
+      const t = s.threads[peer.id];
+      if (!t) return s;
+      const messages = t.messages.map((m) => (m.id === message.id ? { ...m, ...message } : m));
+      return { threads: { ...s.threads, [peer.id]: { ...t, messages } } };
+    }),
 
   applyIncoming: (message, peer, unreadTotal, myId) =>
     set((s) => {

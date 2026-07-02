@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useVideoNotePlayerStore } from './videoNotePlayerStore';
 
 /**
  * Единый аудио-пайплайн для голосовых сообщений: ровно один общий `<audio>` на
@@ -81,6 +82,8 @@ export const useVoicePlayerStore = create<VoicePlayerState>((set, get) => {
 
   /** Загрузить новое сообщение в плеер и запустить с начала. */
   function loadAndPlay(id: string, url: string, durationSec: number): void {
+    // Не допускаем двух звуков: глушим активный видео-кружок, если он играл.
+    useVideoNotePlayerStore.getState().stop();
     const audio = ensureAudio();
     audio.src = url;
     audio.playbackRate = get().rate;

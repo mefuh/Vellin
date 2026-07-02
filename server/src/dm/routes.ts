@@ -10,6 +10,7 @@ import { requireAuth } from '../auth/middleware.js';
 import { getThreadByUsername, listConversations } from './service.js';
 import { ALLOWED_DM_IMAGE_MIME, MAX_DM_IMAGE_BYTES, processAndSaveDmImage } from './image.js';
 import { ALLOWED_DM_VOICE_MIME, MAX_DM_VOICE_BYTES, saveDmVoice } from './voice.js';
+import { ALLOWED_DM_VIDEO_MIME, MAX_DM_VIDEO_BYTES, saveRawVideo } from './videoNote.js';
 
 function deny(reply: FastifyReply, status: number, error: string, message: string): void {
   reply.code(status).send({ error, message, statusCode: status });
@@ -113,6 +114,33 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
       reply.send(saved satisfies UploadDmVoiceResponse);
     } catch {
       deny(reply, 400, 'BadRequest', 'Не удалось сохранить голосовое');
+    }
+  });
+
+  // Видеосообщение («кружок»). Сырое видео СТРИМИТСЯ на диск (без буфера в RAM),
+  // потолок 128 МБ. Возвращает uploadId; транскод в mp4 идёт в фоне после dm_send.
+  app.post('/dm/video-note', async (req, reply) => {
+    const p = requireUser(req, reply);
+    if (!p) return;
+    const file = await req.file({ limits: { fileSize: MAX_DM_VIDEO_BYTES, files: 1 } });
+    if (!file) {
+      deny(reply, 400, 'BadRequest', 'Файл не получен');
+      return;
+    }
+    const baseMime = file.mimetype.split(';')[0].trim().toLowerCase();
+    if (!ALLOWED_DM_VIDEO_MIME.has(baseMime)) {
+      deny(reply, 400, 'BadRequest', 'Неподдерживаемый формат видео');
+      return;
+    }
+    try {
+      const saved = await saveRawVideo(p.userId, file.file, baseMime);
+      reply.send({ uploadId: saved.uploadId });
+    } catch (err) {
+      if ((err as Error).message === 'too_large') {
+        deny(reply, 413, 'PayloadTooLarge', 'Видео слишком большое (макс. 128 МБ)');
+        return;
+      }
+      deny(reply, 400, 'BadRequest', 'Не удалось сохранить видео');
     }
   });
 }
