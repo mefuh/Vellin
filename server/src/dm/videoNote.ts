@@ -167,7 +167,10 @@ export async function transcodeVideoNote(messageId: string): Promise<TranscodeRe
     [
       '-y',
       '-i', raw,
-      '-vf', `crop='min(iw,ih)':'min(iw,ih)',scale=${TARGET_SIZE}:${TARGET_SIZE}`,
+      // hflip — зеркалим как в Telegram: пользователь видит себя одинаково в
+      // превью (CSS scaleX(-1)) и в отправленном кружке. Файл хранится зеркальным,
+      // поэтому воспроизведение не требует CSS-трансформа (кольцо/контролы целы).
+      '-vf', `hflip,crop='min(iw,ih)':'min(iw,ih)',scale=${TARGET_SIZE}:${TARGET_SIZE}`,
       '-c:v', 'libx264',
       '-preset', 'veryfast',
       '-crf', '28',

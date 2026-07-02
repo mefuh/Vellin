@@ -5,8 +5,10 @@ import { createPortal } from 'react-dom';
  * RecordingOverlay + CameraPreview для видео-«кружков»: весь чат уходит в сильный
  * blur (и перестаёт быть кликабельным), по центру — большой круг с фронт-камерой.
  * Только визуальная часть: элементы управления (полоса записи + кнопки) рисует
- * композер поверх этого оверлея тем же UI, что у голосовых. Картинку НЕ зеркалим —
- * превью совпадает с тем, что уходит в отправленном кружке.
+ * композер поверх этого оверлея тем же UI, что у голосовых. Живое превью зеркалим
+ * (`scaleX(-1)` только на самом `<video>`, не на контролах) — как в Telegram
+ * пользователь видит себя «в зеркале». Отправленный кружок тоже хранится зеркальным
+ * (ffmpeg `hflip` на сервере), поэтому превью и готовое видео совпадают.
  */
 export function VideoRecordOverlay({
   stream,
@@ -67,7 +69,7 @@ export function VideoRecordOverlay({
           muted
           autoPlay
           playsInline
-          style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: cancelArmed ? 0.4 : 1, transition: 'opacity .18s ease' }}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', opacity: cancelArmed ? 0.4 : 1, transition: 'opacity .18s ease' }}
         />
       </div>
     </div>,
