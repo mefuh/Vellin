@@ -367,20 +367,6 @@ input[type='date']::-webkit-datetime-edit {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-/* Плейсхолдер для contenteditable-поля ввода (dm-editable). Абсолютный, чтобы не
-   занимать поток и не сдвигать каретку вправо от текста-подсказки. */
-.dm-editable {
-  position: relative;
-}
-.dm-editable[data-empty='true']::before {
-  content: attr(data-placeholder);
-  position: absolute;
-  left: 16px;
-  top: 9px;
-  color: var(--text-3);
-  pointer-events: none;
-  line-height: 1.4;
-}
 
 /* Служебный хром (хедер, композер, панель записи, мини-плеер) — не выделяется.
    Текст сообщений остаётся выделяемым: класс вешаем только на не-текстовые зоны. */
