@@ -30,6 +30,7 @@ import { useVideoRecorder } from '../hooks/useVideoRecorder';
 import { VideoMessageBubble } from '../components/messages/video/VideoMessageBubble';
 import { VideoRecordOverlay } from '../components/messages/video/VideoRecordOverlay';
 import { CameraSwitcher } from '../components/messages/video/CameraSwitcher';
+import { MessageInput, type MessageInputHandle } from '../components/messages/MessageInput';
 import { CameraPermissionScreen } from '../components/messages/video/CameraPermissionScreen';
 import { computeVoiceMeta } from '../utils/audioPeaks';
 import {
@@ -1397,7 +1398,7 @@ function Composer({
   const sendTyping = useDmStore((s) => s.sendTyping);
   const recorder = useVoiceRecorder();
   const isMobile = useIsMobile();
-  const taRef = useRef<HTMLTextAreaElement>(null);
+  const taRef = useRef<MessageInputHandle>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Превью вложения: присутствие для симметричных появления/исчезания. Во время
@@ -1925,41 +1926,15 @@ function Composer({
             >
               <Icon name="image" size={18} />
             </button>
-            <textarea
+            <MessageInput
               ref={taRef}
               value={text}
-              onChange={(e) => {
-                setText(e.target.value);
+              onChange={(v) => {
+                setText(v);
                 pokeTyping();
               }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  submit();
-                }
-              }}
-              rows={1}
+              onSubmit={submit}
               placeholder="Сообщение…"
-              className="dm-input"
-              style={{
-                flex: 1,
-                resize: 'none',
-                maxHeight: 140,
-                minHeight: 40,
-                padding: '9px 16px',
-                // Полная «пилюля» как в Telegram.
-                borderRadius: 20,
-                border: '1px solid var(--line-2)',
-                // Полупрозрачное стекло — сквозь поле слегка видно ленту.
-                background: 'var(--glass-bg)',
-                backdropFilter: 'blur(var(--glass-blur))',
-                WebkitBackdropFilter: 'blur(var(--glass-blur))',
-                color: 'var(--text-0)',
-                fontSize: 15,
-                fontFamily: 'inherit',
-                lineHeight: 1.4,
-                outline: 'none',
-              }}
             />
           </>
         )}
