@@ -29,6 +29,7 @@ import { useVoiceRecorder, type RecordResult } from '../hooks/useVoiceRecorder';
 import { useVideoRecorder } from '../hooks/useVideoRecorder';
 import { VideoMessageBubble } from '../components/messages/video/VideoMessageBubble';
 import { VideoRecordOverlay } from '../components/messages/video/VideoRecordOverlay';
+import { CameraSwitcher } from '../components/messages/video/CameraSwitcher';
 import { CameraPermissionScreen } from '../components/messages/video/CameraPermissionScreen';
 import { computeVoiceMeta } from '../utils/audioPeaks';
 import {
@@ -1623,7 +1624,7 @@ function Composer({
       return;
     }
     setUploadErr(null);
-    sendVideoNote(peer, res.blob, res.mimeType, durationSecOf(res.durationMs));
+    sendVideoNote(peer, res.blob, res.mimeType, durationSecOf(res.durationMs), res.mirrored);
   };
   const videoCancelRec = async (): Promise<void> => {
     resetVideoState();
@@ -1668,7 +1669,7 @@ function Composer({
         holdRef.current.active = false;
       }
     } else {
-      const ok = await videoRecorder.start('user');
+      const ok = await videoRecorder.start();
       if (ok) {
         setVideoOverlay(true);
       } else {
@@ -2006,8 +2007,35 @@ function Composer({
       </div>
       {recorder.error && <span style={{ fontSize: 12, color: 'var(--accent-hi)' }}>{recorder.error}</span>}
       {(videoOverlay || videoRecorder.recording) && (
-        <VideoRecordOverlay stream={videoRecorder.stream} cancelArmed={cancelArmed} visible={videoOverlay} />
+        <VideoRecordOverlay
+          stream={videoRecorder.stream}
+          cancelArmed={cancelArmed}
+          visible={videoOverlay}
+          facing={videoRecorder.facing}
+          switching={videoRecorder.switching}
+        />
       )}
+      {/* Кнопка смены камеры — слева над полосой записи (портал, поверх оверлея).
+          Показывается, пока идёт запись и есть 2+ камеры. Тап — отдельный pointer,
+          жест кнопки записи (свайпы/стоп/отправка) не задевается. */}
+      {videoRecorder.recording &&
+        videoRecorder.canSwitch &&
+        createPortal(
+          <div
+            style={{
+              position: 'fixed',
+              left: 16,
+              bottom: 'calc(env(safe-area-inset-bottom, 0px) + 96px)',
+              zIndex: 1001,
+              pointerEvents: 'none',
+            }}
+          >
+            <div style={{ pointerEvents: 'auto' }}>
+              <CameraSwitcher onSwitch={() => void videoRecorder.switchCamera()} switching={videoRecorder.switching} />
+            </div>
+          </div>,
+          document.body,
+        )}
       {/* Управление записью видео — ТЕМ ЖЕ UI, что у голосовых (полоса + кнопки),
           порталом поверх blur-оверлея. Удержание: полоса + микрофон-кнопка (визуал,
           жест ведёт кнопка композера снизу) + аффорданс фиксации. Locked (hands-free):
@@ -2057,7 +2085,7 @@ function Composer({
           onClose={() => setShowCamPerm(false)}
           onRetry={() => {
             setShowCamPerm(false);
-            void videoRecorder.start('user').then((ok) => {
+            void videoRecorder.start().then((ok) => {
               if (ok) setVideoOverlay(true);
             });
           }}

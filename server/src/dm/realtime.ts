@@ -92,7 +92,7 @@ export async function handleDmSend(
     const res = await sendMessage(senderId, toUserId, body, image, voice, video);
     // Видео: привязать сырой файл к сообщению и поставить в очередь транскода.
     if (video) {
-      const ok = await promoteRawToMessage(video.uploadId, res.message.id);
+      const ok = await promoteRawToMessage(video.uploadId, res.message.id, video.mirrored);
       if (ok) enqueueTranscode(res.message.id);
       else await deleteRawUpload(video.uploadId).catch(() => {});
     }

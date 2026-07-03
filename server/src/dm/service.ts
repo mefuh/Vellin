@@ -191,6 +191,8 @@ export interface SendVoice {
 export interface SendVideoNote {
   uploadId: string;
   durationSec: number;
+  /** Клиент уже применил финальную ориентацию (canvas со сменой камеры) — не зеркалить на сервере. */
+  mirrored?: boolean;
 }
 
 /**
