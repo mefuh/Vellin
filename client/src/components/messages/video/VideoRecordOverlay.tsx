@@ -1,23 +1,28 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import type { Facing } from './recordingPipeline';
 
 /**
  * RecordingOverlay + CameraPreview для видео-«кружков»: весь чат уходит в сильный
- * blur (и перестаёт быть кликабельным), по центру — большой круг с фронт-камерой.
- * Только визуальная часть: элементы управления (полоса записи + кнопки) рисует
- * композер поверх этого оверлея тем же UI, что у голосовых. Живое превью зеркалим
- * (`scaleX(-1)` только на самом `<video>`, не на контролах) — как в Telegram
- * пользователь видит себя «в зеркале». Отправленный кружок тоже хранится зеркальным
- * (ffmpeg `hflip` на сервере), поэтому превью и готовое видео совпадают.
+ * blur (и перестаёт быть кликабельным), по центру — большой круг с камерой. Только
+ * визуальная часть: элементы управления (полоса записи + кнопки) рисует композер
+ * поверх этого оверлея тем же UI, что у голосовых. Фронт-камеру показываем зеркально
+ * (`scaleX(-1)`, как в Telegram), заднюю — как есть; на бесшовной смене камеры
+ * (canvas-конвейер) отправленный кружок хранит ту же ориентацию по кадрам. Кнопку
+ * смены камеры рисует композер (слева над полосой записи), здесь — только превью.
  */
 export function VideoRecordOverlay({
   stream,
   cancelArmed,
   visible,
+  facing,
+  switching,
 }: {
   stream: MediaStream | null;
   cancelArmed: boolean;
   visible: boolean;
+  facing: Facing;
+  switching: boolean;
 }): React.ReactElement {
   const liveRef = useRef<HTMLVideoElement>(null);
 
@@ -31,6 +36,9 @@ export function VideoRecordOverlay({
 
   const circle = 'min(72vw, 300px)';
   const ringColor = cancelArmed ? 'rgba(255,59,48,0.95)' : 'rgba(255,255,255,0.92)';
+  const mirror = facing === 'user';
+  const videoTransform = `${mirror ? 'scaleX(-1)' : ''}${switching ? ' scale(1.04)' : ''}`.trim();
+  const videoOpacity = cancelArmed ? 0.4 : switching ? 0.62 : 1;
 
   return createPortal(
     <div
@@ -57,20 +65,35 @@ export function VideoRecordOverlay({
           transform: visible ? 'translateX(-50%) scale(1)' : 'translateX(-50%) scale(0.82)',
           width: circle,
           height: circle,
-          borderRadius: '50%',
-          overflow: 'hidden',
-          boxShadow: `0 0 0 4px ${ringColor}, 0 20px 60px rgba(0,0,0,0.5)`,
-          transition: 'transform .34s cubic-bezier(.34,1.56,.64,1), box-shadow .2s ease',
-          background: '#000',
+          transition: 'transform .34s cubic-bezier(.34,1.56,.64,1)',
         }}
       >
-        <video
-          ref={liveRef}
-          muted
-          autoPlay
-          playsInline
-          style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', opacity: cancelArmed ? 0.4 : 1, transition: 'opacity .18s ease' }}
-        />
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            borderRadius: '50%',
+            overflow: 'hidden',
+            boxShadow: `0 0 0 4px ${ringColor}, 0 20px 60px rgba(0,0,0,0.5)`,
+            transition: 'box-shadow .2s ease',
+            background: '#000',
+          }}
+        >
+          <video
+            ref={liveRef}
+            muted
+            autoPlay
+            playsInline
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              transform: videoTransform,
+              opacity: videoOpacity,
+              transition: 'opacity .2s ease, transform .2s ease',
+            }}
+          />
+        </div>
       </div>
     </div>,
     document.body,

@@ -105,29 +105,46 @@ export async function saveRawVideo(
   return { uploadId, bytes };
 }
 
+/** Путь маркера «ориентация уже финальная» (клиент сам зеркалил — не делать hflip). */
+function noflipMarkerPath(messageId: string): string {
+  return path.join(rawDir(), `${messageId}.noflip`);
+}
+
 /**
  * Привязать сырой файл к сообщению: переименовать `up_*` → `<messageId>.<ext>`.
  * После этого раскодирование и восстановление работают только по messageId.
- * Возвращает false, если исходного файла нет.
+ * При `mirrored` создаём on-disk маркер `<messageId>.noflip` (переживает рестарт),
+ * чтобы транскод не зеркалил уже правильно ориентированное видео. Возвращает false,
+ * если исходного файла нет.
  */
-export async function promoteRawToMessage(uploadId: string, messageId: string): Promise<boolean> {
+export async function promoteRawToMessage(
+  uploadId: string,
+  messageId: string,
+  mirrored = false,
+): Promise<boolean> {
   if (!isValidUploadId(uploadId)) return false;
   const ext = uploadId.split('.').pop() ?? 'webm';
   const from = path.join(rawDir(), uploadId);
   const to = path.join(rawDir(), `${messageId}.${ext}`);
   try {
     await fs.rename(from, to);
+    if (mirrored) await fs.writeFile(noflipMarkerPath(messageId), '').catch(() => {});
     return true;
   } catch {
     return false;
   }
 }
 
+/** Является ли файл видео-сырьём (а не маркером `.noflip`). */
+function isRawVideoFile(name: string): boolean {
+  return /\.(webm|mp4|mov|mkv)$/.test(name);
+}
+
 /** Найти сырой файл сообщения (`<messageId>.<ext>`), либо null. */
 export async function findRawForMessage(messageId: string): Promise<string | null> {
   try {
     const files = await fs.readdir(rawDir());
-    const hit = files.find((f) => f.replace(/\.[^.]+$/, '') === messageId);
+    const hit = files.find((f) => isRawVideoFile(f) && f.replace(/\.[^.]+$/, '') === messageId);
     return hit ? path.join(rawDir(), hit) : null;
   } catch {
     return null;
@@ -138,7 +155,9 @@ export async function findRawForMessage(messageId: string): Promise<string | nul
 export async function listRawMessageIds(): Promise<string[]> {
   try {
     const files = await fs.readdir(rawDir());
-    return files.filter((f) => !f.startsWith('up_')).map((f) => f.replace(/\.[^.]+$/, ''));
+    return files
+      .filter((f) => !f.startsWith('up_') && isRawVideoFile(f))
+      .map((f) => f.replace(/\.[^.]+$/, ''));
   } catch {
     return [];
   }
@@ -162,15 +181,21 @@ export async function transcodeVideoNote(messageId: string): Promise<TranscodeRe
   const mp4Path = path.join(baseDir(), mp4Name);
   const jpgPath = path.join(baseDir(), jpgName);
 
+  // Зеркалим (hflip) только если клиент НЕ применил ориентацию сам. При записи со
+  // сменой камеры (canvas-конвейер) фронт уже отзеркален, а задняя — нет, по кадрам:
+  // единый серверный hflip там был бы неверен, поэтому клиент ставит маркер .noflip.
+  const alreadyOriented = await fs
+    .access(noflipMarkerPath(messageId))
+    .then(() => true)
+    .catch(() => false);
+  const filter = `${alreadyOriented ? '' : 'hflip,'}crop='min(iw,ih)':'min(iw,ih)',scale=${TARGET_SIZE}:${TARGET_SIZE}`;
+
   await execFileAsync(
     'ffmpeg',
     [
       '-y',
       '-i', raw,
-      // hflip — зеркалим как в Telegram: пользователь видит себя одинаково в
-      // превью (CSS scaleX(-1)) и в отправленном кружке. Файл хранится зеркальным,
-      // поэтому воспроизведение не требует CSS-трансформа (кольцо/контролы целы).
-      '-vf', `hflip,crop='min(iw,ih)':'min(iw,ih)',scale=${TARGET_SIZE}:${TARGET_SIZE}`,
+      '-vf', filter,
       '-c:v', 'libx264',
       '-preset', 'veryfast',
       '-crf', '28',
@@ -191,6 +216,7 @@ export async function transcodeVideoNote(messageId: string): Promise<TranscodeRe
 
   const durationSec = await probeDuration(mp4Path);
   await fs.unlink(raw).catch(() => {});
+  await fs.unlink(noflipMarkerPath(messageId)).catch(() => {});
 
   return { videoUrl: `${PUBLIC_PREFIX}/${mp4Name}`, thumbUrl: `${PUBLIC_PREFIX}/${jpgName}`, durationSec };
 }
@@ -210,10 +236,11 @@ async function probeDuration(file: string): Promise<number> {
   }
 }
 
-/** Удалить сырой файл сообщения (при ошибке/отмене). */
+/** Удалить сырой файл сообщения + маркер ориентации (при ошибке/отмене). */
 export async function deleteRawForMessage(messageId: string): Promise<void> {
   const raw = await findRawForMessage(messageId);
   if (raw) await fs.unlink(raw).catch(() => {});
+  await fs.unlink(noflipMarkerPath(messageId)).catch(() => {});
 }
 
 /** Удалить временный сырой файл по uploadId (если сообщение не создалось). */

@@ -72,7 +72,7 @@ interface DmState {
     voice?: { url: string; durationSec: number; peaks: number[] },
   ) => void;
   /** Оптимистично отправить видеосообщение («кружок»): аплоад blob → dm_send. */
-  sendVideoNote: (peer: PublicUser, blob: Blob, mimeType: string, durationSec: number) => void;
+  sendVideoNote: (peer: PublicUser, blob: Blob, mimeType: string, durationSec: number, mirrored?: boolean) => void;
   /** Обновление существующего сообщения из WS (видео: processing→ready). */
   applyMessageUpdate: (message: DirectMessageDTO, peer: PublicUser) => void;
   /** Входящее/эхо сообщение из WS. */
@@ -216,7 +216,7 @@ export const useDmStore = create<DmState>((set, get) => ({
     });
   },
 
-  sendVideoNote: (peer, blob, mimeType, durationSec) => {
+  sendVideoNote: (peer, blob, mimeType, durationSec, mirrored = false) => {
     const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const optimistic: ClientDm = {
       id: nonce,
@@ -266,7 +266,7 @@ export const useDmStore = create<DmState>((set, get) => ({
     uploadVideoNote(blob, mimeType, (frac) => patch({ _progress: frac }))
       .then(({ uploadId }) => {
         patch({ _uploading: false });
-        get()._send?.({ t: 'dm_send', toUserId: peer.id, body: '', nonce, videoUploadId: uploadId, videoDurationSec: durationSec });
+        get()._send?.({ t: 'dm_send', toUserId: peer.id, body: '', nonce, videoUploadId: uploadId, videoDurationSec: durationSec, videoMirrored: mirrored });
       })
       .catch(() => patch({ pending: false, failed: true, _uploading: false }));
   },

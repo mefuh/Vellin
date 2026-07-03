@@ -13,7 +13,7 @@ export type IconName =
   | 'arrowDown' | 'flame' | 'waveform' | 'refresh' | 'hash'
   | 'userMinus' | 'userPlus' | 'gripVertical'
   | 'video' | 'videoOff' | 'phone' | 'phoneOff' | 'logout'
-  | 'cake' | 'mapPin';
+  | 'cake' | 'mapPin' | 'cameraReverse';
 
 interface IconProps {
   name: IconName;
@@ -302,6 +302,15 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0116 0z" />
       <circle cx="12" cy="10" r="2.6" />
+    </>
+  ),
+  cameraReverse: (
+    <>
+      <path d="M3 8.5A1.5 1.5 0 014.5 7H7l1.3-1.9A1 1 0 019.1 5h5.8a1 1 0 01.8.4L17 7h2.5A1.5 1.5 0 0121 8.5v9A1.5 1.5 0 0119.5 19h-15A1.5 1.5 0 013 17.5v-9z" />
+      <path d="M9.2 12.8a2.8 2.8 0 015.2-1.3" />
+      <path d="M14.8 13.2a2.8 2.8 0 01-5.2 1.3" />
+      <path d="M14.5 9.1l-.1 2.1 2.1.1" />
+      <path d="M9.5 16.9l.1-2.1-2.1-.1" />
     </>
   ),
 };

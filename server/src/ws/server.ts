@@ -122,6 +122,7 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         voicePeaks?: number[];
         videoUploadId?: string;
         videoDurationSec?: number;
+        videoMirrored?: boolean;
         messageId?: string;
         conversationId?: string | null;
         visible?: boolean;
@@ -162,6 +163,7 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
             ? {
                 uploadId: m.videoUploadId,
                 durationSec: typeof m.videoDurationSec === 'number' ? m.videoDurationSec : 0,
+                mirrored: m.videoMirrored === true,
               }
             : undefined;
         void handleDmSend(principal.userId, m.toUserId, m.body, m.nonce, image, voice, video);
