@@ -416,6 +416,10 @@ export async function listConversations(
         createdAt: last.createdAt.toISOString(),
         hasImage: !!last.imageUrl,
         hasVoice: !!last.voiceUrl,
+        // videoUrl появляется только после транскода (ready) — статус же
+        // проставляется сразу при создании сообщения (processing), поэтому
+        // маркер должен опираться на него, а не ждать готового файла.
+        hasVideo: !!last.videoStatus,
       },
       unreadCount: unread,
       peerLastReadAt: peerRead ? peerRead.toISOString() : null,

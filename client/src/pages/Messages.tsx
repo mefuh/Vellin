@@ -325,14 +325,16 @@ function ConversationRow({
   const read =
     mine && c.peerLastReadAt != null && new Date(c.peerLastReadAt).getTime() >= new Date(last!.createdAt).getTime();
 
-  // Иконка-маркер вложения в превью (голосовое/фото).
-  const marker = last?.hasVoice ? 'mic' : last?.hasImage ? 'image' : null;
+  // Иконка-маркер вложения в превью (фото/голосовое/видео).
+  const marker = last?.hasImage ? 'image' : last?.hasVoice ? 'mic' : last?.hasVideo ? 'video' : null;
   const previewText = last
-    ? last.hasVoice
-      ? 'Голосовое сообщение'
-      : last.hasImage
-        ? last.body || 'Фото'
-        : last.body
+    ? last.hasImage
+      ? last.body || 'Фото'
+      : last.hasVoice
+        ? 'Голосовое сообщение'
+        : last.hasVideo
+          ? 'Видеосообщение'
+          : last.body
     : '';
   const prefix = mine ? 'Вы: ' : '';
 
