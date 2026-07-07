@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { useVoicePlayerStore } from './voicePlayerStore';
+import type { MediaNextResolver } from './mediaChain';
 
 /**
  * Единое активное воспроизведение видео-«кружков» со звуком: одновременно звучит
@@ -7,11 +8,13 @@ import { useVoicePlayerStore } from './voicePlayerStore';
  * кадры превью), поэтому стор не держит общий элемент, а РЕГИСТРИРУЕТ активный
  * `<video>` (его отдаёт {@link CircularVideoPlayer} при входе в полный режим) и
  * даёт мини-плееру «сейчас играет» управление: пауза, скорость, закрытие.
+ *
+ * Резолвер общий с голосовыми ({@link MediaNextResolver}): следующим может
+ * оказаться голосовое — тогда эстафету принимает voicePlayerStore.
  */
-const RATES = [1, 1.5, 2] as const;
+export type VideoNextResolver = MediaNextResolver;
 
-/** Резолвер следующего кружка для авто-проигрывания (или null — цепочка кончилась). */
-export type VideoNextResolver = (currentId: string) => string | null;
+const RATES = [1, 1.5, 2] as const;
 
 interface VideoNotePlayerState {
   currentId: string | null;
@@ -19,8 +22,6 @@ interface VideoNotePlayerState {
   positionSec: number;
   durationSec: number;
   rate: number;
-  /** id кружка, который должен САМ запуститься в полном режиме (авто-next). */
-  autoPlayId: string | null;
   _video: HTMLVideoElement | null;
   _detach: (() => void) | null;
   _next: VideoNextResolver | null;
@@ -37,7 +38,11 @@ interface VideoNotePlayerState {
   stop: () => void;
   /** Задать резолвер следующего кружка (авто-next после полного проигрывания). */
   setNextResolver: (fn: VideoNextResolver | null) => void;
-  /** Запланировать авто-запуск следующего после `currentId`. true — следующий найден. */
+  /**
+   * Текущий кружок доиграл — продолжить цепочку. Возврат: true — эстафета
+   * передана (следующее голосовое запущено), false — цепочка остановлена (дальше
+   * кружок или конец списка; кружок автозапускать нельзя — iOS требует тап).
+   */
   playNext: (currentId: string) => boolean;
 }
 
@@ -53,7 +58,6 @@ export const useVideoNotePlayerStore = create<VideoNotePlayerState>((set, get) =
     positionSec: 0,
     durationSec: 0,
     rate: 1,
-    autoPlayId: null,
     _video: null,
     _detach: null,
     _next: null,
@@ -63,29 +67,48 @@ export const useVideoNotePlayerStore = create<VideoNotePlayerState>((set, get) =
       useVoicePlayerStore.getState().stop();
       detach();
       video.playbackRate = get().rate;
-      const onPlay = (): void => set({ playing: true });
-      const onPause = (): void => set({ playing: false });
-      const onTime = (): void =>
+      // Позицию тянем через rAF (как у голосовых, tick() в voicePlayerStore), а не
+      // через нативный `timeupdate` — он у видео заметно реже (браузеры троттлят
+      // его сильнее, чем у `<audio>`), из-за чего кольцо/прогресс мини-плеера
+      // обновлялись рывками. rAF даёт ровные 60 кадров/с, как и у голосовых.
+      let raf: number | null = null;
+      const tick = (): void => {
         set({
           positionSec: video.currentTime,
           durationSec: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : durationSec,
         });
+        if (!video.paused) raf = requestAnimationFrame(tick);
+      };
+      const onPlay = (): void => {
+        set({ playing: true });
+        if (raf != null) cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(tick);
+      };
+      const onPause = (): void => {
+        set({ playing: false });
+        if (raf != null) cancelAnimationFrame(raf);
+        raf = null;
+      };
       video.addEventListener('play', onPlay);
       video.addEventListener('pause', onPause);
-      video.addEventListener('timeupdate', onTime);
       set({
         currentId: id,
         _video: video,
         _detach: () => {
           video.removeEventListener('play', onPlay);
           video.removeEventListener('pause', onPause);
-          video.removeEventListener('timeupdate', onTime);
+          if (raf != null) cancelAnimationFrame(raf);
+          raf = null;
         },
         playing: !video.paused,
         positionSec: 0,
         durationSec,
-        autoPlayId: null, // сигнал авто-запуска потреблён
       });
+      // Если кружок УЖЕ играл (беззвучное превью самого видимого) в момент входа
+      // в полный режим — события `play` больше не будет, поэтому rAF-цикл нужно
+      // запустить здесь напрямую; иначе positionSec не обновлялся бы и кольцо
+      // прогресса стояло бы на месте, хотя видео идёт.
+      if (!video.paused) raf = requestAnimationFrame(tick);
     },
 
     clear: (id) => {
@@ -119,19 +142,19 @@ export const useVideoNotePlayerStore = create<VideoNotePlayerState>((set, get) =
       const v = get()._video;
       if (v) v.pause();
       detach();
-      set({ currentId: null, _video: null, playing: false, positionSec: 0, durationSec: 0, autoPlayId: null });
+      set({ currentId: null, _video: null, playing: false, positionSec: 0, durationSec: 0 });
     },
 
     setNextResolver: (fn) => set({ _next: fn }),
 
-    // Авто-next: резолвим следующий кружок и «бросаем» его id — целевой плеер сам
-    // подхватит autoPlayId и запустится в полном режиме (setActive сменит currentId,
-    // предыдущий вернётся в превью). Возврат: найден ли следующий.
+    // Продолжение цепочки после конца кружка. Голосовое — отдаём эстафету
+    // voicePlayerStore напрямую (общий <audio> уже разблокирован тапом), возврат
+    // false, чтобы этот кружок закрылся в превью. Кружок дальше — НЕ автозапускаем
+    // (iOS требует тап для видео со звуком): цепочка стопорится, возврат false.
     playNext: (currentId) => {
       const next = get()._next?.(currentId) ?? null;
-      if (next) {
-        set({ autoPlayId: next });
-        return true;
+      if (next?.kind === 'voice') {
+        useVoicePlayerStore.getState().toggle(next.id, next.url, next.durationSec);
       }
       return false;
     },

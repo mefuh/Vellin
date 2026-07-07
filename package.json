@@ -1,6 +1,6 @@
 {
   "name": "vellin",
-  "version": "0.22.2",
+  "version": "0.22.3",
   "private": true,
   "description": "Vellin — платформа для совместного просмотра видео в реальном времени",
   "workspaces": [

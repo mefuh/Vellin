@@ -21,3 +21,14 @@ export function isIOS(): boolean {
   cachedIsIOS = iOSDevice || iPadOS;
   return cachedIsIOS;
 }
+
+/**
+ * Основной указатель устройства — «грубый» (палец), а не мышь/трекпад.
+ * В отличие от брейкпоинтов по ширине окна (`useIsMobile`), не путает узкое
+ * окно десктопа с телефоном: у гибридных тач-ноутбуков с мышью primary
+ * pointer остаётся «fine», даже если экран сенсорный.
+ */
+export function isMobileDevice(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return window.matchMedia('(pointer: coarse)').matches;
+}

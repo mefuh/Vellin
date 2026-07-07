@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -21,10 +22,12 @@ import { ApiHttpError } from '../api/client';
 import { lastSeenLabel } from '../utils/lastSeen';
 import { AppHeader } from '../components/AppHeader';
 import { VoicePlayer } from '../components/messages/VoicePlayer';
-import { VoiceNowPlaying } from '../components/messages/VoiceNowPlaying';
-import { VideoNoteNowPlaying } from '../components/messages/video/VideoNoteNowPlaying';
+import { NowPlaying } from '../components/messages/NowPlaying';
+import { AnimatedStatusBubble } from '../components/messages/AnimatedStatusBubble';
+import { useSpringValue } from '../hooks/useSpringValue';
 import { useVoicePlayerStore } from '../stores/voicePlayerStore';
 import { useVideoNotePlayerStore } from '../stores/videoNotePlayerStore';
+import type { MediaNextResolver } from '../stores/mediaChain';
 import { useVoiceRecorder, type RecordResult } from '../hooks/useVoiceRecorder';
 import { useVideoRecorder } from '../hooks/useVideoRecorder';
 import { VideoMessageBubble } from '../components/messages/video/VideoMessageBubble';
@@ -43,6 +46,44 @@ import {
   R_BUBBLE_IN,
   R_BUBBLE_OUT,
 } from '../components/messages/chatTheme';
+
+/**
+ * Перерисовывает картинку через `<img>`+canvas и отдаёт заново закодированный
+ * файл — БЕЗ EXIF-ориентации вообще, так что серверу нечего интерпретировать.
+ *
+ * Почему на сервере (jimp/exifr) это не чинится надёжно: на iOS Safari
+ * конвертация HEIC→JPEG при выборе фото иногда физически поворачивает
+ * пиксели, но оставляет в файле СТАРЫЙ EXIF-тег ориентации от исходного HEIC
+ * (уже неактуальный для уже повёрнутых пикселей) — любая честная EXIF-
+ * библиотека на сервере применит этот тег и повернёт УЖЕ правильную картинку
+ * ещё раз, независимо от того, насколько она надёжна. `<img>` в браузере
+ * рендерит файл ТОЧНО так же, как его в итоге увидит пользователь (это и
+ * есть источник истины) — перерисовав этот рендер на canvas и экспортировав
+ * заново, получаем файл без какой-либо ориентации для интерпретации.
+ */
+async function normalizeImageOrientation(file: File): Promise<File> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('image decode failed'));
+      el.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('canvas 2d context unavailable');
+    ctx.drawImage(img, 0, 0);
+    const mime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, mime, 0.92));
+    if (!blob) throw new Error('canvas toBlob failed');
+    return new File([blob], file.name, { type: mime });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 function fmtTime(iso: string): string {
   const d = new Date(iso);
@@ -325,14 +366,16 @@ function ConversationRow({
   const read =
     mine && c.peerLastReadAt != null && new Date(c.peerLastReadAt).getTime() >= new Date(last!.createdAt).getTime();
 
-  // Иконка-маркер вложения в превью (голосовое/фото).
-  const marker = last?.hasVoice ? 'mic' : last?.hasImage ? 'image' : null;
+  // Иконка-маркер вложения в превью (фото/голосовое/видео).
+  const marker = last?.hasImage ? 'image' : last?.hasVoice ? 'mic' : last?.hasVideo ? 'video' : null;
   const previewText = last
-    ? last.hasVoice
-      ? 'Голосовое сообщение'
-      : last.hasImage
-        ? last.body || 'Фото'
-        : last.body
+    ? last.hasImage
+      ? last.body || 'Фото'
+      : last.hasVoice
+        ? 'Голосовое сообщение'
+        : last.hasVideo
+          ? 'Видеосообщение'
+          : last.body
     : '';
   const prefix = mine ? 'Вы: ' : '';
 
@@ -507,6 +550,14 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, []);
 
+  // Стабильные ссылки для MessageList → MessageRow: если пересоздавать эти
+  // колбэки инлайново при каждом рендере ChatPane, memo на MessageRow не
+  // сработает (props всегда «новые») — весь смысл мемоизации потеряется.
+  const onOpenImage = useCallback((url: string, rect: DOMRect) => setLightbox({ url, rect }), []);
+  const onImageLoad = useCallback(() => {
+    if (pinnedRef.current) scrollToBottom();
+  }, [scrollToBottom]);
+
   // Плавная прокрутка к концу по кнопке. После долёта onScroll сам спрячет кнопку.
   const jumpToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -638,63 +689,45 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     if (pinnedRef.current) scrollToBottom();
   }, [msgCount, scrollToBottom]);
 
-  // Авто-следующее голосовое + отметка «прослушано». Резолвер читает свежий
-  // тред из стора (getState), поэтому ставим его один раз на peerId.
+  // Авто-следующее медиа (голосовое ИЛИ видео-кружок) + отметка «прослушано».
+  // Резолвер общий для обоих сторов ({@link MediaNextResolver}) — следующим по
+  // списку идёт РЕАЛЬНО следующее вложение, того или другого типа, а не
+  // следующее своего типа с пропуском чужого (иначе цепочка «ГС → кружок → ГС»
+  // проглатывала кружок). Резолвер читает свежий тред из стора (getState),
+  // поэтому ставим его один раз на peerId.
   useEffect(() => {
     if (!peerId) return;
-    const vp = useVoicePlayerStore.getState();
     const isUnplayedIncoming = (m: ClientDm): boolean =>
       !!m.voiceUrl && m.senderId !== myId && m.senderId !== 'me' && !m.voicePlayed;
-    // Авто-проигрывание как плейлист: после текущего — следующее голосовое по
-    // порядку, независимо от отправителя (так последовательность ГС играет
-    // подряд). Отметку «прослушано» при этом ставим только входящим.
-    vp.setNextResolver((currentId) => {
+    const resolveNext: MediaNextResolver = (currentId) => {
       const t = useDmStore.getState().threads[peerId];
       if (!t) return null;
       const idx = t.messages.findIndex((m) => m.id === currentId);
       if (idx < 0) return null;
       for (let i = idx + 1; i < t.messages.length; i++) {
         const m = t.messages[i];
-        if (m.voiceUrl) {
-          return { id: m.id, url: m.voiceUrl, durationSec: m.voiceDurationSec ?? 0 };
-        }
+        if (m.voiceUrl) return { kind: 'voice', id: m.id, url: m.voiceUrl, durationSec: m.voiceDurationSec ?? 0 };
+        if (m.videoUrl && m.videoStatus === 'ready') return { kind: 'video', id: m.id };
       }
       return null;
-    });
-    vp.setOnStart((messageId) => {
+    };
+    useVoicePlayerStore.getState().setNextResolver(resolveNext);
+    useVideoNotePlayerStore.getState().setNextResolver(resolveNext);
+    useVoicePlayerStore.getState().setOnStart((messageId) => {
       const t = useDmStore.getState().threads[peerId];
       const m = t?.messages.find((x) => x.id === messageId);
       if (m && isUnplayedIncoming(m)) useDmStore.getState().markVoicePlayed(messageId);
     });
     return () => {
-      const cur = useVoicePlayerStore.getState();
-      cur.setNextResolver(null);
-      cur.setOnStart(null);
-      cur.stop();
+      const vp = useVoicePlayerStore.getState();
+      vp.setNextResolver(null);
+      vp.setOnStart(null);
+      vp.stop();
+      const vnp = useVideoNotePlayerStore.getState();
+      vnp.setNextResolver(null);
+      vnp.stop();
     };
   }, [peerId, myId]);
-
-  // Авто-следующий видео-«кружок»: после полного проигрывания стартует следующий
-  // готовый кружок по порядку (как цепочка голосовых). Резолвер читает свежий тред.
-  useEffect(() => {
-    if (!peerId) return;
-    useVideoNotePlayerStore.getState().setNextResolver((currentId) => {
-      const t = useDmStore.getState().threads[peerId];
-      if (!t) return null;
-      const idx = t.messages.findIndex((m) => m.id === currentId);
-      if (idx < 0) return null;
-      for (let i = idx + 1; i < t.messages.length; i++) {
-        const m = t.messages[i];
-        if (m.videoUrl && m.videoStatus === 'ready') return m.id;
-      }
-      return null;
-    });
-    return () => {
-      const cur = useVideoNotePlayerStore.getState();
-      cur.setNextResolver(null);
-      cur.stop();
-    };
-  }, [peerId]);
 
   // При появлении/скрытии клавиатуры (resize visual viewport) держим ленту у
   // низа, чтобы последнее сообщение не пряталось за поднявшимся композером.
@@ -734,12 +767,34 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
   const online = peerPresence?.online ?? thread.online;
   const isTyping = typingUntil != null && typingUntil > Date.now();
   const room = peerPresence?.currentRoom ?? null;
+  // Вид статуса (не сам текст) — драйвер кросс-фейда в AnimatedStatusText:
+  // тиканье «5 минут назад» → «6 минут назад» не должно переигрывать анимацию,
+  // а смена вида (печатает → в сети) — должна. Не завязан на конкретные
+  // строки, поэтому новые статусы в будущем подключаются сами.
+  const statusId = isTyping
+    ? typingKind === 'voice'
+      ? 'typing-voice'
+      : typingKind === 'video'
+        ? 'typing-video'
+        : 'typing-text'
+    : online
+      ? room
+        ? 'room'
+        : 'online'
+      : 'offline';
   const subtitle = isTyping ? (
-    <span style={{ color: 'var(--accent-hi)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+    // Без своего color — наследует цвет от внешнего блока (тот же, что у «в
+    // сети»), чтобы все статусы шапки выглядели единообразно.
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
       {typingKind === 'voice' ? (
         <>
           <Icon name="mic" size={13} style={{ marginRight: -1 }} />
           записывает голосовое
+        </>
+      ) : typingKind === 'video' ? (
+        <>
+          <Icon name="video" size={13} style={{ marginRight: -1 }} />
+          записывает видео
         </>
       ) : (
         'печатает'
@@ -748,7 +803,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     </span>
   ) : online ? (
     room ? (
-      <span style={{ color: 'var(--accent-hi)' }}>смотрит «{room.name}»</span>
+      <>смотрит «{room.name}»</>
     ) : (
       'в сети'
     )
@@ -780,57 +835,56 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
             boxShadow: '0 3px 12px rgba(0,0,0,0.32)',
             color: ACCENT_TEXT,
             cursor: 'pointer',
+            // На мобилке шапка — grid (1fr auto 1fr): без этого кнопка растянется
+            // на всю левую колонку, а пилюля перестанет быть по центру.
+            justifySelf: 'start',
           }}
         >
           <Icon name="chevron" size={22} stroke={2.4} style={{ transform: 'rotate(180deg)' }} />
         </button>
       )}
-      <Link
-        to={`/u/${encodeURIComponent(peer.username)}`}
-        style={
-          isMobile
-            ? {
-                // Стеклянный овальный блок — чтобы имя/статус не сливались с
-                // лентой, которая скроллится под прозрачной шапкой.
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 9,
-                color: 'inherit',
-                textDecoration: 'none',
-                minWidth: 0,
-                maxWidth: '72%',
-                background: 'var(--glass-bg)',
-                backdropFilter: 'blur(var(--glass-blur))',
-                WebkitBackdropFilter: 'blur(var(--glass-blur))',
-                borderRadius: 999,
-                padding: '4px 14px 4px 4px',
-                boxShadow: '0 3px 12px rgba(0,0,0,0.32)',
-              }
-            : { display: 'flex', alignItems: 'center', gap: 11, color: 'inherit', textDecoration: 'none', minWidth: 0, flex: 1 }
-        }
-      >
-        <Avatar name={peer.username} seed={peer.avatarSeed} src={peer.avatarUrl} size={isMobile ? 36 : 40} status={online ? 'online' : 'offline'} />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {peer.username}
+      {isMobile ? (
+        // «Живой» пузырь: пружинно меняет ширину под контент и мягко
+        // кросс-фейдит строку статуса — см. AnimatedStatusBubble.
+        <AnimatedStatusBubble
+          to={`/u/${encodeURIComponent(peer.username)}`}
+          avatarName={peer.username}
+          avatarSeed={peer.avatarSeed}
+          avatarSrc={peer.avatarUrl}
+          avatarSize={36}
+          online={online}
+          username={peer.username}
+          statusId={statusId}
+          statusContent={subtitle}
+          statusColor={isTyping || online ? ACCENT_TEXT_SOFT : 'var(--text-2)'}
+        />
+      ) : (
+        <Link
+          to={`/u/${encodeURIComponent(peer.username)}`}
+          style={{ display: 'flex', alignItems: 'center', gap: 11, color: 'inherit', textDecoration: 'none', minWidth: 0, flex: 1 }}
+        >
+          <Avatar name={peer.username} seed={peer.avatarSeed} src={peer.avatarUrl} size={40} status={online ? 'online' : 'offline'} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {peer.username}
+            </div>
+            <div
+              style={{
+                fontSize: 12.5,
+                fontWeight: 500,
+                marginTop: 1,
+                color: isTyping || online ? ACCENT_TEXT_SOFT : 'var(--text-2)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {subtitle}
+            </div>
           </div>
-          <div
-            style={{
-              fontSize: 12.5,
-              fontWeight: 500,
-              marginTop: 1,
-              color: isTyping || online ? ACCENT_TEXT_SOFT : 'var(--text-2)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {subtitle}
-          </div>
-        </div>
-      </Link>
-      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-        <HeaderActionButton icon="video" label="Видеозвонок" />
+        </Link>
+      )}
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0, justifySelf: isMobile ? 'end' : undefined }}>
         <HeaderActionButton icon="phone" label="Позвонить" />
       </div>
     </>
@@ -854,10 +908,8 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
         messages={thread.messages}
         myId={myId}
         peerLastReadAt={thread.peerLastReadAt}
-        onOpenImage={(url, rect) => setLightbox({ url, rect })}
-        onImageLoad={() => {
-          if (pinnedRef.current) scrollToBottom();
-        }}
+        onOpenImage={onOpenImage}
+        onImageLoad={onImageLoad}
       />
     </div>
   );
@@ -972,10 +1024,27 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
         >
           {messagesInner}
         </div>
-        <VoiceNowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} topOffset={headerH} />
-        <VideoNoteNowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} topOffset={headerH} />
+        <NowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} topOffset={headerH} />
         {jumpButton}
-        <header ref={headerRef} className="dm-noselect" style={{ ...headerBase, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }}>
+        <header
+          ref={headerRef}
+          className="dm-noselect"
+          style={{
+            ...headerBase,
+            // Grid вместо flex+space-between: с 1fr auto 1fr средняя колонка
+            // (пилюля) всегда РОВНО по центру — обе боковые колонки получают
+            // поровну оставшегося места независимо от реальной ширины кнопки
+            // назад слева и кнопки звонка справа.
+            display: 'grid',
+            gridTemplateColumns: '1fr auto 1fr',
+            justifyContent: 'normal',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 5,
+          }}
+        >
           {headerInner}
         </header>
         <div ref={composerRef} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 5 }}>
@@ -1003,8 +1072,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
         {headerInner}
       </header>
       <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <VoiceNowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} />
-        <VideoNoteNowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} />
+        <NowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} />
         <div
           ref={scrollRef}
           onScroll={onScroll}
@@ -1161,129 +1229,174 @@ function MessageList({
   return (
     <>
       {messages.map((m) => {
-        const mine = m.senderId === myId || m.senderId === 'me';
         const day = dayLabel(m.createdAt);
         const showDay = day !== lastDay;
         lastDay = day;
-        const read = mine && peerReadMs >= new Date(m.createdAt).getTime() && !m.pending;
         const fresh = !reduceMotion && new Date(m.createdAt).getTime() >= mountTsRef.current - 2000;
-        const status = !mine ? null : m.failed ? (
-          <span style={{ color: '#ffd0d0' }} title="Не отправлено">!</span>
-        ) : m.pending ? (
-          <Ticks read={false} faint />
-        ) : (
-          <Ticks read={read} />
-        );
         return (
-          <div key={m.nonce ?? m.id}>
-            {showDay && (
-              <div style={{ display: 'grid', placeItems: 'center', margin: '14px 0 14px' }}>
-                <span style={{ fontSize: 12.5, color: 'var(--text-3)', background: 'var(--bg-2)', padding: '4px 13px', borderRadius: 13 }}>
-                  {day}
-                </span>
-              </div>
-            )}
-            <div style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', padding: '3px 0' }}>
-              <div
-                style={{
-                  maxWidth: '76%',
-                  display: 'flex',
-                  transformOrigin: mine ? 'right bottom' : 'left bottom',
-                  ...(fresh ? { animation: 'dmBubbleIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) both' } : null),
-                }}
-              >
-              {(() => {
-                // Видео-«кружок» — самодостаточный круглый бабл (без прямоугольной подложки).
-                if (m.videoStatus) {
-                  return <VideoMessageBubble m={m} clock={fmtTime(m.createdAt)} status={status} />;
-                }
-                const isImage = !!m.imageUrl;
-                const isVoice = !!m.voiceUrl;
-                const bareImage = isImage && !m.body;
-                const timeColor = mine ? ON_ACCENT_DIM : 'var(--text-3)';
-                return (
-                  <div
-                    style={{
-                      position: 'relative',
-                      maxWidth: '100%',
-                      padding: isVoice ? '9px 13px 8px 9px' : bareImage ? 0 : isImage ? 4 : '8px 13px 6px',
-                      borderRadius: mine ? R_BUBBLE_OUT : R_BUBBLE_IN,
-                      background: bareImage ? 'transparent' : mine ? ACCENT_GRAD : 'var(--bg-3)',
-                      border: !mine && !bareImage ? '1px solid var(--line-2)' : 'none',
-                      color: mine ? '#fff' : 'var(--text-0)',
-                      boxShadow: mine && !bareImage ? OUT_SHADOW : 'none',
-                      opacity: m.pending ? 0.7 : 1,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {isVoice ? (
-                      <VoicePlayer
-                        messageId={m.id}
-                        url={m.voiceUrl!}
-                        durationSec={m.voiceDurationSec ?? 0}
-                        peaks={m.voicePeaks ?? []}
-                        mine={mine}
-                        played={!!m.voicePlayed}
-                        pending={m.pending}
-                        clock={fmtTime(m.createdAt)}
-                        statusSlot={status}
-                      />
-                    ) : isImage ? (
-                      <>
-                        <img
-                          src={m.imageUrl}
-                          alt=""
-                          loading="lazy"
-                          onLoad={onImageLoad}
-                          onClick={(e) => onOpenImage(m.imageUrl!, e.currentTarget.getBoundingClientRect())}
-                          style={{
-                            display: 'block',
-                            maxWidth: 'min(260px, 72vw)',
-                            maxHeight: 340,
-                            width: 'auto',
-                            height: 'auto',
-                            borderRadius: bareImage ? 'inherit' : 12,
-                            cursor: 'pointer',
-                          }}
-                        />
-                        {m.body && (
-                          <span style={{ display: 'block', padding: '6px 9px 0', fontSize: 15, lineHeight: 1.32, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                            {m.body}
-                          </span>
-                        )}
-                        {bareImage ? (
-                          // Время поверх фото — тёмный чип в углу.
-                          <span style={{ position: 'absolute', bottom: 8, right: 8, display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: '#fff', padding: '3px 8px', background: 'rgba(0,0,0,0.45)', borderRadius: 11 }}>
-                            {fmtTime(m.createdAt)}
-                            {status}
-                          </span>
-                        ) : (
-                          <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 500, color: timeColor, padding: '3px 7px 1px' }}>
-                            {fmtTime(m.createdAt)}
-                            {status}
-                          </span>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <span style={{ fontSize: 15, lineHeight: 1.32, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body}</span>
-                        <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 1, fontSize: 11, fontWeight: 500, color: timeColor }}>
-                          {fmtTime(m.createdAt)}
-                          {status}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                );
-              })()}
-              </div>
-            </div>
-          </div>
+          <MessageRow
+            key={m.nonce ?? m.id}
+            m={m}
+            myId={myId}
+            peerReadMs={peerReadMs}
+            day={day}
+            showDay={showDay}
+            fresh={fresh}
+            onOpenImage={onOpenImage}
+            onImageLoad={onImageLoad}
+          />
         );
       })}
     </>
   );
 }
+
+/**
+ * Одно сообщение в ленте — вынесено из `MessageList.map()` и обёрнуто в
+ * `memo`, чтобы обновление ОДНОГО сообщения (например, `voicePlayed` при
+ * старте прослушивания) не пересчитывало JSX всех остальных бабблов в тред
+ * при каждом ре-рендере. `messages`-массив в dmStore пересобирается через
+ * `.slice()` с заменой одного элемента (см. markVoicePlayed) — ссылки на
+ * ВСЕ остальные сообщения остаются теми же, поэтому `memo` реально отсекает
+ * лишнюю работу для длинных тредов (это давало на iOS просадки кадра на
+ * 100-600мс на старте/переходе гс/кружков — реконсиляция всего списка вместо
+ * одного изменившегося элемента).
+ */
+const MessageRow = memo(function MessageRow({
+  m,
+  myId,
+  peerReadMs,
+  day,
+  showDay,
+  fresh,
+  onOpenImage,
+  onImageLoad,
+}: {
+  m: ClientDm;
+  myId: string;
+  peerReadMs: number;
+  day: string;
+  showDay: boolean;
+  fresh: boolean;
+  onOpenImage: (url: string, rect: DOMRect) => void;
+  onImageLoad: () => void;
+}) {
+  const mine = m.senderId === myId || m.senderId === 'me';
+  const read = mine && peerReadMs >= new Date(m.createdAt).getTime() && !m.pending;
+  const status = !mine ? null : m.failed ? (
+    <span style={{ color: '#ffd0d0' }} title="Не отправлено">!</span>
+  ) : m.pending ? (
+    <Ticks read={false} faint />
+  ) : (
+    <Ticks read={read} />
+  );
+  return (
+    <div>
+      {showDay && (
+        <div style={{ display: 'grid', placeItems: 'center', margin: '14px 0 14px' }}>
+          <span style={{ fontSize: 12.5, color: 'var(--text-3)', background: 'var(--bg-2)', padding: '4px 13px', borderRadius: 13 }}>
+            {day}
+          </span>
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', padding: '3px 0' }}>
+        <div
+          style={{
+            maxWidth: '76%',
+            display: 'flex',
+            transformOrigin: mine ? 'right bottom' : 'left bottom',
+            ...(fresh ? { animation: 'dmBubbleIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) both' } : null),
+          }}
+        >
+        {(() => {
+          // Видео-«кружок» — самодостаточный круглый бабл (без прямоугольной подложки).
+          if (m.videoStatus) {
+            return <VideoMessageBubble m={m} clock={fmtTime(m.createdAt)} status={status} />;
+          }
+          const isImage = !!m.imageUrl;
+          const isVoice = !!m.voiceUrl;
+          const bareImage = isImage && !m.body;
+          const timeColor = mine ? ON_ACCENT_DIM : 'var(--text-3)';
+          return (
+            <div
+              style={{
+                position: 'relative',
+                maxWidth: '100%',
+                padding: isVoice ? '9px 13px 8px 9px' : bareImage ? 0 : isImage ? 4 : '8px 13px 6px',
+                borderRadius: mine ? R_BUBBLE_OUT : R_BUBBLE_IN,
+                background: bareImage ? 'transparent' : mine ? ACCENT_GRAD : 'var(--bg-3)',
+                border: !mine && !bareImage ? '1px solid var(--line-2)' : 'none',
+                color: mine ? '#fff' : 'var(--text-0)',
+                boxShadow: mine && !bareImage ? OUT_SHADOW : 'none',
+                opacity: m.pending ? 0.7 : 1,
+                overflow: 'hidden',
+              }}
+            >
+              {isVoice ? (
+                <VoicePlayer
+                  messageId={m.id}
+                  url={m.voiceUrl!}
+                  durationSec={m.voiceDurationSec ?? 0}
+                  peaks={m.voicePeaks ?? []}
+                  mine={mine}
+                  played={!!m.voicePlayed}
+                  pending={m.pending}
+                  clock={fmtTime(m.createdAt)}
+                  statusSlot={status}
+                />
+              ) : isImage ? (
+                <>
+                  <img
+                    src={m.imageUrl}
+                    alt=""
+                    loading="lazy"
+                    onLoad={onImageLoad}
+                    onClick={(e) => onOpenImage(m.imageUrl!, e.currentTarget.getBoundingClientRect())}
+                    style={{
+                      display: 'block',
+                      maxWidth: 'min(260px, 72vw)',
+                      maxHeight: 340,
+                      width: 'auto',
+                      height: 'auto',
+                      borderRadius: bareImage ? 'inherit' : 12,
+                      cursor: 'pointer',
+                    }}
+                  />
+                  {m.body && (
+                    <span style={{ display: 'block', padding: '6px 9px 0', fontSize: 15, lineHeight: 1.32, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {m.body}
+                    </span>
+                  )}
+                  {bareImage ? (
+                    // Время поверх фото — тёмный чип в углу.
+                    <span style={{ position: 'absolute', bottom: 8, right: 8, display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: '#fff', padding: '3px 8px', background: 'rgba(0,0,0,0.45)', borderRadius: 11 }}>
+                      {fmtTime(m.createdAt)}
+                      {status}
+                    </span>
+                  ) : (
+                    <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 500, color: timeColor, padding: '3px 7px 1px' }}>
+                      {fmtTime(m.createdAt)}
+                      {status}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span style={{ fontSize: 15, lineHeight: 1.32, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body}</span>
+                  <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginTop: 1, fontSize: 11, fontWeight: 500, color: timeColor }}>
+                    {fmtTime(m.createdAt)}
+                    {status}
+                  </span>
+                </>
+              )}
+            </div>
+          );
+        })()}
+        </div>
+      </div>
+    </div>
+  );
+});
 
 /** Анимированное многоточие индикатора «печатает…» (три бегущие точки). */
 function TypingDots() {
@@ -1306,33 +1419,113 @@ function TypingDots() {
   );
 }
 
-/** Круглая кнопка действия в шапке чата (видео/звонок). Пока без обработчика —
- *  функционал телефонии добавим позже, сейчас только оформление по макету. */
+/**
+ * Круглая кнопка действия в шапке чата (звонок). Телефония ещё не реализована —
+ * по тапу вместо звонка показывает всплывающую подсказку «в разработке» с той
+ * же пружинной анимацией появления/исчезания, что у пузыря данных собеседника
+ * (см. AnimatedStatusBubble/useSpringValue): растягивается-«перетекает» к
+ * полному размеру с лёгким пружинением, схлопывается так же мягко, а не
+ * мгновенным show/hide. Скрывается сама через паузу или по тапу мимо.
+ */
 function HeaderActionButton({ icon, label }: { icon: IconName; label: string }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+
+  useSpringValue(open ? 1 : 0, (v) => {
+    const el = tipRef.current;
+    if (!el) return;
+    el.style.opacity = String(v);
+    // Растёт от чуть уменьшенного (не из scale(0) — ничто не появляется из
+    // ничего), transform-origin — угол у самой кнопки-триггера.
+    el.style.transform = `scale(${0.82 + v * 0.18})`;
+  });
+
+  // Авто-скрытие через паузу.
+  useEffect(() => {
+    if (!open) return;
+    const t = window.setTimeout(() => setOpen(false), 2600);
+    return () => window.clearTimeout(t);
+  }, [open]);
+
+  // Тап мимо — скрыть сразу.
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent): void => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [open]);
+
   return (
-    <button
-      type="button"
-      // Телефония ещё не реализована — кнопки заглушены до появления функционала.
-      disabled
-      aria-disabled
-      aria-label={`${label} — скоро`}
-      title={`${label} — скоро`}
-      style={{
-        width: 37,
-        height: 37,
-        flexShrink: 0,
-        borderRadius: 999,
-        border: '1px solid var(--line-1)',
-        background: 'var(--bg-3)',
-        color: 'var(--text-0)',
-        display: 'grid',
-        placeItems: 'center',
-        cursor: 'not-allowed',
-        opacity: 0.4,
-      }}
-    >
-      <Icon name={icon} size={18} />
-    </button>
+    <span ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={`${label} — в разработке`}
+        className="dm-press"
+        style={{
+          width: 37,
+          height: 37,
+          flexShrink: 0,
+          borderRadius: 999,
+          border: '1px solid var(--line-1)',
+          background: 'var(--bg-3)',
+          color: 'var(--text-0)',
+          display: 'grid',
+          placeItems: 'center',
+          cursor: 'pointer',
+          opacity: 0.65,
+        }}
+      >
+        <Icon name={icon} size={18} />
+      </button>
+      <div
+        ref={tipRef}
+        role="status"
+        aria-hidden={!open}
+        style={{
+          position: 'absolute',
+          top: '100%',
+          right: 0,
+          marginTop: 10,
+          transformOrigin: 'top right',
+          opacity: 0,
+          pointerEvents: 'none',
+          zIndex: 20,
+          background: 'var(--bg-4)',
+          border: '1px solid var(--line-2)',
+          // Полная пилюля. Стрелка ниже сдвинута дальше от угла (right: 24, а
+          // не 13) — иначе при таком радиусе она бы легла на закруглённый угол
+          // вместо прямого участка границы и выглядела бы срезанной.
+          borderRadius: 999,
+          padding: '10px 16px',
+          boxShadow: 'var(--shadow-2)',
+          fontSize: 13,
+          fontWeight: 500,
+          color: 'var(--text-0)',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {/* Стрелка-указатель на кнопку. */}
+        <span
+          aria-hidden
+          style={{
+            position: 'absolute',
+            top: -5,
+            right: 24,
+            width: 10,
+            height: 10,
+            background: 'var(--bg-4)',
+            borderLeft: '1px solid var(--line-2)',
+            borderTop: '1px solid var(--line-2)',
+            transform: 'rotate(45deg)',
+          }}
+        />
+        Звонки пока в разработке
+      </div>
+    </span>
   );
 }
 
@@ -1360,6 +1553,32 @@ interface Attachment {
 
 /** Появление акцентной кнопки-действия (отправить/голосовое) — один мягкий «pop». */
 const ACTION_POP = 'dmActionPop 0.18s cubic-bezier(0.22, 1, 0.36, 1) both';
+
+/**
+ * Схлопывает частые вызовы (например, `pointermove` жеста удержания — их может
+ * быть на порядок больше, чем кадров отрисовки) в один React `setState` за кадр.
+ * Без этого каждое сырое событие указателя триггерило бы ре-рендер всего
+ * композера во время перетаскивания — лишняя нагрузка на главный поток именно
+ * в момент, когда важна плавность жеста.
+ */
+function useRafCoalesced<T>(apply: (value: T) => void): (value: T) => void {
+  const rafRef = useRef<number | null>(null);
+  const latestRef = useRef<T | null>(null);
+  useEffect(
+    () => () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    },
+    [],
+  );
+  return (value: T) => {
+    latestRef.current = value;
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      if (latestRef.current != null) apply(latestRef.current);
+    });
+  };
+}
 
 /** Минимальная длительность записи, ниже — считаем случайным тапом. */
 const MIN_VOICE_MS = 700;
@@ -1547,14 +1766,26 @@ function Composer({
   // отмены). Решение (зафиксировать/отменить/отправить) принимаем ТОЛЬКО на
   // отпускании пальца — чтобы ничего не размонтировалось посреди жеста (иначе
   // ломается захват указателя и сбивается отсчёт записи).
+  const applyMicMove = useRafCoalesced<{ progress: number; armed: boolean }>(({ progress, armed }) => {
+    // Жест мог завершиться (палец уже отпущен/отменён) до того, как этот
+    // отложенный на кадр апдейт долетел — иначе он затирает мгновенный сброс
+    // в 0 из onMicUp/onMicCancel устаревшим значением.
+    if (!holdRef.current.active) return;
+    setLockProgress(progress);
+    armCancel(armed);
+  });
   const onMicMove = (clientX: number, clientY: number): void => {
     if (!holdRef.current.active) return;
     const dy = holdRef.current.startY - clientY; // вверх — положительно
     const dx = holdRef.current.startX - clientX; // влево — положительно
     // Шкала следует за пальцем в обе стороны: повёл вверх — заполняется, повёл
-    // обратно вниз — опустошается (можно «передумать» и не фиксировать).
-    setLockProgress(Math.max(0, Math.min(1, dy / LOCK_LIFT_PX)));
-    armCancel(dy < LOCK_LIFT_PX * 0.5 && dx > CANCEL_SWIPE_PX);
+    // обратно вниз — опустошается (можно «передумать» и не фиксировать). Не
+    // чаще кадра отрисовки (см. useRafCoalesced) — иначе лишние ре-рендеры на
+    // каждое сырое событие указателя дёргают композер во время перетаскивания.
+    applyMicMove({
+      progress: Math.max(0, Math.min(1, dy / LOCK_LIFT_PX)),
+      armed: dy < LOCK_LIFT_PX * 0.5 && dx > CANCEL_SWIPE_PX,
+    });
   };
 
   const onMicUp = async (clientX: number, clientY: number): Promise<void> => {
@@ -1605,6 +1836,18 @@ function Composer({
   const modeAtPressRef = useRef<'voice' | 'video'>('voice');
   const toggleMode = (): void => setRecordMode((m) => (m === 'voice' ? 'video' : 'voice'));
 
+  // Пока идёт запись видео-«кружка» — сигналим собеседнику «записывает видео…»
+  // (тот же принцип, что у голосовых: TTL 6с, поэтому обновляем каждые 3с).
+  useEffect(() => {
+    if (!videoRecorder.recording) return;
+    sendTyping(peer.id, true, 'video');
+    const iv = window.setInterval(() => sendTyping(peer.id, true, 'video'), 3000);
+    return () => {
+      window.clearInterval(iv);
+      sendTyping(peer.id, false, 'video');
+    };
+  }, [videoRecorder.recording, peer.id, sendTyping]);
+
   const durationSecOf = (ms: number): number => Math.max(1, Math.round(ms / 100) / 10);
   const resetVideoState = (): void => {
     videoLockedRef.current = false;
@@ -1631,12 +1874,19 @@ function Composer({
     await videoRecorder.cancel();
   };
 
+  const applyVideoMove = useRafCoalesced<{ progress: number; armed: boolean }>(({ progress, armed }) => {
+    if (!holdRef.current.active) return;
+    setVideoLockProgress(progress);
+    armCancel(armed);
+  });
   const onVideoMove = (clientX: number, clientY: number): void => {
     if (!holdRef.current.active) return;
     const dy = holdRef.current.startY - clientY;
     const dx = holdRef.current.startX - clientX;
-    setVideoLockProgress(Math.max(0, Math.min(1, dy / LOCK_LIFT_PX)));
-    armCancel(dy < LOCK_LIFT_PX * 0.5 && dx > CANCEL_SWIPE_PX);
+    applyVideoMove({
+      progress: Math.max(0, Math.min(1, dy / LOCK_LIFT_PX)),
+      armed: dy < LOCK_LIFT_PX * 0.5 && dx > CANCEL_SWIPE_PX,
+    });
   };
   const onVideoUp = async (clientX: number, clientY: number): Promise<void> => {
     if (!holdRef.current.active) return;
@@ -1776,7 +2026,12 @@ function Composer({
     setAttach({ url: '', width: 0, height: 0, preview });
     setUploading(true);
     try {
-      const res = await dmApi.uploadImage(file);
+      // Перекодируем через canvas — «сбрасывает» EXIF-ориентацию (см. комментарий
+      // у normalizeImageOrientation): без этого некоторые фото с iOS уходят на
+      // сервер повёрнутыми. Если перекодирование почему-то не удалось — лучше
+      // отправить исходный файл, чем вовсе не дать прикрепить фото.
+      const normalized = await normalizeImageOrientation(file).catch(() => file);
+      const res = await dmApi.uploadImage(normalized);
       setAttach({ url: res.url, width: res.width, height: res.height, preview });
     } catch (e) {
       setAttach(null);
@@ -2141,7 +2396,7 @@ function RecordingBar({
         willChange: 'transform, opacity',
       }}
     >
-      <span style={{ width: 9, height: 9, borderRadius: 999, background: '#ff453a', animation: exiting ? undefined : 'vellinPulse 1.1s ease-in-out infinite', flexShrink: 0 }} />
+      <span className="dm-rec-dot" style={{ width: 9, height: 9, borderRadius: 999, background: '#ff453a', animation: exiting ? undefined : 'vellinPulse 1.1s ease-in-out infinite', flexShrink: 0 }} />
       <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 14, fontWeight: 600, color: 'var(--text-0)', minWidth: 32, flexShrink: 0 }}>{mm}</span>
       <LiveWaveform getLevel={getLevel} dim={cancelArmed} collapsed={exiting} />
       <span style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0, color: cancelArmed ? '#ff6b6b' : 'var(--text-2)' }}>
@@ -2342,6 +2597,7 @@ function MicButton({
   onPointerDown: (e: ReactPointerEvent) => void;
 }) {
   const isVideo = recordMode === 'video';
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Слой иконки: crossfade + лёгкий rotate/scale — «живой» morph микрофон⇄видео.
   const iconLayer = (active: boolean): CSSProperties => ({
     position: 'absolute',
@@ -2349,54 +2605,64 @@ function MicButton({
     display: 'grid',
     placeItems: 'center',
     opacity: active ? 1 : 0,
-    transform: active ? 'rotate(0deg) scale(1)' : 'rotate(-40deg) scale(0.6)',
-    transition: 'opacity .2s ease, transform .28s cubic-bezier(0.34, 1.56, 0.64, 1)',
+    transform: reduceMotion ? undefined : active ? 'rotate(0deg) scale(1)' : 'rotate(-40deg) scale(0.6)',
+    transition: reduceMotion ? 'opacity .2s ease' : 'opacity .2s ease, transform .28s cubic-bezier(0.34, 1.56, 0.64, 1)',
   });
   return (
-    <button
-      onPointerDown={onPointerDown}
-      onContextMenu={(e) => e.preventDefault()}
-      disabled={busy}
-      aria-label={
-        recording ? 'Запись — отпустите, чтобы отправить' : isVideo ? 'Видеосообщение (тап — переключить)' : 'Голосовое (тап — переключить)'
-      }
-      title="Удерживайте, чтобы записать · тап — сменить режим"
-      style={{
-        position: 'relative',
-        flexShrink: 0,
-        width: 40,
-        height: 40,
-        padding: 0,
-        borderRadius: 999,
-        border: 'none',
-        background: cancelArmed ? '#ff4d4f' : ACCENT_GRAD_BTN,
-        color: '#fff',
-        cursor: busy ? 'default' : 'pointer',
-        transform: `translateY(${-lift * 12}px) scale(${recording ? 1.08 : 1})`,
-        transition: 'transform .12s ease-out, background .15s ease',
-        // Свечение акцента + мягкая тень — кнопка «парит» над лентой.
-        boxShadow: `${BTN_GLOW}, 0 3px 10px rgba(0,0,0,0.4)`,
-        touchAction: 'none',
-        userSelect: 'none',
-        WebkitUserSelect: 'none',
-        opacity: busy ? 0.6 : 1,
-      }}
-    >
-      {cancelArmed ? (
-        <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
-          <Icon name="trash" size={20} />
-        </span>
-      ) : (
-        <>
-          <span style={iconLayer(!isVideo)}>
-            <Icon name="mic" size={20} />
+    // Внешняя обёртка несёт ТОЛЬКО подъём за пальцем (lift) — без transition, 1:1
+    // с позицией пальца. Раньше он делил один transform+transition с scale-бампом
+    // записи на самой кнопке: любое обновление lift (десятки раз в секунду во
+    // время протяжки) перезапускало 120мс transition на ВЕСЬ transform, и кнопка
+    // гонялась за пальцем с постоянным лагом вместо честного 1:1 — отсюда рывки
+    // при удержании и протяжке к замку.
+    <span style={{ display: 'block', width: 40, height: 40, flexShrink: 0, transform: `translateY(${-lift * 12}px)` }}>
+      <button
+        onPointerDown={onPointerDown}
+        onContextMenu={(e) => e.preventDefault()}
+        disabled={busy}
+        aria-label={
+          recording ? 'Запись — отпустите, чтобы отправить' : isVideo ? 'Видеосообщение (тап — переключить)' : 'Голосовое (тап — переключить)'
+        }
+        title="Удерживайте, чтобы записать · тап — сменить режим"
+        style={{
+          position: 'relative',
+          display: 'block',
+          width: 40,
+          height: 40,
+          padding: 0,
+          borderRadius: 999,
+          border: 'none',
+          background: cancelArmed ? '#ff4d4f' : ACCENT_GRAD_BTN,
+          color: '#fff',
+          cursor: busy ? 'default' : 'pointer',
+          // Только состояние записи (не жест) анимируется здесь — короткий бамп,
+          // не конфликтует с 1:1-подъёмом выше.
+          transform: reduceMotion ? undefined : recording ? 'scale(1.08)' : 'scale(1)',
+          transition: reduceMotion ? 'background .15s ease' : 'transform .12s ease-out, background .15s ease',
+          // Свечение акцента + мягкая тень — кнопка «парит» над лентой.
+          boxShadow: `${BTN_GLOW}, 0 3px 10px rgba(0,0,0,0.4)`,
+          touchAction: 'none',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          opacity: busy ? 0.6 : 1,
+        }}
+      >
+        {cancelArmed ? (
+          <span style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+            <Icon name="trash" size={20} />
           </span>
-          <span style={iconLayer(isVideo)}>
-            <Icon name="video" size={20} />
-          </span>
-        </>
-      )}
-    </button>
+        ) : (
+          <>
+            <span style={iconLayer(!isVideo)}>
+              <Icon name="mic" size={20} />
+            </span>
+            <span style={iconLayer(isVideo)}>
+              <Icon name="video" size={20} />
+            </span>
+          </>
+        )}
+      </button>
+    </span>
   );
 }
 
@@ -2438,7 +2704,12 @@ function LockHint({ progress }: { progress: number }) {
           transition: 'box-shadow .2s ease, border-color .2s ease',
         }}
       >
-        {/* Заливка снизу вверх — scaleY от нижнего края (на композиторе). */}
+        {/* Заливка снизу вверх — scaleY от нижнего края (на композиторе). БЕЗ
+            transition: значение обновляется на каждый пиксель протяжки пальца
+            (см. useRafCoalesced в Composer), и фиксированная по времени кривая
+            поверх него не успевает за жестом — заливка «плывёт» позади пальца
+            вместо честного 1:1. Прогресс сам по себе — это уже feedback, кривая
+            здесь не нужна. */}
         <div
           style={{
             position: 'absolute',
@@ -2446,7 +2717,6 @@ function LockHint({ progress }: { progress: number }) {
             background: ACCENT_GRAD_BTN,
             transform: `scaleY(${p})`,
             transformOrigin: 'bottom',
-            transition: 'transform .08s linear',
           }}
         />
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
@@ -2462,7 +2732,7 @@ function LockHint({ progress }: { progress: number }) {
         </div>
       </div>
       {/* Пульсирующая стрелка вверх (внешний span — анимация, чтобы не конфликтовать с rotate). */}
-      <span style={{ display: 'block', opacity: 0.9 - p * 0.9, animation: 'vellinNudgeUp 1s ease-in-out infinite' }}>
+      <span className="dm-anim" style={{ display: 'block', opacity: 0.9 - p * 0.9, animation: 'vellinNudgeUp 1s ease-in-out infinite' }}>
         <Icon name="chevron" size={16} style={{ display: 'block', transform: 'rotate(-90deg)', color: 'var(--accent-hi)' }} />
       </span>
     </div>

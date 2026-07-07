@@ -503,7 +503,7 @@ export interface DmConversation {
   /** Собеседник. */
   peer: PublicUser;
   /** Последнее сообщение в диалоге (для превью), либо null — диалог пуст. */
-  lastMessage: { body: string; senderId: string; createdAt: string; hasImage: boolean; hasVoice: boolean } | null;
+  lastMessage: { body: string; senderId: string; createdAt: string; hasImage: boolean; hasVoice: boolean; hasVideo: boolean } | null;
   /** Сколько у меня непрочитанных в этом диалоге. */
   unreadCount: number;
   /**

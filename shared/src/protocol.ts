@@ -507,8 +507,8 @@ export interface UserS2CDmTyping {
   conversationId: string;
   fromUserId: string;
   typing: boolean;
-  /** Что именно делает собеседник: печатает текст или записывает голосовое. */
-  kind?: 'text' | 'voice';
+  /** Что именно делает собеседник: печатает текст, записывает голосовое или кружок. */
+  kind?: 'text' | 'voice' | 'video';
 }
 /** Собеседник прослушал моё голосовое — обновить индикатор «прослушано». */
 export interface UserS2CDmVoicePlayed {
@@ -539,7 +539,8 @@ export type UserC2S =
   | UserC2SDmTyping
   | UserC2SDmRead
   | UserC2SDmVoicePlayed
-  | UserC2SPresenceFocus;
+  | UserC2SPresenceFocus
+  | UserC2SActivity;
 
 export interface UserC2SPong {
   t: 'pong';
@@ -605,8 +606,8 @@ export interface UserC2SDmTyping {
   t: 'dm_typing';
   toUserId: string;
   typing: boolean;
-  /** Текст (по умолчанию) или запись голосового. */
-  kind?: 'text' | 'voice';
+  /** Текст (по умолчанию), запись голосового или запись видео-«кружка». */
+  kind?: 'text' | 'voice' | 'video';
 }
 /** Отметить переписку с `peerId` прочитанной (до текущего момента). */
 export interface UserC2SDmRead {
@@ -622,6 +623,16 @@ export interface UserC2SPresenceFocus {
   t: 'presence_focus';
   conversationId: string | null;
   visible: boolean;
+}
+/**
+ * Реальная активность пользователя во вкладке (двигал мышью/тач/клавиатуру
+ * недавно), а не просто «вкладка открыта». Сервер считает пользователя
+ * онлайн, только если хотя бы одно его соединение активно — иначе, несмотря
+ * на открытый сокет, презенс отдаётся как офлайн.
+ */
+export interface UserC2SActivity {
+  t: 'activity';
+  active: boolean;
 }
 
 // ── Type guards ────────────────────────────────────────────────────────

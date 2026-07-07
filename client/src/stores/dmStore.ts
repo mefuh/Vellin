@@ -49,7 +49,7 @@ interface DmState {
   /** peerId → момент истечения «печатает…». */
   typing: Record<string, number>;
   /** peerId → что делает: печатает текст или записывает голосовое. */
-  typingKind: Record<string, 'text' | 'voice'>;
+  typingKind: Record<string, 'text' | 'voice' | 'video'>;
   /** Открытый сейчас диалог (для пометки прочтения и звука). */
   activePeerId: string | null;
   _send: ((msg: UserC2S) => void) | null;
@@ -88,10 +88,10 @@ interface DmState {
     payload: { conversationId: string; byUserId: string; readAt: string; unreadTotal?: number },
     myId: string,
   ) => void;
-  applyTyping: (fromUserId: string, typing: boolean, kind?: 'text' | 'voice') => void;
+  applyTyping: (fromUserId: string, typing: boolean, kind?: 'text' | 'voice' | 'video') => void;
   /** Открыли диалог — отметить прочитанным (оптимистично + сигнал серверу). */
   markRead: (peerId: string) => void;
-  sendTyping: (peerId: string, typing: boolean, kind?: 'text' | 'voice') => void;
+  sendTyping: (peerId: string, typing: boolean, kind?: 'text' | 'voice' | 'video') => void;
 
   reset: () => void;
 }
@@ -111,6 +111,9 @@ function bumpConversation(
     createdAt: message.createdAt,
     hasImage: !!message.imageUrl,
     hasVoice: !!message.voiceUrl,
+    // videoUrl появляется только после транскода — статус же есть сразу
+    // при создании (processing), маркер не должен ждать готового файла.
+    hasVideo: !!message.videoStatus,
   };
   if (idx === -1) {
     return [

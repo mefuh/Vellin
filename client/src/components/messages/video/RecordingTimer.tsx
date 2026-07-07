@@ -11,6 +11,7 @@ export function RecordingTimer({ elapsedMs }: { elapsedMs: number }): React.Reac
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontVariantNumeric: 'tabular-nums' }}>
       <span
+        className="dm-rec-dot"
         style={{
           width: 9,
           height: 9,
