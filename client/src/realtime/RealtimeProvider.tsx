@@ -9,6 +9,8 @@ import { useDmStore } from '../stores/dmStore';
 import { realtimeApi } from '../api/realtime';
 import { UserSocket } from '../ws/UserSocket';
 import { playDmSound } from '../utils/sound';
+import { createActivityTracker, type ActivityTracker } from './activityTracker';
+import { isMobileDevice } from '../utils/platform';
 
 /**
  * Держит app-wide пользовательский realtime-канал для авторизованного
@@ -92,6 +94,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
       }
     };
 
+    let activity: ActivityTracker | null = null;
+
     const socket = new UserSocket({
       getTicket: async () => (await realtimeApi.ticket()).ticket,
       onMessage,
@@ -102,15 +106,26 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
         setTimeout(() => {
           usePresenceStore.getState().rewatch();
           useLibraryStore.getState().rewatch();
+          // Сервер по умолчанию считает свежее соединение активным — синхронизируем
+          // реальным состоянием (важно после реконнекта, если пользователь простаивал).
+          if (activity) socket.send({ t: 'activity', active: activity.getActive() });
         }, 250),
     });
     usePresenceStore.getState().setSender((m) => socket.send(m));
     useLibraryStore.getState().setSender((m) => socket.send(m));
     useDmStore.getState().setSender((m) => socket.send(m));
+    // На мобильных простой не отслеживаем: открытый сокет = онлайн (как раньше).
+    // На тач-устройствах события активности редкие (скролл/тап раз в минуту —
+    // это нормальное чтение, а не «ушёл»), а сворачивание/блокировка экрана уже
+    // само по себе рвёт сокет и корректно уводит в офлайн через detach().
+    if (!isMobileDevice()) {
+      activity = createActivityTracker((active) => socket.send({ t: 'activity', active }));
+    }
     void socket.connect();
 
     return () => {
       socket.close();
+      activity?.stop();
       useNotificationsStore.getState().reset();
       useFriendsStore.getState().reset();
       usePresenceStore.getState().reset();

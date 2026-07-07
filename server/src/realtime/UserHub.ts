@@ -34,6 +34,12 @@ class UserHub {
   private readonly rooms = new Map<string, RoomRef>();
   /** userId → момент последнего ухода в офлайн (ms). In-memory, дублируется в БД. */
   private readonly lastSeen = new Map<string, number>();
+  /**
+   * Соединение → реально ли активен пользователь в этой вкладке (двигал
+   * мышью/клавиатурой/тач недавно). Открытая, но простаивающая вкладка не
+   * должна показывать пользователя онлайн — только открытый сокет недостаточно.
+   */
+  private readonly activeByConn = new Map<UserConnection, boolean>();
   /** Кого смотрит соединение (открытые страницы профилей). */
   private readonly watchedByConn = new Map<UserConnection, Set<string>>();
   /** watchedUserId → соединения, подписанные на его присутствие. */
@@ -62,9 +68,11 @@ class UserHub {
       set = new Set();
       this.conns.set(conn.userId, set);
     }
-    const wasOffline = set.size === 0;
+    const wasOnline = this.isOnline(conn.userId);
     set.add(conn);
-    if (wasOffline) {
+    // Только что подключился — считаем активным, пока клиент не пришлёт иначе.
+    this.activeByConn.set(conn, true);
+    if (!wasOnline) {
       this.lastSeen.delete(conn.userId); // снова онлайн
       void this.broadcastPresence(conn.userId);
     }
@@ -79,12 +87,16 @@ class UserHub {
     }
     this.librarySubs.delete(conn);
     this.focusByConn.delete(conn);
+    this.activeByConn.delete(conn);
     const set = this.conns.get(conn.userId);
     if (!set) return;
+    const wasOnline = this.isOnline(conn.userId);
     set.delete(conn);
     if (set.size === 0) {
       this.conns.delete(conn.userId);
       this.rooms.delete(conn.userId);
+    }
+    if (wasOnline && !this.isOnline(conn.userId)) {
       const now = Date.now();
       this.lastSeen.set(conn.userId, now);
       this.lastSeenWriter?.(conn.userId, new Date(now));
@@ -92,8 +104,34 @@ class UserHub {
     }
   }
 
+  /**
+   * Онлайн — это открытый сокет И хотя бы одно соединение реально активно
+   * (см. `activeByConn`). Простаивающая вкладка не в счёт.
+   */
   isOnline(userId: string): boolean {
-    return this.conns.has(userId);
+    const set = this.conns.get(userId);
+    if (!set) return false;
+    for (const c of set) {
+      if (this.activeByConn.get(c) !== false) return true;
+    }
+    return false;
+  }
+
+  /** Клиент сообщил о смене реальной активности в конкретной вкладке. */
+  setActivity(conn: UserConnection, active: boolean): void {
+    if (this.activeByConn.get(conn) === active) return;
+    const wasOnline = this.isOnline(conn.userId);
+    this.activeByConn.set(conn, active);
+    const nowOnline = this.isOnline(conn.userId);
+    if (wasOnline === nowOnline) return;
+    if (nowOnline) {
+      this.lastSeen.delete(conn.userId);
+    } else {
+      const now = Date.now();
+      this.lastSeen.set(conn.userId, now);
+      this.lastSeenWriter?.(conn.userId, new Date(now));
+    }
+    void this.broadcastPresence(conn.userId);
   }
 
   roomOf(userId: string): RoomRef | null {

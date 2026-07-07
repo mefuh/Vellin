@@ -126,6 +126,7 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         messageId?: string;
         conversationId?: string | null;
         visible?: boolean;
+        active?: boolean;
       };
       if (m.t === 'watch_presence' && typeof m.userId === 'string') {
         userHub.watch(conn, m.userId);
@@ -177,6 +178,8 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         // Какой диалог открыт + видима ли вкладка — для подавления push о ЛС.
         const convId = typeof m.conversationId === 'string' ? m.conversationId : null;
         userHub.setFocus(conn, convId, m.visible !== false);
+      } else if (m.t === 'activity' && typeof m.active === 'boolean') {
+        userHub.setActivity(conn, m.active);
       }
     });
     socket.on('close', () => {

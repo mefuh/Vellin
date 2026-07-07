@@ -539,7 +539,8 @@ export type UserC2S =
   | UserC2SDmTyping
   | UserC2SDmRead
   | UserC2SDmVoicePlayed
-  | UserC2SPresenceFocus;
+  | UserC2SPresenceFocus
+  | UserC2SActivity;
 
 export interface UserC2SPong {
   t: 'pong';
@@ -622,6 +623,16 @@ export interface UserC2SPresenceFocus {
   t: 'presence_focus';
   conversationId: string | null;
   visible: boolean;
+}
+/**
+ * Реальная активность пользователя во вкладке (двигал мышью/тач/клавиатуру
+ * недавно), а не просто «вкладка открыта». Сервер считает пользователя
+ * онлайн, только если хотя бы одно его соединение активно — иначе, несмотря
+ * на открытый сокет, презенс отдаётся как офлайн.
+ */
+export interface UserC2SActivity {
+  t: 'activity';
+  active: boolean;
 }
 
 // ── Type guards ────────────────────────────────────────────────────────
