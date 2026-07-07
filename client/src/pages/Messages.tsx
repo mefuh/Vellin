@@ -23,6 +23,7 @@ import { lastSeenLabel } from '../utils/lastSeen';
 import { AppHeader } from '../components/AppHeader';
 import { VoicePlayer } from '../components/messages/VoicePlayer';
 import { NowPlaying } from '../components/messages/NowPlaying';
+import { AnimatedStatusBubble } from '../components/messages/AnimatedStatusBubble';
 import { useVoicePlayerStore } from '../stores/voicePlayerStore';
 import { useVideoNotePlayerStore } from '../stores/videoNotePlayerStore';
 import type { MediaNextResolver } from '../stores/mediaChain';
@@ -727,12 +728,34 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
   const online = peerPresence?.online ?? thread.online;
   const isTyping = typingUntil != null && typingUntil > Date.now();
   const room = peerPresence?.currentRoom ?? null;
+  // Вид статуса (не сам текст) — драйвер кросс-фейда в AnimatedStatusText:
+  // тиканье «5 минут назад» → «6 минут назад» не должно переигрывать анимацию,
+  // а смена вида (печатает → в сети) — должна. Не завязан на конкретные
+  // строки, поэтому новые статусы в будущем подключаются сами.
+  const statusId = isTyping
+    ? typingKind === 'voice'
+      ? 'typing-voice'
+      : typingKind === 'video'
+        ? 'typing-video'
+        : 'typing-text'
+    : online
+      ? room
+        ? 'room'
+        : 'online'
+      : 'offline';
   const subtitle = isTyping ? (
-    <span style={{ color: 'var(--accent-hi)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+    // Без своего color — наследует цвет от внешнего блока (тот же, что у «в
+    // сети»), чтобы все статусы шапки выглядели единообразно.
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
       {typingKind === 'voice' ? (
         <>
           <Icon name="mic" size={13} style={{ marginRight: -1 }} />
           записывает голосовое
+        </>
+      ) : typingKind === 'video' ? (
+        <>
+          <Icon name="video" size={13} style={{ marginRight: -1 }} />
+          записывает видео
         </>
       ) : (
         'печатает'
@@ -741,7 +764,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     </span>
   ) : online ? (
     room ? (
-      <span style={{ color: 'var(--accent-hi)' }}>смотрит «{room.name}»</span>
+      <>смотрит «{room.name}»</>
     ) : (
       'в сети'
     )
@@ -773,57 +796,56 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
             boxShadow: '0 3px 12px rgba(0,0,0,0.32)',
             color: ACCENT_TEXT,
             cursor: 'pointer',
+            // На мобилке шапка — grid (1fr auto 1fr): без этого кнопка растянется
+            // на всю левую колонку, а пилюля перестанет быть по центру.
+            justifySelf: 'start',
           }}
         >
           <Icon name="chevron" size={22} stroke={2.4} style={{ transform: 'rotate(180deg)' }} />
         </button>
       )}
-      <Link
-        to={`/u/${encodeURIComponent(peer.username)}`}
-        style={
-          isMobile
-            ? {
-                // Стеклянный овальный блок — чтобы имя/статус не сливались с
-                // лентой, которая скроллится под прозрачной шапкой.
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 9,
-                color: 'inherit',
-                textDecoration: 'none',
-                minWidth: 0,
-                maxWidth: '72%',
-                background: 'var(--glass-bg)',
-                backdropFilter: 'blur(var(--glass-blur))',
-                WebkitBackdropFilter: 'blur(var(--glass-blur))',
-                borderRadius: 999,
-                padding: '4px 14px 4px 4px',
-                boxShadow: '0 3px 12px rgba(0,0,0,0.32)',
-              }
-            : { display: 'flex', alignItems: 'center', gap: 11, color: 'inherit', textDecoration: 'none', minWidth: 0, flex: 1 }
-        }
-      >
-        <Avatar name={peer.username} seed={peer.avatarSeed} src={peer.avatarUrl} size={isMobile ? 36 : 40} status={online ? 'online' : 'offline'} />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {peer.username}
+      {isMobile ? (
+        // «Живой» пузырь: пружинно меняет ширину под контент и мягко
+        // кросс-фейдит строку статуса — см. AnimatedStatusBubble.
+        <AnimatedStatusBubble
+          to={`/u/${encodeURIComponent(peer.username)}`}
+          avatarName={peer.username}
+          avatarSeed={peer.avatarSeed}
+          avatarSrc={peer.avatarUrl}
+          avatarSize={36}
+          online={online}
+          username={peer.username}
+          statusId={statusId}
+          statusContent={subtitle}
+          statusColor={isTyping || online ? ACCENT_TEXT_SOFT : 'var(--text-2)'}
+        />
+      ) : (
+        <Link
+          to={`/u/${encodeURIComponent(peer.username)}`}
+          style={{ display: 'flex', alignItems: 'center', gap: 11, color: 'inherit', textDecoration: 'none', minWidth: 0, flex: 1 }}
+        >
+          <Avatar name={peer.username} seed={peer.avatarSeed} src={peer.avatarUrl} size={40} status={online ? 'online' : 'offline'} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {peer.username}
+            </div>
+            <div
+              style={{
+                fontSize: 12.5,
+                fontWeight: 500,
+                marginTop: 1,
+                color: isTyping || online ? ACCENT_TEXT_SOFT : 'var(--text-2)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {subtitle}
+            </div>
           </div>
-          <div
-            style={{
-              fontSize: 12.5,
-              fontWeight: 500,
-              marginTop: 1,
-              color: isTyping || online ? ACCENT_TEXT_SOFT : 'var(--text-2)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {subtitle}
-          </div>
-        </div>
-      </Link>
-      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-        <HeaderActionButton icon="video" label="Видеозвонок" />
+        </Link>
+      )}
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0, justifySelf: isMobile ? 'end' : undefined }}>
         <HeaderActionButton icon="phone" label="Позвонить" />
       </div>
     </>
@@ -965,7 +987,25 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
         </div>
         <NowPlaying messages={thread.messages} peerUsername={peer.username} myId={myId} topOffset={headerH} />
         {jumpButton}
-        <header ref={headerRef} className="dm-noselect" style={{ ...headerBase, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }}>
+        <header
+          ref={headerRef}
+          className="dm-noselect"
+          style={{
+            ...headerBase,
+            // Grid вместо flex+space-between: с 1fr auto 1fr средняя колонка
+            // (пилюля) всегда РОВНО по центру — обе боковые колонки получают
+            // поровну оставшегося места независимо от реальной ширины кнопки
+            // назад слева и кнопки звонка справа.
+            display: 'grid',
+            gridTemplateColumns: '1fr auto 1fr',
+            justifyContent: 'normal',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 5,
+          }}
+        >
           {headerInner}
         </header>
         <div ref={composerRef} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 5 }}>
@@ -1676,6 +1716,18 @@ function Composer({
   const videoLockedRef = useRef(false);
   const modeAtPressRef = useRef<'voice' | 'video'>('voice');
   const toggleMode = (): void => setRecordMode((m) => (m === 'voice' ? 'video' : 'voice'));
+
+  // Пока идёт запись видео-«кружка» — сигналим собеседнику «записывает видео…»
+  // (тот же принцип, что у голосовых: TTL 6с, поэтому обновляем каждые 3с).
+  useEffect(() => {
+    if (!videoRecorder.recording) return;
+    sendTyping(peer.id, true, 'video');
+    const iv = window.setInterval(() => sendTyping(peer.id, true, 'video'), 3000);
+    return () => {
+      window.clearInterval(iv);
+      sendTyping(peer.id, false, 'video');
+    };
+  }, [videoRecorder.recording, peer.id, sendTyping]);
 
   const durationSecOf = (ms: number): number => Math.max(1, Math.round(ms / 100) / 10);
   const resetVideoState = (): void => {

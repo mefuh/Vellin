@@ -169,7 +169,12 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
             : undefined;
         void handleDmSend(principal.userId, m.toUserId, m.body, m.nonce, image, voice, video);
       } else if (m.t === 'dm_typing' && typeof m.toUserId === 'string' && typeof m.typing === 'boolean') {
-        handleDmTyping(principal.userId, m.toUserId, m.typing, m.kind === 'voice' ? 'voice' : 'text');
+        handleDmTyping(
+          principal.userId,
+          m.toUserId,
+          m.typing,
+          m.kind === 'voice' ? 'voice' : m.kind === 'video' ? 'video' : 'text',
+        );
       } else if (m.t === 'dm_read' && typeof m.peerId === 'string') {
         void handleDmRead(principal.userId, m.peerId);
       } else if (m.t === 'dm_voice_played' && typeof m.messageId === 'string') {
