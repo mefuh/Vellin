@@ -24,6 +24,7 @@ import { AppHeader } from '../components/AppHeader';
 import { VoicePlayer } from '../components/messages/VoicePlayer';
 import { NowPlaying } from '../components/messages/NowPlaying';
 import { AnimatedStatusBubble } from '../components/messages/AnimatedStatusBubble';
+import { useSpringValue } from '../hooks/useSpringValue';
 import { useVoicePlayerStore } from '../stores/voicePlayerStore';
 import { useVideoNotePlayerStore } from '../stores/videoNotePlayerStore';
 import type { MediaNextResolver } from '../stores/mediaChain';
@@ -1380,33 +1381,113 @@ function TypingDots() {
   );
 }
 
-/** Круглая кнопка действия в шапке чата (видео/звонок). Пока без обработчика —
- *  функционал телефонии добавим позже, сейчас только оформление по макету. */
+/**
+ * Круглая кнопка действия в шапке чата (звонок). Телефония ещё не реализована —
+ * по тапу вместо звонка показывает всплывающую подсказку «в разработке» с той
+ * же пружинной анимацией появления/исчезания, что у пузыря данных собеседника
+ * (см. AnimatedStatusBubble/useSpringValue): растягивается-«перетекает» к
+ * полному размеру с лёгким пружинением, схлопывается так же мягко, а не
+ * мгновенным show/hide. Скрывается сама через паузу или по тапу мимо.
+ */
 function HeaderActionButton({ icon, label }: { icon: IconName; label: string }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+
+  useSpringValue(open ? 1 : 0, (v) => {
+    const el = tipRef.current;
+    if (!el) return;
+    el.style.opacity = String(v);
+    // Растёт от чуть уменьшенного (не из scale(0) — ничто не появляется из
+    // ничего), transform-origin — угол у самой кнопки-триггера.
+    el.style.transform = `scale(${0.82 + v * 0.18})`;
+  });
+
+  // Авто-скрытие через паузу.
+  useEffect(() => {
+    if (!open) return;
+    const t = window.setTimeout(() => setOpen(false), 2600);
+    return () => window.clearTimeout(t);
+  }, [open]);
+
+  // Тап мимо — скрыть сразу.
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent): void => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [open]);
+
   return (
-    <button
-      type="button"
-      // Телефония ещё не реализована — кнопки заглушены до появления функционала.
-      disabled
-      aria-disabled
-      aria-label={`${label} — скоро`}
-      title={`${label} — скоро`}
-      style={{
-        width: 37,
-        height: 37,
-        flexShrink: 0,
-        borderRadius: 999,
-        border: '1px solid var(--line-1)',
-        background: 'var(--bg-3)',
-        color: 'var(--text-0)',
-        display: 'grid',
-        placeItems: 'center',
-        cursor: 'not-allowed',
-        opacity: 0.4,
-      }}
-    >
-      <Icon name={icon} size={18} />
-    </button>
+    <span ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={`${label} — в разработке`}
+        className="dm-press"
+        style={{
+          width: 37,
+          height: 37,
+          flexShrink: 0,
+          borderRadius: 999,
+          border: '1px solid var(--line-1)',
+          background: 'var(--bg-3)',
+          color: 'var(--text-0)',
+          display: 'grid',
+          placeItems: 'center',
+          cursor: 'pointer',
+          opacity: 0.65,
+        }}
+      >
+        <Icon name={icon} size={18} />
+      </button>
+      <div
+        ref={tipRef}
+        role="status"
+        aria-hidden={!open}
+        style={{
+          position: 'absolute',
+          top: '100%',
+          right: 0,
+          marginTop: 10,
+          transformOrigin: 'top right',
+          opacity: 0,
+          pointerEvents: 'none',
+          zIndex: 20,
+          background: 'var(--bg-4)',
+          border: '1px solid var(--line-2)',
+          // Полная пилюля. Стрелка ниже сдвинута дальше от угла (right: 24, а
+          // не 13) — иначе при таком радиусе она бы легла на закруглённый угол
+          // вместо прямого участка границы и выглядела бы срезанной.
+          borderRadius: 999,
+          padding: '10px 16px',
+          boxShadow: 'var(--shadow-2)',
+          fontSize: 13,
+          fontWeight: 500,
+          color: 'var(--text-0)',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {/* Стрелка-указатель на кнопку. */}
+        <span
+          aria-hidden
+          style={{
+            position: 'absolute',
+            top: -5,
+            right: 24,
+            width: 10,
+            height: 10,
+            background: 'var(--bg-4)',
+            borderLeft: '1px solid var(--line-2)',
+            borderTop: '1px solid var(--line-2)',
+            transform: 'rotate(45deg)',
+          }}
+        />
+        Звонки пока в разработке
+      </div>
+    </span>
   );
 }
 
