@@ -47,6 +47,44 @@ import {
   R_BUBBLE_OUT,
 } from '../components/messages/chatTheme';
 
+/**
+ * Перерисовывает картинку через `<img>`+canvas и отдаёт заново закодированный
+ * файл — БЕЗ EXIF-ориентации вообще, так что серверу нечего интерпретировать.
+ *
+ * Почему на сервере (jimp/exifr) это не чинится надёжно: на iOS Safari
+ * конвертация HEIC→JPEG при выборе фото иногда физически поворачивает
+ * пиксели, но оставляет в файле СТАРЫЙ EXIF-тег ориентации от исходного HEIC
+ * (уже неактуальный для уже повёрнутых пикселей) — любая честная EXIF-
+ * библиотека на сервере применит этот тег и повернёт УЖЕ правильную картинку
+ * ещё раз, независимо от того, насколько она надёжна. `<img>` в браузере
+ * рендерит файл ТОЧНО так же, как его в итоге увидит пользователь (это и
+ * есть источник истины) — перерисовав этот рендер на canvas и экспортировав
+ * заново, получаем файл без какой-либо ориентации для интерпретации.
+ */
+async function normalizeImageOrientation(file: File): Promise<File> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('image decode failed'));
+      el.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('canvas 2d context unavailable');
+    ctx.drawImage(img, 0, 0);
+    const mime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, mime, 0.92));
+    if (!blob) throw new Error('canvas toBlob failed');
+    return new File([blob], file.name, { type: mime });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function fmtTime(iso: string): string {
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -1988,7 +2026,12 @@ function Composer({
     setAttach({ url: '', width: 0, height: 0, preview });
     setUploading(true);
     try {
-      const res = await dmApi.uploadImage(file);
+      // Перекодируем через canvas — «сбрасывает» EXIF-ориентацию (см. комментарий
+      // у normalizeImageOrientation): без этого некоторые фото с iOS уходят на
+      // сервер повёрнутыми. Если перекодирование почему-то не удалось — лучше
+      // отправить исходный файл, чем вовсе не дать прикрепить фото.
+      const normalized = await normalizeImageOrientation(file).catch(() => file);
+      const res = await dmApi.uploadImage(normalized);
       setAttach({ url: res.url, width: res.width, height: res.height, preview });
     } catch (e) {
       setAttach(null);
