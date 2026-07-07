@@ -1,15 +1,18 @@
 import { create } from 'zustand';
 import { useVideoNotePlayerStore } from './videoNotePlayerStore';
+import type { MediaNextResolver } from './mediaChain';
 
 /**
  * Единый аудио-пайплайн для голосовых сообщений: ровно один общий `<audio>` на
  * всё приложение, поэтому одновременно играет только одно голосовое, а после
  * окончания автоматически запускается следующее непрослушанное (auto-next).
  * Компоненты {@link VoicePlayer} — это просто UI поверх этого стора.
+ *
+ * Резолвер общий с видео-кружками ({@link MediaNextResolver}): следующим может
+ * оказаться кружок — тогда эстафету принимает videoNotePlayerStore, а не
+ * пропускается в поисках следующего голосового.
  */
-
-/** Следующее голосовое для авто-проигрывания (или null — очередь кончилась). */
-export type NextResolver = (currentId: string) => { id: string; url: string; durationSec: number } | null;
+export type NextResolver = MediaNextResolver;
 
 const RATES = [1, 1.5, 2] as const;
 
@@ -65,13 +68,16 @@ export const useVoicePlayerStore = create<VoicePlayerState>((set, get) => {
     });
     audio.addEventListener('ended', () => {
       const id = get().currentId;
-      const next = id ? get()._next?.(id) : null;
-      if (next) {
-        // Авто-следующее непрослушанное — продолжаем цепочку.
+      const next = id ? get()._next?.(id) ?? null : null;
+      if (next?.kind === 'voice') {
+        // Следующее — тоже голосовое: продолжаем цепочку сами (общий <audio>
+        // уже «разблокирован» первым тапом, iOS играет без нового жеста).
         get().toggle(next.id, next.url, next.durationSec);
       } else {
-        // Плейлист закончился — полностью останавливаемся (currentId → null),
-        // чтобы мини-плеер «сейчас играет» сам закрылся с анимацией.
+        // Дальше — видео-кружок ИЛИ конец списка → останавливаемся. Кружок НЕ
+        // автозапускаем: iOS запрещает старт видео со звуком без прямого тапа,
+        // поэтому цепочка стопорится на кружке, а он ждёт нажатия (см. решение
+        // «стоп на кружке, ждём тап»).
         get().stop();
       }
     });
