@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import { Icon } from '../../shared';
 import { useVoicePlayerStore } from '../../stores/voicePlayerStore';
 import { useVideoNotePlayerStore } from '../../stores/videoNotePlayerStore';
@@ -66,43 +66,17 @@ export function NowPlaying({
 
   const current = currentId ? messages.find((m) => m.id === currentId) : undefined;
   const active = !!current && !!kind;
+  const open = active;
 
-  // Плавные вход/выход: бар держим смонтированным на время exit-анимации
-  // (съезжает сверху + затухание). При смене трека — того же ИЛИ другого типа —
-  // active не падает, поэтому бар не переанимируется, лишь обновляет содержимое.
+  // Бар смонтирован ВСЕГДА (не только пока активен) — видимость переключается
+  // только opacity/transform, без пересоздания DOM на каждый старт воспроизведения.
   const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const [mounted, setMounted] = useState(false);
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
   const lastFrameRef = useRef<{ title: string; mine: boolean; frac: number; subtitle: string }>({
     title: '',
     mine: false,
     frac: 0,
     subtitle: '',
   });
-
-  // Монтаж/размонтаж: при появлении монтируем (open=false), при исчезновении —
-  // запускаем выход и снимаем после анимации.
-  useEffect(() => {
-    if (active) {
-      setMounted(true);
-      return;
-    }
-    setOpen(false);
-    const t = window.setTimeout(() => setMounted(false), reduceMotion ? 0 : 300);
-    return () => window.clearTimeout(t);
-  }, [active, reduceMotion]);
-
-  // Вход: после того как бар реально отрисован в стартовом состоянии
-  // (open=false), форсируем reflow и переключаем в open — иначе браузер не видит
-  // стартовый кадр и перехода нет (вход «резкий»).
-  useEffect(() => {
-    if (mounted && active && !open) {
-      const el = rootRef.current;
-      if (el) void el.offsetHeight; // зафиксировать стартовое состояние
-      setOpen(true);
-    }
-  }, [mounted, active, open]);
 
   // Во время выхода (active=false) показываем последний кадр, чтобы не «прыгало».
   const mine = current ? current.senderId === myId || current.senderId === 'me' : lastFrameRef.current.mine;
@@ -115,11 +89,8 @@ export function NowPlaying({
     : lastFrameRef.current.subtitle;
   if (active) lastFrameRef.current = { title, mine, frac, subtitle };
 
-  if (!mounted) return null;
-
   return (
     <div
-      ref={rootRef}
       style={{
         position: 'absolute',
         top: topOffset + 8,
@@ -127,7 +98,7 @@ export function NowPlaying({
         right: 0,
         padding: '0 12px',
         zIndex: 6,
-        pointerEvents: 'none',
+        pointerEvents: open ? 'auto' : 'none',
         transform: open ? 'translateY(0)' : 'translateY(-10px)',
         opacity: open ? 1 : 0,
         transition: reduceMotion ? 'none' : 'transform .3s cubic-bezier(0.22, 1, 0.36, 1), opacity .26s ease',
@@ -142,13 +113,19 @@ export function NowPlaying({
           gap: 8,
           height: 56,
           padding: '0 8px 0 6px',
-          // Полное скругление-пилюля + стекло — в тон блоку аватарки/ника в шапке.
+          // Полное скругление-пилюля — в тон блоку аватарки/ника в шапке.
+          // Сплошная поверхность вместо backdrop-filter: этот бар анимируется
+          // при каждом старте/окончании/переходе гс↔кружок, и на iOS блюр
+          // стабильно не успевал посчитаться к первому кадру (~1с плоского
+          // фона до блюра) — ни разные тайминги появления, ни меньший радиус
+          // это не убрали. Проверено (см. историю правок) — без блюра рывка нет.
           borderRadius: 999,
-          background: 'var(--glass-bg)',
-          backdropFilter: 'blur(var(--glass-blur))',
-          WebkitBackdropFilter: 'blur(var(--glass-blur))',
+          background: 'var(--bg-4)',
           border: '1px solid var(--line-2)',
-          pointerEvents: 'auto',
+          // Карточка теперь смонтирована постоянно (см. комментарий выше про
+          // active/open) — пока она невидима (open=false), сама не должна
+          // ловить клики/тапы поверх ленты, иначе перехватывала бы их незаметно.
+          pointerEvents: open ? 'auto' : 'none',
           boxShadow: 'var(--shadow-2)',
         }}
       >
