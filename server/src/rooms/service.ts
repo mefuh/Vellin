@@ -43,7 +43,7 @@ function parseResolved(json: string | null): ResolvedMedia | null {
  * берём актуальный снимок из рантайма (плейлистное имя + постер резолвера),
  * у холодной — персистнутый `videoResolvedJson`.
  */
-function videoCardInfo(room: Room): { videoPoster: string | null; videoTitle: string | null } {
+export function videoCardInfo(room: Room): { videoPoster: string | null; videoTitle: string | null } {
   const runtime = roomStore.get(room.id);
   if (runtime) {
     const v = runtime.snapshotVideo();

@@ -1,4 +1,4 @@
-import type { Conversation, DirectMessage } from '@prisma/client';
+import type { Conversation, DirectMessage, Room } from '@prisma/client';
 import type { DirectMessageDTO, DmConversation, DmEligibility, Gender, PublicUser } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 import { canSee, parsePrivacy } from '../privacy/privacy.js';
@@ -7,6 +7,9 @@ import { getAcceptedFriendIds } from '../friends/service.js';
 import { userHub } from '../realtime/UserHub.js';
 import { isDmImageUrl } from './image.js';
 import { isDmVoiceUrl, sanitizeVoicePeaks } from './voice.js';
+import { authorizeJoin, getRoomById, videoCardInfo, RoomServiceError } from '../rooms/service.js';
+import { roomStore } from '../rooms/store.js';
+import type { RoomInviteInfoResponse } from '@vellin/shared';
 
 export const MAX_DM_BODY = 4000;
 /** Сколько сообщений отдаём одной страницей треда. */
@@ -71,6 +74,16 @@ export function dmRowToDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
             return peaks ? { voicePeaks: peaks } : {};
           })(),
           voicePlayed: m.voicePlayedAt != null,
+        }
+      : {}),
+    ...(m.inviteRoomId
+      ? {
+          inviteRoomId: m.inviteRoomId,
+          ...(m.inviteRoomSlug ? { inviteRoomSlug: m.inviteRoomSlug } : {}),
+          ...(m.inviteRoomName ? { inviteRoomName: m.inviteRoomName } : {}),
+          ...(m.inviteVideoTitle ? { inviteVideoTitle: m.inviteVideoTitle } : {}),
+          ...(m.inviteVideoPoster ? { inviteVideoPoster: m.inviteVideoPoster } : {}),
+          inviteStatus: (m.inviteStatus ?? 'pending') as 'pending' | 'accepted' | 'declined' | 'expired',
         }
       : {}),
     ...(nonce ? { nonce } : {}),
@@ -315,6 +328,215 @@ export async function processingVideoMessageIds(): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
+const INVITE_TTL_MS = 30 * 60 * 1000;
+
+export interface RoomInviteCardResult {
+  conversationId: string;
+  message: DirectMessageDTO;
+  sender: PublicUser;
+  recipient: PublicUser;
+  /** true — создана новая карточка; false — обновлена существующая pending. */
+  isNew: boolean;
+}
+
+/**
+ * Отправить (или обновить существующую pending) карточку-приглашение в
+ * комнату `room` от `meId` к `peerId`. Повторное приглашение той же пары в ту
+ * же комнату, пока предыдущее ещё pending, обновляет снапшот на месте —
+ * новой записи не создаётся.
+ */
+export async function createOrUpdateRoomInviteCard(
+  meId: string,
+  peerId: string,
+  room: Room,
+  token: string,
+): Promise<RoomInviteCardResult> {
+  const peer = await loadPeerOrThrow(peerId);
+  const elig = await checkEligibility(meId, peer);
+  if (!elig.canMessage) {
+    const text =
+      elig.reason === 'blocked'
+        ? 'Вы не можете писать этому пользователю'
+        : elig.reason === 'privacy'
+          ? 'Пользователь ограничил, кто может ему писать'
+          : 'Нельзя отправить приглашение';
+    throw new DmError(elig.reason, text);
+  }
+
+  const conv = await getOrCreateConversation(meId, peerId);
+  const { videoPoster, videoTitle } = videoCardInfo(room);
+
+  const existing = await prisma.directMessage.findFirst({
+    where: { conversationId: conv.id, inviteRoomId: room.id, inviteStatus: 'pending' },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const snapshot = {
+    inviteRoomSlug: room.slug,
+    inviteRoomName: room.name,
+    inviteVideoTitle: videoTitle,
+    inviteVideoPoster: videoPoster,
+    inviteToken: token,
+  };
+
+  let row: DirectMessage;
+  const isNew = !existing;
+  if (existing) {
+    row = await prisma.directMessage.update({ where: { id: existing.id }, data: snapshot });
+  } else {
+    row = await prisma.directMessage.create({
+      data: {
+        conversationId: conv.id,
+        senderId: meId,
+        body: '🎬 Приглашение в комнату',
+        inviteRoomId: room.id,
+        inviteStatus: 'pending',
+        ...snapshot,
+      },
+    });
+    await prisma.conversation.update({
+      where: { id: conv.id },
+      data: { lastMessageAt: row.createdAt, [myReadField(conv, meId)]: row.createdAt },
+    });
+  }
+
+  const me = await prisma.user.findUnique({ where: { id: meId }, select: PUBLIC_USER_SELECT });
+  return {
+    conversationId: conv.id,
+    message: dmRowToDto(row),
+    sender: me ? toPublicUser(me) : { id: meId, username: '', avatarSeed: '', avatarUrl: null, kind: 'user' },
+    recipient: { id: peer.id, username: peer.username, avatarSeed: peer.avatarSeed, avatarUrl: peer.avatarUrl, kind: 'user' },
+    isNew,
+  };
+}
+
+/**
+ * Живая синхронизация снапшота «что играет» у всех активных (pending, не
+ * истёкших) карточек-приглашений в комнату `roomId`. Возвращает данные для
+ * рассылки обновления обоим участникам каждой карточки (пустой массив — нечего
+ * обновлять). Вызывается при смене видео в комнате, пока приглашение висит.
+ */
+export async function syncRoomInviteSnapshots(
+  roomId: string,
+  videoTitle: string | null,
+  videoPoster: string | null,
+): Promise<VideoNoteBroadcast[]> {
+  const rows = await prisma.directMessage.findMany({
+    where: { inviteRoomId: roomId, inviteStatus: 'pending' },
+    include: { conversation: { select: { userAId: true, userBId: true } } },
+  });
+  const cutoff = Date.now() - INVITE_TTL_MS;
+  const active = rows.filter((r) => r.createdAt.getTime() >= cutoff);
+  if (active.length === 0) return [];
+
+  await prisma.directMessage.updateMany({
+    where: { id: { in: active.map((r) => r.id) } },
+    data: { inviteVideoTitle: videoTitle, inviteVideoPoster: videoPoster },
+  });
+
+  return active.map((r) => ({
+    message: dmRowToDto({ ...r, inviteVideoTitle: videoTitle, inviteVideoPoster: videoPoster }),
+    userAId: r.conversation.userAId,
+    userBId: r.conversation.userBId,
+  }));
+}
+
+/**
+ * Живая инфо-сводка комнаты для попапа по тапу на карточку. Доступна только
+ * участникам диалога, в котором висит приглашение. Если комната удалена —
+ * возвращает `available:false` со снапшотными данными карточки.
+ */
+export async function getRoomInviteInfo(meId: string, messageId: string): Promise<RoomInviteInfoResponse | null> {
+  const m = await prisma.directMessage.findUnique({
+    where: { id: messageId },
+    include: { conversation: { select: { userAId: true, userBId: true } } },
+  });
+  if (!m || !m.inviteRoomId) return null;
+  if (m.conversation.userAId !== meId && m.conversation.userBId !== meId) return null;
+
+  const room = await getRoomById(m.inviteRoomId);
+  if (!room) {
+    return {
+      roomName: m.inviteRoomName ?? 'Комната',
+      videoTitle: m.inviteVideoTitle,
+      videoPoster: m.inviteVideoPoster,
+      ownerUsername: '',
+      participantCount: 0,
+      maxParticipants: 0,
+      available: false,
+    };
+  }
+  const { videoTitle, videoPoster } = videoCardInfo(room);
+  return {
+    roomName: room.name,
+    videoTitle,
+    videoPoster,
+    ownerUsername: room.owner.username,
+    participantCount: roomStore.get(room.id)?.participants.size ?? 0,
+    maxParticipants: room.maxParticipants,
+    available: true,
+  };
+}
+
+export type RespondRoomInviteResult =
+  | { kind: 'accepted'; redirect: { slug: string; inviteToken: string }; broadcast: VideoNoteBroadcast }
+  | { kind: 'declined'; broadcast: VideoNoteBroadcast }
+  | { kind: 'expired'; broadcast: VideoNoteBroadcast }
+  | { kind: 'blocked'; reason: 'full' | 'closed'; message: string }
+  | { kind: 'invalid'; message: string };
+
+/**
+ * Ответ получателя на карточку-приглашение. `accept` реально проверяет
+ * доступность комнаты через тот же `authorizeJoin`, что и штатный вход —
+ * сам вход (WS-тикет, регистрация участника) клиент затем выполняет обычным
+ * путём через `Room.tsx` по возвращённому `redirect`.
+ */
+export async function respondRoomInvite(
+  meId: string,
+  messageId: string,
+  action: 'accept' | 'decline',
+): Promise<RespondRoomInviteResult> {
+  const m = await prisma.directMessage.findUnique({
+    where: { id: messageId },
+    include: { conversation: { select: { userAId: true, userBId: true } } },
+  });
+  if (!m || !m.inviteRoomId) return { kind: 'invalid', message: 'Приглашение не найдено' };
+  const isParticipant = m.conversation.userAId === meId || m.conversation.userBId === meId;
+  if (!isParticipant || m.senderId === meId) return { kind: 'invalid', message: 'Нет доступа к приглашению' };
+  if (m.inviteStatus !== 'pending') return { kind: 'invalid', message: 'Приглашение уже неактивно' };
+
+  if (Date.now() - m.createdAt.getTime() > INVITE_TTL_MS) {
+    await prisma.directMessage.update({ where: { id: m.id }, data: { inviteStatus: 'expired' } });
+    const broadcast = await loadForBroadcast(m.id);
+    return broadcast ? { kind: 'expired', broadcast } : { kind: 'invalid', message: 'Приглашение истекло' };
+  }
+
+  if (action === 'decline') {
+    await prisma.directMessage.update({ where: { id: m.id }, data: { inviteStatus: 'declined' } });
+    const broadcast = await loadForBroadcast(m.id);
+    return broadcast ? { kind: 'declined', broadcast } : { kind: 'invalid', message: 'Приглашение не найдено' };
+  }
+
+  try {
+    const room = await authorizeJoin(
+      m.inviteRoomSlug ?? '',
+      { userId: meId, isGuest: false },
+      undefined,
+      m.inviteToken ?? undefined,
+    );
+    await prisma.directMessage.update({ where: { id: m.id }, data: { inviteStatus: 'accepted' } });
+    const broadcast = await loadForBroadcast(m.id);
+    if (!broadcast) return { kind: 'invalid', message: 'Приглашение не найдено' };
+    return { kind: 'accepted', redirect: { slug: room.slug, inviteToken: m.inviteToken ?? '' }, broadcast };
+  } catch (err) {
+    if (err instanceof RoomServiceError) {
+      if (err.status === 404) return { kind: 'blocked', reason: 'closed', message: 'Комната больше недоступна' };
+      if (err.status === 409) return { kind: 'blocked', reason: 'full', message: 'Комната заполнена' };
+    }
+    return { kind: 'blocked', reason: 'closed', message: 'Не удалось подключиться к комнате' };
+  }
+}
+
 export interface MarkReadResult {
   conversationId: string;
   /** Кому принадлежит непрочитанное (получатель отметки = он сам). */
@@ -420,6 +642,7 @@ export async function listConversations(
         // проставляется сразу при создании сообщения (processing), поэтому
         // маркер должен опираться на него, а не ждать готового файла.
         hasVideo: !!last.videoStatus,
+        hasRoomInvite: !!last.inviteRoomId,
       },
       unreadCount: unread,
       peerLastReadAt: peerRead ? peerRead.toISOString() : null,

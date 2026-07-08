@@ -296,10 +296,25 @@ model DirectMessage {
   videoDurationSec Float?
   /// Стадия: 'processing' | 'ready' | 'failed'. Null — не видеосообщение.
   videoStatus    String?
+  /// Карточка-приглашение в комнату («Watch Party»): id приглашённой комнаты.
+  /// Null — обычное сообщение (не приглашение).
+  inviteRoomId     String?
+  /// Слаг комнаты на момент отправки — для перехода без похода в БД.
+  inviteRoomSlug   String?
+  /// Снапшот названия комнаты на момент отправки приглашения.
+  inviteRoomName   String?
+  /// Снапшот «что сейчас играет» на момент отправки. Null — нет видео/неизвестно.
+  inviteVideoTitle  String?
+  inviteVideoPoster String?
+  /// Токен InviteLink, потребляемый при принятии (не отдаётся в DTO).
+  inviteToken      String?
+  /// 'pending' | 'accepted' | 'declined' | 'expired'. Null — не приглашение.
+  inviteStatus     String?
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])
   @@index([videoStatus])
+  @@index([conversationId, inviteRoomId, inviteStatus])
 }
 
 /// Серверная запись о входе (устройство/браузер). JWT пользователя несёт

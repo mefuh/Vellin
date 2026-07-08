@@ -2,12 +2,16 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
   ConversationThreadResponse,
   ListConversationsResponse,
+  RoomInviteInfoResponse,
+  RoomInviteRespondRequest,
+  RoomInviteRespondResponse,
   UploadDmImageResponse,
   UploadDmVoiceResponse,
 } from '@vellin/shared';
 import type { Principal } from '../auth/jwt.js';
 import { requireAuth } from '../auth/middleware.js';
-import { getThreadByUsername, listConversations } from './service.js';
+import { getRoomInviteInfo, getThreadByUsername, listConversations, respondRoomInvite } from './service.js';
+import { broadcastRoomInviteUpdate } from './realtime.js';
 import { ALLOWED_DM_IMAGE_MIME, MAX_DM_IMAGE_BYTES, processAndSaveDmImage } from './image.js';
 import { ALLOWED_DM_VOICE_MIME, MAX_DM_VOICE_BYTES, saveDmVoice } from './voice.js';
 import { ALLOWED_DM_VIDEO_MIME, MAX_DM_VIDEO_BYTES, saveRawVideo } from './videoNote.js';
@@ -143,4 +147,54 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
       deny(reply, 400, 'BadRequest', 'Не удалось сохранить видео');
     }
   });
+
+  // Живая инфо-сводка комнаты для попапа по тапу на карточку-приглашение.
+  app.get<{ Params: { messageId: string } }>(
+    '/dm/room-invite/:messageId/info',
+    async (req, reply) => {
+      const p = requireUser(req, reply);
+      if (!p) return;
+      const info = await getRoomInviteInfo(p.userId, req.params.messageId);
+      if (!info) {
+        deny(reply, 404, 'NotFound', 'Приглашение не найдено');
+        return;
+      }
+      reply.send(info satisfies RoomInviteInfoResponse);
+    },
+  );
+
+  // Ответ получателя на карточку-приглашение в комнату: принять или отклонить.
+  app.post<{ Params: { messageId: string }; Body: RoomInviteRespondRequest }>(
+    '/dm/room-invite/:messageId/respond',
+    async (req, reply) => {
+      const p = requireUser(req, reply);
+      if (!p) return;
+      const action = req.body?.action;
+      if (action !== 'accept' && action !== 'decline') {
+        deny(reply, 400, 'BadRequest', 'Некорректное действие');
+        return;
+      }
+      const result = await respondRoomInvite(p.userId, req.params.messageId, action);
+      switch (result.kind) {
+        case 'accepted':
+          await broadcastRoomInviteUpdate(result.broadcast);
+          reply.send({ ok: true, redirect: result.redirect } satisfies RoomInviteRespondResponse);
+          return;
+        case 'declined':
+          await broadcastRoomInviteUpdate(result.broadcast);
+          reply.send({ ok: true } satisfies RoomInviteRespondResponse);
+          return;
+        case 'expired':
+          await broadcastRoomInviteUpdate(result.broadcast);
+          reply.send({ ok: false, reason: 'expired', message: 'Приглашение истекло' } satisfies RoomInviteRespondResponse);
+          return;
+        case 'blocked':
+          reply.send({ ok: false, reason: result.reason, message: result.message } satisfies RoomInviteRespondResponse);
+          return;
+        case 'invalid':
+          reply.send({ ok: false, reason: 'gone', message: result.message } satisfies RoomInviteRespondResponse);
+          return;
+      }
+    },
+  );
 }

@@ -216,6 +216,18 @@ input[type='date']::-webkit-datetime-edit {
   }
 }
 
+/* Ripple по нажатию на кнопки карточки-приглашения (Material-подобный отклик). */
+@keyframes inviteRipple {
+  from {
+    transform: scale(0);
+    opacity: 0.45;
+  }
+  to {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
 /* Бегущие точки индикатора «печатает…». */
 @keyframes dmTypingDot {
   0%,

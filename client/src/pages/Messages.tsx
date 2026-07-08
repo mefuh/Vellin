@@ -31,6 +31,7 @@ import type { MediaNextResolver } from '../stores/mediaChain';
 import { useVoiceRecorder, type RecordResult } from '../hooks/useVoiceRecorder';
 import { useVideoRecorder } from '../hooks/useVideoRecorder';
 import { VideoMessageBubble } from '../components/messages/video/VideoMessageBubble';
+import { RoomInviteCard } from '../components/messages/RoomInviteCard';
 import { VideoRecordOverlay } from '../components/messages/video/VideoRecordOverlay';
 import { CameraSwitcher } from '../components/messages/video/CameraSwitcher';
 import { CameraPermissionScreen } from '../components/messages/video/CameraPermissionScreen';
@@ -366,8 +367,16 @@ function ConversationRow({
   const read =
     mine && c.peerLastReadAt != null && new Date(c.peerLastReadAt).getTime() >= new Date(last!.createdAt).getTime();
 
-  // Иконка-маркер вложения в превью (фото/голосовое/видео).
-  const marker = last?.hasImage ? 'image' : last?.hasVoice ? 'mic' : last?.hasVideo ? 'video' : null;
+  // Иконка-маркер вложения в превью (фото/голосовое/видео/приглашение).
+  const marker = last?.hasImage
+    ? 'image'
+    : last?.hasVoice
+      ? 'mic'
+      : last?.hasVideo
+        ? 'video'
+        : last?.hasRoomInvite
+          ? 'film'
+          : null;
   const previewText = last
     ? last.hasImage
       ? last.body || 'Фото'
@@ -375,7 +384,9 @@ function ConversationRow({
         ? 'Голосовое сообщение'
         : last.hasVideo
           ? 'Видеосообщение'
-          : last.body
+          : last.hasRoomInvite
+            ? 'Приглашение в комнату'
+            : last.body
     : '';
   const prefix = mine ? 'Вы: ' : '';
 
@@ -1305,10 +1316,16 @@ const MessageRow = memo(function MessageRow({
             maxWidth: '76%',
             display: 'flex',
             transformOrigin: mine ? 'right bottom' : 'left bottom',
-            ...(fresh ? { animation: 'dmBubbleIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) both' } : null),
+            // Карточка-приглашение анимирует появление сама (пружиной) — не
+            // дублируем CSS-анимацией обёртки, иначе трансформы наложатся.
+            ...(fresh && !m.inviteRoomId ? { animation: 'dmBubbleIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) both' } : null),
           }}
         >
         {(() => {
+          // Карточка-приглашение в комнату — самодостаточный бабл (без прямоугольной подложки).
+          if (m.inviteRoomId) {
+            return <RoomInviteCard m={m} mine={mine} fresh={fresh} clock={fmtTime(m.createdAt)} status={status} />;
+          }
           // Видео-«кружок» — самодостаточный круглый бабл (без прямоугольной подложки).
           if (m.videoStatus) {
             return <VideoMessageBubble m={m} clock={fmtTime(m.createdAt)} status={status} />;
