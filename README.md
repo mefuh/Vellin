@@ -45,15 +45,25 @@ docker compose up --build
 - Backend: http://localhost:3001
 - Postgres: localhost:5432 (vellin/vellin)
 
-## Локальная разработка (без Docker)
+## Локальная разработка (без Docker для приложения)
 
-Требования: Node.js 20+, PostgreSQL 16 (или Docker для одного только Postgres), `yt-dlp` в `$PATH`.
+Требования: Node.js 20+, Docker (для Postgres) или свой PostgreSQL 16, `yt-dlp` в `$PATH`.
 
 `yt-dlp` нужен серверу, чтобы вытаскивать стримы из YouTube/RuTube/Vimeo/VK и десятков других сайтов. Без него будут работать только прямые ссылки на `mp4/webm/m3u8/mpd` и magnet'ы. Установка:
 
 - Windows: `winget install yt-dlp.yt-dlp`
 - macOS: `brew install yt-dlp`
 - Linux: `pip install yt-dlp` или системный пакет
+
+### Автоматически (одна команда)
+
+```bash
+npm run setup
+```
+
+Скрипт [`scripts/setup.mjs`](scripts/setup.mjs) сам поднимает Postgres в Docker, ставит зависимости, создаёт `server/.env` со случайным `JWT_SECRET`, собирает `@vellin/shared`, накатывает миграции и запускает `npm run dev`. Идемпотентен — можно запускать повторно, ничего не перезатирает. Остановить — `Ctrl+C`.
+
+### Вручную (по шагам)
 
 ```bash
 # 1. Postgres (можно поднять отдельно через docker compose up postgres)
@@ -66,10 +76,13 @@ npm install
 cp server/.env.example server/.env
 # отредактируйте JWT_SECRET (минимум 32 символа)
 
-# 4. Применить миграции и сгенерировать Prisma client
+# 4. Собрать shared-пакет (обязательно перед первым стартом)
+npm run build:shared
+
+# 5. Применить миграции и сгенерировать Prisma client
 npm run db:migrate
 
-# 5. Запустить dev (shared + server + client параллельно)
+# 6. Запустить dev (shared + server + client параллельно)
 npm run dev
 ```
 
