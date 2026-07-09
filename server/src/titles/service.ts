@@ -1,7 +1,8 @@
 import type { FavoriteTitle } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 
-const MAX = 5;
+// Пользовательского лимита нет — предохранитель от абьюза (см. routes.ts).
+const MAX = 100;
 
 interface DbFavorite {
   kpId: number;

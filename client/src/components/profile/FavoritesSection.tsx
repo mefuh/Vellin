@@ -7,7 +7,9 @@ import { Card } from './ProfilePrimitives';
 import { TitlePoster } from './TitlePoster';
 import { TitleSearchModal } from './TitleSearchModal';
 
-const MAX = 5;
+// Пользовательского лимита нет (безлимитное добавление); MAX — только зеркало
+// серверного предохранителя от абьюза, чтобы UX не расходился с бэком.
+const MAX = 100;
 const POSTER_W = 112;
 
 /** Иконка-кнопка управления (перенос/удаление) под постером. */
@@ -115,7 +117,7 @@ export function FavoritesSection() {
   const existingIds = new Set(titles.map((t) => t.kpId));
 
   return (
-    <Card title="Любимое кино" desc="До 5 фильмов и сериалов — ваша визитка вкуса." icon="film">
+    <Card title="Любимое кино" desc="Любимые фильмы и сериалы — ваша визитка вкуса." icon="film">
       <div style={{ minHeight: 20, fontSize: 12.5 }}>{statusEl}</div>
 
       {loading ? (
