@@ -26,7 +26,7 @@ import { ensureDmImagesDir } from './dm/image.js';
 import { ensureDmVoiceDir } from './dm/voice.js';
 import { ensureDmVideoDir, MAX_DM_VIDEO_BYTES } from './dm/videoNote.js';
 import { setVideoNoteBroadcaster, startVideoTranscodeWorker } from './dm/videoTranscode.js';
-import { broadcastVideoNoteUpdate } from './dm/realtime.js';
+import { broadcastVideoNoteUpdate, syncRoomInviteCards } from './dm/realtime.js';
 import { registerWebSocket } from './ws/server.js';
 import { userHub } from './realtime/UserHub.js';
 import { getAcceptedFriendIds } from './friends/service.js';
@@ -109,7 +109,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.code(500).send({ error: 'InternalServerError', message: 'Internal error', statusCode: 500 });
   });
 
-  app.get('/health', async () => ({ ok: true, version: '0.22.3' }));
+  app.get('/health', async () => ({ ok: true, version: '0.23.0' }));
 
   await app.register(
     async (api) => {
@@ -159,6 +159,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   // импортов) + восстановление незавершённых задач после рестарта.
   setVideoNoteBroadcaster(broadcastVideoNoteUpdate);
   startVideoTranscodeWorker();
+
+  // Живая синхронизация карточек-приглашений в ЛС при смене видео в комнате (DI).
+  userHub.setRoomVideoChangedHook(syncRoomInviteCards);
 
   return app;
 }

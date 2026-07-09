@@ -27,8 +27,9 @@ import { prisma } from '../db/prisma.js';
 import { requireAuth } from '../auth/middleware.js';
 import { signWsTicket } from '../auth/jwt.js';
 import { areFriends } from '../friends/service.js';
-import { createAndPush } from '../realtime/notify.js';
 import { notifyAsync } from '../push/notificationService.js';
+import { createOrUpdateRoomInviteCard, DmError } from '../dm/service.js';
+import { broadcastRoomInviteCard } from '../dm/realtime.js';
 import {
   authorizeJoin,
   createRoom,
@@ -422,6 +423,10 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const body = inviteFriendSchema.parse(req.body ?? {});
       const principal = req.principal!;
+      if (body.friendId === principal.userId) {
+        reply.code(400).send({ error: 'BadRequest', message: 'Нельзя пригласить самого себя', statusCode: 400 });
+        return;
+      }
       const room = await getRoomById(req.params.id);
       if (!room) {
         reply.code(404).send({ error: 'NotFound', message: 'Room not found', statusCode: 404 });
@@ -442,10 +447,17 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       // чтобы друг мог войти даже в приватную комнату.
       const token = generateInviteToken();
       await prisma.inviteLink.create({ data: { roomId: room.id, token } });
-      await createAndPush(body.friendId, 'room_invite', principal.userId, {
-        roomSlug: `${room.slug}?invite=${token}`,
-        roomName: room.name,
-      });
+      // Карточка-приглашение в ЛС вместо колокольчика — интерактивная, с состояниями.
+      try {
+        const cardResult = await createOrUpdateRoomInviteCard(principal.userId, body.friendId, room, token);
+        await broadcastRoomInviteCard(cardResult);
+      } catch (err) {
+        if (err instanceof DmError) {
+          reply.code(403).send({ error: 'Forbidden', message: err.message, statusCode: 403 });
+          return;
+        }
+        throw err;
+      }
       // Web-Push приглашённому: имя приглашающего + название/ссылка комнаты.
       const inviter = await prisma.user.findUnique({
         where: { id: principal.userId },

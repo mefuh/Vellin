@@ -36,7 +36,9 @@ const titleItem = z.object({
   ratingImdb: z.number().nullable(),
 });
 const updateSchema = z.object({
-  titles: z.array(titleItem).max(5),
+  // Пользовательского лимита нет (безлимитное добавление); .max(100) — только
+  // предохранитель от абьюза, чтобы один PUT не залил тысячи строк в БД.
+  titles: z.array(titleItem).max(100),
 }) satisfies z.ZodType<UpdateFavoriteTitlesRequest>;
 
 /**

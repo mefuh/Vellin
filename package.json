@@ -1,6 +1,6 @@
 {
   "name": "vellin",
-  "version": "0.22.3",
+  "version": "0.23.0",
   "private": true,
   "description": "Vellin — платформа для совместного просмотра видео в реальном времени",
   "workspaces": [
@@ -13,6 +13,7 @@
     "build:shared": "npm run build -w @vellin/shared",
     "build:server": "npm run build -w @vellin/server",
     "build:client": "npm run build -w @vellin/client",
+    "setup": "node scripts/setup.mjs",
     "dev": "concurrently -n shared,server,client -c blue,green,magenta \"npm run dev -w @vellin/shared\" \"npm run dev -w @vellin/server\" \"npm run dev -w @vellin/client\"",
     "dev:server": "npm run dev -w @vellin/server",
     "dev:client": "npm run dev -w @vellin/client",

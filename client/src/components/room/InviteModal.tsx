@@ -91,6 +91,8 @@ export function InviteModal({ room, canCreate, onClose }: InviteModalProps) {
           padding: 'clamp(20px, 4vw, 28px)',
           width: '100%',
           maxWidth: 460,
+          boxSizing: 'border-box',
+          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
           gap: 16,
@@ -115,10 +117,11 @@ export function InviteModal({ room, canCreate, onClose }: InviteModalProps) {
             gap: 8,
           }}
         >
-          <Icon name="link" size={16} style={{ color: 'var(--text-2)' }} />
+          <Icon name="link" size={16} style={{ color: 'var(--text-2)', flexShrink: 0 }} />
           <span
             style={{
               flex: 1,
+              minWidth: 0,
               fontFamily: 'var(--font-mono)',
               fontSize: 12,
               color: 'var(--text-0)',
@@ -129,7 +132,7 @@ export function InviteModal({ room, canCreate, onClose }: InviteModalProps) {
           >
             {creating ? 'Создаём…' : url}
           </span>
-          <Button size="sm" variant="secondary" icon="copy" onClick={copy} disabled={creating}>
+          <Button size="sm" variant="secondary" icon="copy" onClick={copy} disabled={creating} style={{ flexShrink: 0 }}>
             {copied ? 'Скопировано' : 'Копировать'}
           </Button>
         </div>
@@ -176,7 +179,7 @@ export function InviteModal({ room, canCreate, onClose }: InviteModalProps) {
                       {f.username}
                     </span>
                     {here ? (
-                      <span style={{ fontSize: 12, color: 'var(--ok)' }}>уже здесь</span>
+                      <span style={{ fontSize: 12, color: 'var(--ok)', flexShrink: 0 }}>уже здесь</span>
                     ) : (
                       <Button
                         size="sm"
@@ -184,6 +187,7 @@ export function InviteModal({ room, canCreate, onClose }: InviteModalProps) {
                         icon={isInvited ? 'check' : 'userPlus'}
                         disabled={isInvited || invitingId === f.id}
                         onClick={() => void inviteFriend(f.id)}
+                        style={{ flexShrink: 0 }}
                       >
                         {isInvited ? 'Приглашён' : 'Пригласить'}
                       </Button>

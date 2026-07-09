@@ -491,6 +491,20 @@ export interface DirectMessageDTO {
   /** Стадия видеосообщения: обрабатывается / готово / ошибка. */
   videoStatus?: 'processing' | 'ready' | 'failed';
   /**
+   * Карточка-приглашение в комнату («Watch Party»). Присутствие `inviteRoomId`
+   * определяет тип бабла — само приглашение (без него это обычное сообщение).
+   */
+  inviteRoomId?: string;
+  /** Слаг комнаты на момент отправки — переход без похода в БД. */
+  inviteRoomSlug?: string;
+  /** Снапшот названия комнаты на момент отправки приглашения. */
+  inviteRoomName?: string;
+  /** Снапшот «что сейчас играет» на момент отправки. Отсутствует — неизвестно. */
+  inviteVideoTitle?: string;
+  inviteVideoPoster?: string;
+  /** Статус приглашения. */
+  inviteStatus?: 'pending' | 'accepted' | 'declined' | 'expired';
+  /**
    * Эхо клиентского nonce — отдаётся только отправителю, чтобы он сопоставил
    * пришедшее с сервера сообщение со своей оптимистичной отправкой.
    */
@@ -503,7 +517,7 @@ export interface DmConversation {
   /** Собеседник. */
   peer: PublicUser;
   /** Последнее сообщение в диалоге (для превью), либо null — диалог пуст. */
-  lastMessage: { body: string; senderId: string; createdAt: string; hasImage: boolean; hasVoice: boolean; hasVideo: boolean } | null;
+  lastMessage: { body: string; senderId: string; createdAt: string; hasImage: boolean; hasVoice: boolean; hasVideo: boolean; hasRoomInvite: boolean } | null;
   /** Сколько у меня непрочитанных в этом диалоге. */
   unreadCount: number;
   /**

@@ -12,11 +12,13 @@ import {
   markRead,
   markVoicePlayed,
   sendMessage,
+  syncRoomInviteSnapshots,
   unreadTotal,
   type SendImage,
   type SendVoice,
   type SendVideoNote,
   type VideoNoteBroadcast,
+  type RoomInviteCardResult,
 } from './service.js';
 import { promoteRawToMessage, deleteRawUpload } from './videoNote.js';
 import { enqueueTranscode } from './videoTranscode.js';
@@ -76,6 +78,49 @@ export async function broadcastVideoNoteUpdate(b: VideoNoteBroadcast): Promise<v
   const peerB = toPublicUser(ua); // собеседник для userB
   userHub.pushTo(b.userAId, { t: 'dm_message_updated', message: b.message, peer: peerA });
   userHub.pushTo(b.userBId, { t: 'dm_message_updated', message: b.message, peer: peerB });
+}
+
+/** Обновление статуса карточки-приглашения (принято/отклонено/истекло) — переиспользует тот же контракт. */
+export const broadcastRoomInviteUpdate = broadcastVideoNoteUpdate;
+
+/**
+ * Живая синхронизация карточек-приглашений при смене видео в комнате: обновляет
+ * снапшот «что играет» у всех активных приглашений и рассылает обновление обоим
+ * участникам каждой карточки. Внедряется в UserHub через DI (см. app.ts).
+ */
+export function syncRoomInviteCards(p: { roomId: string; videoPoster: string | null; videoTitle: string | null }): void {
+  void syncRoomInviteSnapshots(p.roomId, p.videoTitle, p.videoPoster)
+    .then((broadcasts) => {
+      for (const b of broadcasts) void broadcastRoomInviteUpdate(b);
+    })
+    .catch((err) => logger.error({ err, roomId: p.roomId }, 'room invite live-sync failed'));
+}
+
+/** Рассылка новой (или обновлённой существующей pending) карточки-приглашения обоим участникам. */
+export async function broadcastRoomInviteCard(res: RoomInviteCardResult): Promise<void> {
+  if (!res.isNew) {
+    // Повторное приглашение — карточка та же, просто обновились снапшот-поля.
+    userHub.pushTo(res.recipient.id, { t: 'dm_message_updated', message: res.message, peer: res.sender });
+    userHub.pushTo(res.sender.id, { t: 'dm_message_updated', message: res.message, peer: res.recipient });
+    return;
+  }
+  const [recipUnread, senderUnread] = await Promise.all([
+    unreadTotal(res.recipient.id),
+    unreadTotal(res.sender.id),
+  ]);
+  userHub.pushTo(res.recipient.id, {
+    t: 'dm_message',
+    message: res.message,
+    peer: res.sender,
+    unreadTotal: recipUnread,
+  });
+  userHub.pushTo(res.sender.id, {
+    t: 'dm_message',
+    message: res.message,
+    peer: res.recipient,
+    unreadTotal: senderUnread,
+  });
+  await pushDmNotification(res.recipient.id, res.sender, res.conversationId, '🎬 Приглашение в комнату');
 }
 
 /** Обработать отправку ЛС: персист + доставка обоим + колокольчик получателю. */

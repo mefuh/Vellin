@@ -1,6 +1,9 @@
 import type {
   ConversationThreadResponse,
   ListConversationsResponse,
+  RoomInviteInfoResponse,
+  RoomInviteRespondRequest,
+  RoomInviteRespondResponse,
   UploadDmImageResponse,
   UploadDmVoiceResponse,
 } from '@vellin/shared';
@@ -22,4 +25,11 @@ export const dmApi = {
     fd.append('file', blob, filename);
     return apiUpload<UploadDmVoiceResponse>('/dm/voice', fd);
   },
+  respondRoomInvite: (messageId: string, action: 'accept' | 'decline') =>
+    apiFetch<RoomInviteRespondResponse>(`/dm/room-invite/${messageId}/respond`, {
+      method: 'POST',
+      body: { action } satisfies RoomInviteRespondRequest,
+    }),
+  roomInviteInfo: (messageId: string) =>
+    apiFetch<RoomInviteInfoResponse>(`/dm/room-invite/${messageId}/info`),
 };

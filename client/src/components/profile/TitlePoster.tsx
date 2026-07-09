@@ -43,8 +43,10 @@ export function TitlePoster({
           borderRadius: 10,
           overflow: 'hidden',
           background: 'var(--bg-3)',
-          border: '1px solid var(--line-1)',
-          boxShadow: highlight ? '0 0 0 2px var(--accent)' : undefined,
+          // Подсветка «общего» фильма — рамкой (внутри border-box), а не внешним
+          // box-shadow-кольцом: кольцо обрезается скролл-контейнером полки на
+          // мобайле (overflow-x: auto), рамка — никогда.
+          border: highlight ? '2px solid var(--accent)' : '1px solid var(--line-1)',
         }}
       >
         {t.posterUrl ? (

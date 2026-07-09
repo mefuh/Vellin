@@ -51,6 +51,12 @@ class UserHub {
   private friendResolver: FriendResolver | null = null;
   private lastSeenWriter: LastSeenWriter | null = null;
   private onlinePrivacyResolver: OnlinePrivacyResolver | null = null;
+  /**
+   * Хук на смену играющего видео комнаты — живая синхронизация карточек-
+   * приглашений в ЛС (DI разрывает цикл импортов realtime↔dm). В отличие от
+   * `broadcastRoomVideo`, вызывается ВСЕГДА (не гейтится подписчиками библиотеки).
+   */
+  private roomVideoChanged: ((p: { roomId: string; slug: string; videoPoster: string | null; videoTitle: string | null }) => void) | null = null;
 
   setFriendResolver(fn: FriendResolver): void {
     this.friendResolver = fn;
@@ -60,6 +66,9 @@ class UserHub {
   }
   setOnlinePrivacyResolver(fn: OnlinePrivacyResolver): void {
     this.onlinePrivacyResolver = fn;
+  }
+  setRoomVideoChangedHook(fn: (p: { roomId: string; slug: string; videoPoster: string | null; videoTitle: string | null }) => void): void {
+    this.roomVideoChanged = fn;
   }
 
   attach(conn: UserConnection): void {
@@ -115,6 +124,19 @@ class UserHub {
       if (this.activeByConn.get(c) !== false) return true;
     }
     return false;
+  }
+
+  /**
+   * Сколько РАЗНЫХ пользователей сейчас онлайн по всему сайту (открыт user-WS и
+   * хотя бы одна вкладка реально активна) — не только те, кто в комнатах.
+   * Источник живой статистики для админ-панели.
+   */
+  countOnline(): number {
+    let n = 0;
+    for (const userId of this.conns.keys()) {
+      if (this.isOnline(userId)) n += 1;
+    }
+    return n;
   }
 
   /** Клиент сообщил о смене реальной активности в конкретной вкладке. */
@@ -231,6 +253,8 @@ class UserHub {
     videoPoster: string | null;
     videoTitle: string | null;
   }): void {
+    // Живая синхронизация карточек-приглашений — независимо от подписчиков библиотеки.
+    this.roomVideoChanged?.(payload);
     if (this.librarySubs.size === 0) return;
     const msg: UserS2C = { t: 'room_video', ...payload };
     for (const c of this.librarySubs) if (c.isOpen()) c.send(msg);

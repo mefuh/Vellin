@@ -9,6 +9,7 @@ import type {
 } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 import { roomStore } from '../rooms/store.js';
+import { userHub } from '../realtime/UserHub.js';
 import { toRoomSummary } from '../rooms/service.js';
 import { roomMutex } from '../utils/async-mutex.js';
 import { hashPassword } from '../auth/password.js';
@@ -280,7 +281,7 @@ export async function buildStats(): Promise<AdminStatsResponse> {
     users: {
       total: totalUsers,
       blocked: blockedUsers,
-      online: roomStore.countOnlineUsers(),
+      online: userHub.countOnline(),
     },
     rooms: {
       total: totalRooms,

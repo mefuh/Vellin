@@ -6,7 +6,7 @@ export type IconName =
   | 'send' | 'plus' | 'close' | 'search' | 'home' | 'compass'
   | 'library' | 'settings' | 'user' | 'users' | 'link' | 'lock'
   | 'globe' | 'bell' | 'smile' | 'upload' | 'download' | 'film'
-  | 'sparkles' | 'crown' | 'heart' | 'chevron' | 'chevronD' | 'eye'
+  | 'sparkles' | 'crown' | 'heart' | 'heartFilled' | 'chevron' | 'chevronD' | 'eye'
   | 'mic' | 'micOff' | 'pin' | 'cast' | 'qr' | 'copy' | 'edit'
   | 'trash' | 'star' | 'arrow' | 'check' | 'sun' | 'moon' | 'image'
   | 'headphones' | 'speaker' | 'grid' | 'list' | 'filter' | 'sort'
@@ -143,6 +143,13 @@ const PATHS: Record<IconName, ReactNode> = {
   sparkles: <path d="M12 3l1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7L12 3zM19 14l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9L19 14z" />,
   crown: <path d="M3 18l-1-10 6 4 4-7 4 7 6-4-1 10H3z" />,
   heart: <path d="M20.8 6.6a5.4 5.4 0 00-9.3-2.2 5.4 5.4 0 00-9.3 5.6c.5 1.2 1.4 2.3 2.4 3.2L12 21l7.4-7.8c1-.9 1.9-2 2.4-3.2.4-1.1.4-2.3 0-3.4z" />,
+  heartFilled: (
+    <path
+      fill="currentColor"
+      stroke="none"
+      d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+    />
+  ),
   chevron: <path d="M9 6l6 6-6 6" />,
   chevronD: <path d="M6 9l6 6 6-6" />,
   eye: (

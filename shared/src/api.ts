@@ -166,6 +166,26 @@ export interface InviteFriendResponse {
   ok: true;
 }
 
+/** Ответ на карточку-приглашение в комнату: принять или отклонить. */
+export interface RoomInviteRespondRequest {
+  action: 'accept' | 'decline';
+}
+export type RoomInviteRespondResponse =
+  | { ok: true; redirect?: { slug: string; inviteToken: string } }
+  | { ok: false; reason: 'expired' | 'full' | 'closed' | 'gone'; message: string };
+
+/** Живая инфо-сводка комнаты для попапа по тапу на карточку-приглашение. */
+export interface RoomInviteInfoResponse {
+  roomName: string;
+  videoTitle: string | null;
+  videoPoster: string | null;
+  ownerUsername: string;
+  participantCount: number;
+  maxParticipants: number;
+  /** Комната ещё существует (false — закрыта/удалена). */
+  available: boolean;
+}
+
 // ── Друзья ──────────────────────────────────────────────────────────────
 export interface ListFriendsResponse {
   friends: FriendUser[];

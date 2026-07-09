@@ -34,3 +34,12 @@ CLAUDE.md
 
 # Локальные dev-сертификаты mkcert (HTTPS для теста с телефона)
 client/.certs/
+
+# Локальные skills/агенты Claude Code (устанавливаются на машине, не часть проекта)
+.agents/
+skills-lock.json
+__pycache__/
+*.pyc
+
+# Кэш скилла impeccable
+**/.impeccable/

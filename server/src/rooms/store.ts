@@ -24,17 +24,6 @@ class RoomStore {
     return [...this.rooms.values()];
   }
 
-  /** Сколько уникальных userId сейчас имеют живые сессии во всех комнатах. */
-  countOnlineUsers(): number {
-    const ids = new Set<string>();
-    for (const rt of this.rooms.values()) {
-      for (const userId of rt.participants.keys()) {
-        ids.add(userId);
-      }
-    }
-    return ids.size;
-  }
-
   /** Закрыть все сессии конкретного пользователя во всех комнатах. */
   closeUserSessionsEverywhere(userId: string, reason: 'blocked' | 'deleted'): number {
     let closed = 0;

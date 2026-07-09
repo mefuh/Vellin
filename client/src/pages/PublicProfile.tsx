@@ -249,7 +249,7 @@ export function PublicProfile() {
                     borderRadius: 999,
                   }}
                 >
-                  <Icon name="heart" size={12} /> {shared} общих
+                  <Icon name="heartFilled" size={12} /> {shared} {shared === 1 ? 'общий' : 'общих'}
                 </span>
               ) : null;
             })()}
@@ -279,7 +279,7 @@ export function PublicProfile() {
                       lineHeight: 1.2,
                     }}
                   >
-                    {shared && <Icon name="heart" size={10} />}#{i + 1}
+                    {shared && <Icon name="heartFilled" size={10} />}#{i + 1}
                   </div>
                   <TitlePoster t={t} highlight={shared} />
                 </div>

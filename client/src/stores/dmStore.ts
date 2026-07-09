@@ -114,6 +114,7 @@ function bumpConversation(
     // videoUrl появляется только после транскода — статус же есть сразу
     // при создании (processing), маркер не должен ждать готового файла.
     hasVideo: !!message.videoStatus,
+    hasRoomInvite: !!message.inviteRoomId,
   };
   if (idx === -1) {
     return [
