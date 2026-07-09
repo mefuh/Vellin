@@ -126,6 +126,19 @@ class UserHub {
     return false;
   }
 
+  /**
+   * Сколько РАЗНЫХ пользователей сейчас онлайн по всему сайту (открыт user-WS и
+   * хотя бы одна вкладка реально активна) — не только те, кто в комнатах.
+   * Источник живой статистики для админ-панели.
+   */
+  countOnline(): number {
+    let n = 0;
+    for (const userId of this.conns.keys()) {
+      if (this.isOnline(userId)) n += 1;
+    }
+    return n;
+  }
+
   /** Клиент сообщил о смене реальной активности в конкретной вкладке. */
   setActivity(conn: UserConnection, active: boolean): void {
     if (this.activeByConn.get(conn) === active) return;

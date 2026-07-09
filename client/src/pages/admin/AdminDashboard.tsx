@@ -83,7 +83,7 @@ export function AdminDashboard() {
           icon="waveform"
           label="Сейчас онлайн"
           value={stats ? stats.users.online : '—'}
-          hint="уникальные WS-сессии"
+          hint="пользователей на сайте"
           tone="ok"
         />
         <StatCard
