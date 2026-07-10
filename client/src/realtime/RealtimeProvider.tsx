@@ -6,6 +6,7 @@ import { useFriendsStore } from '../stores/friendsStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useLibraryStore } from '../stores/libraryStore';
 import { useDmStore } from '../stores/dmStore';
+import { useSharedTimeStore } from '../stores/sharedTimeStore';
 import { realtimeApi } from '../api/realtime';
 import { UserSocket } from '../ws/UserSocket';
 import { playDmSound } from '../utils/sound';
@@ -56,6 +57,9 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
           break;
         case 'room_video':
           useLibraryStore.getState().apply(msg.roomId, msg.videoPoster, msg.videoTitle);
+          break;
+        case 'shared_time':
+          useSharedTimeStore.getState().apply(msg);
           break;
         case 'friends_changed':
           void friends.refresh();

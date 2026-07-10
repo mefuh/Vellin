@@ -26,6 +26,7 @@ import { roomMutex } from '../utils/async-mutex.js';
 import { logger } from '../utils/logger.js';
 import { roomStore } from './store.js';
 import { userHub } from '../realtime/UserHub.js';
+import { onSessionStart, onSessionEnd } from '../social/sharedTime.js';
 import { principalAvatarUrl, type Principal } from '../auth/jwt.js';
 import {
   getEffectivePermissions,
@@ -40,6 +41,8 @@ import {
 const HEARTBEAT_INTERVAL_MS = 5000;
 const PING_INTERVAL_MS = 10000;
 const PARTICIPANT_GRACE_MS = 10000;
+/** «Совместное время»: интервалы короче не начисляются (анти-накрутка). */
+const MIN_SHARED_SESSION_SEC = 30;
 const PERSIST_INTERVAL_MS = 15000;
 const MAX_PLAYLIST_ITEMS = 100;
 const MAX_HISTORY_ITEMS = 10;
@@ -129,6 +132,12 @@ export class RoomRuntime {
    * один и тот же админ может одновременно держать и обычную, и shadow-сессию.
    */
   private readonly shadowSessions = new Map<string, SessionEntry>();
+  /**
+   * «Совместное время»: момент (ms), с которого текущая пара пользователей
+   * непрерывно вместе в этой комнате. Ключ — каноническая пара `min|max`. Только
+   * пары реальных (`kind==='user'`) участников. Начисление — при разрыве пары.
+   */
+  private readonly coWatchSince = new Map<string, number>();
   /** Active voice/video call members keyed by userId. Empty = no active call. */
   private readonly callMembers = new Map<string, CallMember>();
   private callStartedAt: number | null = null;
@@ -191,6 +200,8 @@ export class RoomRuntime {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    // Начисляем незакрытые совместные интервалы (закрытие комнаты / shutdown).
+    this.coWatchFlushAll(Date.now());
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.persistTimer) clearInterval(this.persistTimer);
@@ -413,6 +424,7 @@ export class RoomRuntime {
       entry.pendingRemovalTimer = undefined;
     }
     this.participants.delete(targetUserId);
+    this.coWatchOnLeave(targetUserId, Date.now());
     this.evictFromCall(targetUserId);
     try {
       session.close(4403, 'kicked');
@@ -498,6 +510,7 @@ export class RoomRuntime {
       role,
       permissions,
     });
+    this.coWatchOnJoin(userId);
     return { isReconnect: false };
   }
 
@@ -520,6 +533,7 @@ export class RoomRuntime {
       const current = this.participants.get(userId);
       if (!current || current.session !== session) return;
       this.participants.delete(userId);
+      this.coWatchOnLeave(userId, Date.now());
       if (session.principal.kind === 'user') userHub.clearRoom(userId, this.slug);
       this.evictFromCall(userId);
       this.broadcast({ t: 'user_leave', userId, serverTs: Date.now() });
@@ -532,6 +546,68 @@ export class RoomRuntime {
   /** Является ли активная сессия пользователя shadow-сессией. */
   isShadowSession(sessionId: string): boolean {
     return this.shadowSessions.has(sessionId);
+  }
+
+  // ── «Совместное время» (co-presence) ──────────────────────────────────
+
+  private coWatchKey(a: string, b: string): string {
+    return a < b ? `${a}|${b}` : `${b}|${a}`;
+  }
+
+  /** Активные реальные (не-shadow, kind==='user') участники. */
+  private coWatchUsers(): string[] {
+    const ids: string[] = [];
+    for (const [uid, e] of this.participants) {
+      if (e.session.principal.kind === 'user') ids.push(uid);
+    }
+    return ids;
+  }
+
+  /**
+   * Пользователь только что появился в комнате (свежий join). Заякориваем пары
+   * с каждым другим присутствующим реальным участником и шлём обоим «together».
+   */
+  private coWatchOnJoin(userId: string): void {
+    const entry = this.participants.get(userId);
+    if (!entry || entry.session.principal.kind !== 'user') return;
+    const now = Date.now();
+    for (const other of this.coWatchUsers()) {
+      if (other === userId) continue;
+      const key = this.coWatchKey(userId, other);
+      if (this.coWatchSince.has(key)) continue;
+      this.coWatchSince.set(key, now);
+      void onSessionStart(userId, other, now);
+    }
+  }
+
+  /**
+   * Пользователь окончательно покинул комнату (после grace / кик / блокировка) —
+   * закрываем все его пары: начисляем накопившееся время и шлём «not together».
+   * Вызывать ПОСЛЕ удаления из `participants`.
+   */
+  private coWatchOnLeave(userId: string, now: number): void {
+    for (const [key, since] of [...this.coWatchSince]) {
+      const [a, b] = key.split('|');
+      if (a !== userId && b !== userId) continue;
+      this.coWatchSince.delete(key);
+      const seconds = Math.floor((now - since) / 1000);
+      if (seconds >= MIN_SHARED_SESSION_SEC) void onSessionEnd(a, b, seconds, now);
+    }
+  }
+
+  /** Начислить все незакрытые пары (закрытие комнаты / graceful-shutdown). */
+  private coWatchFlushAll(now: number): void {
+    for (const [key, since] of this.coWatchSince) {
+      const [a, b] = key.split('|');
+      const seconds = Math.floor((now - since) / 1000);
+      if (seconds >= MIN_SHARED_SESSION_SEC) void onSessionEnd(a, b, seconds, now);
+    }
+    this.coWatchSince.clear();
+  }
+
+  /** Момент (ms) начала текущего совместного интервала пары, если они вместе. */
+  coWatchAnchor(a: string, b: string): number | null {
+    return this.coWatchSince.get(this.coWatchKey(a, b)) ?? null;
   }
 
   /**
@@ -631,6 +707,7 @@ export class RoomRuntime {
       entry.pendingRemovalTimer = undefined;
     }
     this.participants.delete(userId);
+    this.coWatchOnLeave(userId, Date.now());
     this.evictFromCall(userId);
     try {
       entry.session.close(4403, reason);

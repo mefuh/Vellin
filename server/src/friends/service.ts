@@ -16,6 +16,8 @@ import { notifyAsync } from '../push/notificationService.js';
 import type { PushNotificationType } from '@vellin/shared';
 import { PUBLIC_USER_SELECT, toAppNotifications, toPublicUser } from './mappers.js';
 import { getFavorites } from '../titles/service.js';
+import { getSharedWatch } from '../social/sharedTime.js';
+import { roomStore } from '../rooms/store.js';
 import { canSee, parsePrivacy, type ViewerContext } from '../privacy/privacy.js';
 
 /**
@@ -463,6 +465,19 @@ export async function getPublicProfile(viewerId: string, username: string): Prom
 
   const friends = canSee(privacy.friends, ctx) ? await listFriendPublicUsers(user.id) : undefined;
 
+  // «Совместное время» — взаимная история пары; показывается всегда между двумя
+  // людьми (не гейтится приватностью), но не в своём профиле.
+  let sharedWatch: PublicProfile['sharedWatch'];
+  if (!isSelf) {
+    const agg = await getSharedWatch(viewerId, user.id);
+    const since = roomStore.coWatchAnchor(viewerId, user.id);
+    sharedWatch = {
+      ...agg,
+      together: since !== null,
+      togetherSince: since !== null ? new Date(since).toISOString() : null,
+    };
+  }
+
   return {
     ...toPublicUser(user),
     bio: user.bio ?? null,
@@ -475,6 +490,7 @@ export async function getPublicProfile(viewerId: string, username: string): Prom
     friends,
     relationship,
     friendshipId,
+    sharedWatch,
   };
 }
 

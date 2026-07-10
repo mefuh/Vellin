@@ -228,6 +228,30 @@ input[type='date']::-webkit-datetime-edit {
   }
 }
 
+/* «Совместное время»: медленное вращение светящегося ореола вокруг кольца. */
+@keyframes sharedRingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Живой пульс индикатора «сейчас вместе». */
+@keyframes sharedLivePulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.35);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shared-ring-halo {
+    animation: none !important;
+  }
+}
+
 /* Бегущие точки индикатора «печатает…». */
 @keyframes dmTypingDot {
   0%,

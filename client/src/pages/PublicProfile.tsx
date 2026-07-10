@@ -5,6 +5,8 @@ import { Avatar, Button, Icon, type IconName } from '../shared';
 import { useAuthStore } from '../stores/authStore';
 import { useFriendsStore } from '../stores/friendsStore';
 import { usePresenceStore } from '../stores/presenceStore';
+import { useSharedTimeStore } from '../stores/sharedTimeStore';
+import { SharedTimeCard } from '../components/profile/SharedTimeCard';
 import { lastSeenLabel } from '../utils/lastSeen';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { usersApi } from '../api/users';
@@ -83,6 +85,8 @@ export function PublicProfile() {
         currentRoom: res.profile.currentRoom,
         lastSeenAt: res.profile.lastSeenAt,
       });
+      // Гидратировать «совместное время» — дальше живёт от WS shared_time.
+      useSharedTimeStore.getState().hydrate(res.profile.id, res.profile.sharedWatch);
     } catch (e) {
       setError(e instanceof ApiHttpError ? e.payload.message : 'Не удалось загрузить профиль');
     } finally {
@@ -222,6 +226,7 @@ export function PublicProfile() {
           </div>
         </section>
       )}
+      {!isSelf && <SharedTimeCard peerId={profile.id} peerName={profile.username} />}
       {(profile.favoriteTitles?.length ?? 0) > 0 && (
         <section
           style={{

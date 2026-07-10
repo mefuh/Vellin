@@ -398,6 +398,30 @@ export interface FriendRequest {
  */
 export type Relationship = 'none' | 'friends' | 'incoming' | 'outgoing' | 'blocked' | 'self';
 
+/**
+ * «Совместное время» — попарная статистика совместного пребывания в комнатах
+ * просмотра (карточка в чужом профиле). Агрегаты накапливаются на сервере;
+ * `together`/`togetherSince` позволяют клиенту тикать число в реальном времени
+ * локально, пока пара прямо сейчас вместе. Расширяемый контейнер (позже сюда
+ * добавятся совместные фильмы/жанры/бейджи/Wrapped).
+ */
+export interface SharedWatchDTO {
+  /** Суммарное совместное время, секунды (без учёта текущего интервала). */
+  totalSeconds: number;
+  /** Число завершённых совместных сессий (≈ совместных просмотров). */
+  sessionsCount: number;
+  /** Рекорд одной непрерывной сессии, секунды. */
+  longestSessionSeconds: number;
+  /** ISO первого совместного просмотра. Null — ещё не были вместе. */
+  firstWatchedAt: string | null;
+  /** ISO последнего совместного просмотра. Null — ещё не были вместе. */
+  lastWatchedAt: string | null;
+  /** Прямо сейчас оба в одной комнате. */
+  together: boolean;
+  /** ISO момента, с которого идёт текущий совместный интервал (если `together`). */
+  togetherSince: string | null;
+}
+
 /** Публичный профиль пользователя для страницы `/u/:username`. */
 export interface PublicProfile extends PublicUser {
   bio: string | null;
@@ -425,6 +449,11 @@ export interface PublicProfile extends PublicUser {
   relationship: Relationship;
   /** Id записи дружбы/заявки — для accept/remove. */
   friendshipId: string | null;
+  /**
+   * Совместное время с этим пользователем. Заполняется только при просмотре
+   * ЧУЖОГО профиля (`!isSelf`); в своём профиле и в поиске отсутствует.
+   */
+  sharedWatch?: SharedWatchDTO;
 }
 
 export type NotificationType =
