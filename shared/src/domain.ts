@@ -5,6 +5,12 @@ export type Gender = 'male' | 'female' | 'other';
 
 export interface PublicUser {
   id: string;
+  /**
+   * Публичный идентификатор для URL профиля/диалога (`/u/:publicId`,
+   * `/messages/:publicId`). Короткий url-safe токен, не раскрывает username и
+   * не является первичным ключом БД. У гостей — эфемерный id (профиля нет).
+   */
+  publicId: string;
   username: string;
   avatarSeed: string;
   /**

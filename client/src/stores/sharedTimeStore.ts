@@ -3,7 +3,7 @@ import type { SharedWatchDTO, UserS2CSharedTime } from '@vellin/shared';
 
 /**
  * «Совместное время» по peerId. Гидратируется из DTO профиля при открытии
- * `/u/:username` и обновляется живьём из WS `shared_time` (переходы co-presence).
+ * `/u/:publicId` и обновляется живьём из WS `shared_time` (переходы co-presence).
  * Карточка профиля читает по peerId и, если `together`, тикает число локально
  * из `togetherSince` — серверу не нужен per-second трафик.
  */

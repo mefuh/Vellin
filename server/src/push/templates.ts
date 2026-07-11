@@ -14,7 +14,7 @@ export const DEFAULT_TEMPLATES: Record<PushNotificationType, Omit<NotificationTe
     icon: '/icon-192.png',
     badge: '/badge-72.png',
     image: null,
-    url: '/messages/{{username}}',
+    url: '/messages/{{publicId}}',
     sound: null,
     ttl: 86400,
     urgency: 'high',
@@ -184,6 +184,12 @@ export async function seedDefaultTemplates(): Promise<void> {
       update: {}, // существующие (возможно отредактированные) не трогаем
     });
   }
+  // Одноразовая нормализация: DM-диплинк перешёл с username на publicId. Чиним
+  // только строго старый дефолт, чтобы не затирать возможные админ-правки.
+  await prisma.notificationTemplate.updateMany({
+    where: { type: 'direct_message', url: '/messages/{{username}}' },
+    data: { url: '/messages/{{publicId}}' },
+  });
   cache.clear();
 }
 

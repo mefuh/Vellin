@@ -146,6 +146,7 @@ export function Friends() {
 // ── Карточка человека ─────────────────────────────────────────────────────
 
 function PersonRow({
+  publicId,
   username,
   avatarSeed,
   avatarUrl,
@@ -153,6 +154,7 @@ function PersonRow({
   subtitle,
   actions,
 }: {
+  publicId: string;
   username: string;
   avatarSeed?: string;
   avatarUrl?: string | null;
@@ -173,7 +175,7 @@ function PersonRow({
         flexWrap: 'wrap',
       }}
     >
-      <Link to={`/u/${encodeURIComponent(username)}`} style={{ display: 'flex', alignItems: 'center', gap: 12, flex: '1 1 180px', minWidth: 0, color: 'inherit' }}>
+      <Link to={`/u/${encodeURIComponent(publicId)}`} style={{ display: 'flex', alignItems: 'center', gap: 12, flex: '1 1 180px', minWidth: 0, color: 'inherit' }}>
         <Avatar name={username} seed={avatarSeed} src={avatarUrl} size={42} status={status} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -231,6 +233,7 @@ function FriendsList({ friends, onChanged }: { friends: FriendUser[]; onChanged:
       {friends.map((f) => (
         <PersonRow
           key={f.id}
+          publicId={f.publicId}
           username={f.username}
           avatarSeed={f.avatarSeed}
           avatarUrl={f.avatarUrl}
@@ -288,6 +291,7 @@ function IncomingList({ requests, onChanged }: { requests: FriendRequest[]; onCh
       {requests.map((r) => (
         <PersonRow
           key={r.id}
+          publicId={r.user.publicId}
           username={r.user.username}
           avatarSeed={r.user.avatarSeed}
           avatarUrl={r.user.avatarUrl}
@@ -318,6 +322,7 @@ function OutgoingList({ requests, onChanged }: { requests: FriendRequest[]; onCh
       {requests.map((r) => (
         <PersonRow
           key={r.id}
+          publicId={r.user.publicId}
           username={r.user.username}
           avatarSeed={r.user.avatarSeed}
           avatarUrl={r.user.avatarUrl}
@@ -438,12 +443,13 @@ function SearchResultRow({ profile, onChanged }: { profile: PublicProfile; onCha
   };
   return (
     <PersonRow
+      publicId={profile.publicId}
       username={profile.username}
       avatarSeed={profile.avatarSeed}
       avatarUrl={profile.avatarUrl}
       status={profile.online ? (profile.currentRoom ? 'watching' : 'online') : undefined}
       subtitle={profile.bio ?? undefined}
-      actions={<RelationshipAction relationship={profile.relationship} busy={busy} run={run} userId={profile.id} username={profile.username} />}
+      actions={<RelationshipAction relationship={profile.relationship} busy={busy} run={run} userId={profile.id} publicId={profile.publicId} />}
     />
   );
 }
@@ -453,13 +459,13 @@ function RelationshipAction({
   busy,
   run,
   userId,
-  username,
+  publicId,
 }: {
   relationship: Relationship;
   busy: boolean;
   run: (fn: () => Promise<unknown>) => Promise<void>;
   userId: string;
-  username: string;
+  publicId: string;
 }) {
   switch (relationship) {
     case 'none':
@@ -482,7 +488,7 @@ function RelationshipAction({
       );
     case 'friends':
       return (
-        <Link to={`/u/${encodeURIComponent(username)}`}>
+        <Link to={`/u/${encodeURIComponent(publicId)}`}>
           <Button size="sm" variant="secondary">
             Профиль
           </Button>

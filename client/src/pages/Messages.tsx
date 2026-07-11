@@ -103,14 +103,14 @@ function dayLabel(iso: string): string {
 }
 
 export function Messages() {
-  const { username } = useParams<{ username?: string }>();
+  const { publicId } = useParams<{ publicId?: string }>();
   const user = useAuthStore((s) => s.user);
   const isMobile = useIsMobile();
   const conversations = useDmStore((s) => s.conversations);
   const setConversations = useDmStore((s) => s.setConversations);
 
   // Открытый чат на мобилке занимает весь экран (фикс-контейнер, см. ниже).
-  const chatOpen = isMobile && !!username;
+  const chatOpen = isMobile && !!publicId;
 
   useEffect(() => {
     let alive = true;
@@ -140,13 +140,13 @@ export function Messages() {
   if (!user) return <Navigate to="/login" replace />;
 
   const list = (
-    <ConversationList conversations={conversations} activeUsername={username} myId={user.id} compact={!isMobile} />
+    <ConversationList conversations={conversations} activePublicId={publicId} myId={user.id} compact={!isMobile} />
   );
-  const chat = username ? <ChatPane key={username} username={username} myId={user.id} /> : <EmptyChat />;
+  const chat = publicId ? <ChatPane key={publicId} publicId={publicId} myId={user.id} /> : <EmptyChat />;
 
   if (isMobile) {
     // Мобайл: либо список, либо открытый чат на весь экран.
-    if (username) {
+    if (publicId) {
       // Чат на весь экран. position:fixed; inset:0 = ровно текущий вьюпорт
       // (безопасный web-view без cover). Когда вылезает клавиатура, web-view
       // ужимается — fixed-контейнер ужимается вместе с ним, и композер сам
@@ -225,12 +225,12 @@ export function Messages() {
 
 function ConversationList({
   conversations,
-  activeUsername,
+  activePublicId,
   myId,
   compact,
 }: {
   conversations: DmConversation[];
-  activeUsername?: string;
+  activePublicId?: string;
   myId: string;
   /** Десктоп-сайдбар: чуть компактнее заголовок/отступы. */
   compact?: boolean;
@@ -341,7 +341,7 @@ function ConversationList({
               c={c}
               myId={myId}
               online={presence[c.peer.id]?.online ?? c.online}
-              active={activeUsername === c.peer.username}
+              active={activePublicId === c.peer.publicId}
             />
           ))
         )}
@@ -392,7 +392,7 @@ function ConversationRow({
 
   return (
     <Link
-      to={`/messages/${encodeURIComponent(c.peer.username)}`}
+      to={`/messages/${encodeURIComponent(c.peer.publicId)}`}
       className="dm-row dm-noselect"
       data-active={active}
       style={{
@@ -509,7 +509,7 @@ function EmptyChat() {
 
 // ── Открытый чат ──────────────────────────────────────────────────────────
 
-function ChatPane({ username, myId }: { username: string; myId: string }) {
+function ChatPane({ publicId, myId }: { publicId: string; myId: string }) {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [peerId, setPeerId] = useState<string | null>(null);
@@ -642,12 +642,12 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     return () => clearInterval(id);
   }, []);
 
-  // Загрузка треда по username.
+  // Загрузка треда по publicId.
   useEffect(() => {
     let alive = true;
     setLoadError(null);
     void dmApi
-      .thread(username)
+      .thread(publicId)
       .then((res) => {
         if (!alive) return;
         peerRef.current = res.peer;
@@ -682,7 +682,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
       if (peerRef.current) unwatch(peerRef.current.id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [username]);
+  }, [publicId]);
 
   // При открытии диалога — всегда к низу, кнопку «вниз» гасим.
   useEffect(() => {
@@ -756,7 +756,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
     if (!thread || !peerId || !thread.messages[0]) return;
     setLoadingMore(true);
     try {
-      const res = await dmApi.thread(username, thread.messages[0].createdAt);
+      const res = await dmApi.thread(publicId, thread.messages[0].createdAt);
       prependMessages(peerId, res.messages, res.hasMore);
     } catch {
       /* ignore */
@@ -858,7 +858,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
         // «Живой» пузырь: пружинно меняет ширину под контент и мягко
         // кросс-фейдит строку статуса — см. AnimatedStatusBubble.
         <AnimatedStatusBubble
-          to={`/u/${encodeURIComponent(peer.username)}`}
+          to={`/u/${encodeURIComponent(peer.publicId)}`}
           avatarName={peer.username}
           avatarSeed={peer.avatarSeed}
           avatarSrc={peer.avatarUrl}
@@ -871,7 +871,7 @@ function ChatPane({ username, myId }: { username: string; myId: string }) {
         />
       ) : (
         <Link
-          to={`/u/${encodeURIComponent(peer.username)}`}
+          to={`/u/${encodeURIComponent(peer.publicId)}`}
           style={{ display: 'flex', alignItems: 'center', gap: 11, color: 'inherit', textDecoration: 'none', minWidth: 0, flex: 1 }}
         >
           <Avatar name={peer.username} seed={peer.avatarSeed} src={peer.avatarUrl} size={40} status={online ? 'online' : 'offline'} />

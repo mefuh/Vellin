@@ -431,8 +431,8 @@ export async function searchUsers(viewerId: string, q: string): Promise<PublicPr
   });
 }
 
-export async function getPublicProfile(viewerId: string, username: string): Promise<PublicProfile> {
-  const user = await prisma.user.findUnique({ where: { username }, select: { ...PROFILE_SELECT, isBlocked: true } });
+export async function getPublicProfile(viewerId: string, publicId: string): Promise<PublicProfile> {
+  const user = await prisma.user.findUnique({ where: { publicId }, select: { ...PROFILE_SELECT, isBlocked: true } });
   if (!user || user.isBlocked) throw new FriendError(404, 'Пользователь не найден');
 
   const isSelf = user.id === viewerId;

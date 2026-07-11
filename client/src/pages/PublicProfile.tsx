@@ -42,12 +42,12 @@ function InfoRow({ icon, label, value }: { icon: IconName; label: string; value:
 }
 
 export function PublicProfile() {
-  const { username = '' } = useParams();
+  const { publicId = '' } = useParams();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isMobile = useIsMobile();
   const refreshFriends = useFriendsStore((s) => s.refresh);
-  const isSelf = user?.kind === 'user' && user.username.toLowerCase() === username.toLowerCase();
+  const isSelf = user?.kind === 'user' && user.publicId === publicId;
 
   const [profile, setProfile] = useState<PublicProfileDTO | null>(null);
   const [loading, setLoading] = useState(true);
@@ -76,7 +76,7 @@ export function PublicProfile() {
     setLoading(true);
     setError(null);
     try {
-      const res = await usersApi.profile(username);
+      const res = await usersApi.profile(publicId);
       setProfile(res.profile);
       // Засеять стор присутствия начальным состоянием из REST-ответа.
       usePresenceStore.getState().apply({
@@ -97,7 +97,7 @@ export function PublicProfile() {
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [username]);
+  }, [publicId]);
 
   useEffect(() => {
     if (user?.kind !== 'user') return;
@@ -335,7 +335,7 @@ export function PublicProfile() {
           {profile.friends.slice(0, 24).map((f) => (
             <Link
               key={f.id}
-              to={`/u/${f.username}`}
+              to={`/u/${f.publicId}`}
               title={f.username}
               style={{
                 display: 'flex',
@@ -431,7 +431,7 @@ function ProfileActions({
     </Button>
   );
   const writeBtn = (
-    <Button size="sm" variant="secondary" icon="chat" onClick={() => navigate(`/messages/${encodeURIComponent(profile.username)}`)}>
+    <Button size="sm" variant="secondary" icon="chat" onClick={() => navigate(`/messages/${encodeURIComponent(profile.publicId)}`)}>
       Написать
     </Button>
   );

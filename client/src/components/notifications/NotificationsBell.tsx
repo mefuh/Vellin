@@ -45,10 +45,10 @@ export function NotificationsBell() {
     return () => document.removeEventListener('mousedown', onDown);
   }, [panelOpen, closePanel]);
 
-  const goProfile = (username?: string): void => {
-    if (!username) return;
+  const goProfile = (publicId?: string): void => {
+    if (!publicId) return;
     closePanel();
-    navigate(`/u/${encodeURIComponent(username)}`);
+    navigate(`/u/${encodeURIComponent(publicId)}`);
   };
 
   const goRoom = (n: AppNotification): void => {
@@ -60,11 +60,11 @@ export function NotificationsBell() {
   };
 
   const goMessages = (n: AppNotification): void => {
-    if (!n.actor?.username) return;
+    if (!n.actor?.publicId) return;
     closePanel();
     // Прочтение диалога снимет уведомление через WS; убираем и локально сразу.
     void dismiss(n.id);
-    navigate(`/messages/${encodeURIComponent(n.actor.username)}`);
+    navigate(`/messages/${encodeURIComponent(n.actor.publicId)}`);
   };
 
   const accept = async (actorId: string): Promise<void> => {
@@ -170,7 +170,7 @@ export function NotificationsBell() {
             }}
           >
             <button
-              onClick={() => (n.type === 'direct_message' ? goMessages(n) : goProfile(n.actor?.username))}
+              onClick={() => (n.type === 'direct_message' ? goMessages(n) : goProfile(n.actor?.publicId))}
               style={{ background: 'transparent', border: 'none', padding: 0, cursor: n.actor ? 'pointer' : 'default' }}
             >
               <Avatar

@@ -30,14 +30,14 @@ function shouldShow(path: string): boolean {
 }
 
 /** Индекс активной вкладки по маршруту (−1 — нет активной). */
-function activeIndexFromPath(path: string, myUsername: string): number {
+function activeIndexFromPath(path: string, myPublicId: string): number {
   if (path.startsWith('/library')) return 0;
   if (path === '/messages') return 1;
   if (path.startsWith('/friends')) return 2;
   if (path === '/profile') return 3;
   if (path.startsWith('/u/')) {
-    const uname = decodeURIComponent(path.slice('/u/'.length));
-    return uname === myUsername ? 3 : -1;
+    const pid = decodeURIComponent(path.slice('/u/'.length));
+    return pid === myPublicId ? 3 : -1;
   }
   return -1;
 }
@@ -67,16 +67,16 @@ export function MobileDock() {
   const [animate, setAnimate] = useState(false);
 
   const isUser = user?.kind === 'user';
-  const myUsername = user?.username ?? '';
+  const myPublicId = user?.publicId ?? '';
   const path = location.pathname;
   const visible = isMobile && isUser && shouldShow(path);
-  const activeIndex = activeIndexFromPath(path, myUsername);
+  const activeIndex = activeIndexFromPath(path, myPublicId);
 
   const tabs: Tab[] = [
     { id: 'library', label: 'Библиотека', icon: 'library', to: '/library' },
     { id: 'messages', label: 'Чаты', icon: 'chat', to: '/messages' },
     { id: 'friends', label: 'Друзья', icon: 'users', to: '/friends' },
-    { id: 'profile', label: 'Профиль', to: myUsername ? `/u/${encodeURIComponent(myUsername)}` : '/profile' },
+    { id: 'profile', label: 'Профиль', to: myPublicId ? `/u/${encodeURIComponent(myPublicId)}` : '/profile' },
   ];
 
   // Позиция подложки под активной вкладкой (измеряем DOM — устойчиво к гэпам/ширинам).

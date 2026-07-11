@@ -10,7 +10,7 @@ import type {
 } from '@vellin/shared';
 import type { Principal } from '../auth/jwt.js';
 import { requireAuth } from '../auth/middleware.js';
-import { getRoomInviteInfo, getThreadByUsername, listConversations, respondRoomInvite } from './service.js';
+import { getRoomInviteInfo, getThreadByPublicId, listConversations, respondRoomInvite } from './service.js';
 import { broadcastRoomInviteUpdate } from './realtime.js';
 import { ALLOWED_DM_IMAGE_MIME, MAX_DM_IMAGE_BYTES, processAndSaveDmImage } from './image.js';
 import { ALLOWED_DM_VOICE_MIME, MAX_DM_VOICE_BYTES, saveDmVoice } from './voice.js';
@@ -43,12 +43,12 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
     reply.send((await listConversations(p.userId)) satisfies ListConversationsResponse);
   });
 
-  app.get<{ Params: { username: string }; Querystring: { before?: string } }>(
-    '/dm/with/:username',
+  app.get<{ Params: { publicId: string }; Querystring: { before?: string } }>(
+    '/dm/with/:publicId',
     async (req, reply) => {
       const p = requireUser(req, reply);
       if (!p) return;
-      const thread = await getThreadByUsername(p.userId, req.params.username, req.query.before);
+      const thread = await getThreadByPublicId(p.userId, req.params.publicId, req.query.before);
       reply.send(thread satisfies ConversationThreadResponse);
     },
   );
