@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { Button } from '../../shared';
 import { profileApi } from '../../api/profile';
 import { ApiHttpError } from '../../api/client';
 import { useAuthStore } from '../../stores/authStore';
-import { Card, LabeledInput, StatusLine } from './ProfilePrimitives';
+import { Card, LabeledInput, PillSubmit, StatusLine } from './ProfilePrimitives';
 
 export function PasswordSection() {
   const applyAuthUpdate = useAuthStore((s) => s.applyAuthUpdate);
@@ -40,34 +39,36 @@ export function PasswordSection() {
   };
 
   return (
-    <Card title="Пароль" desc="После смены пароля вы выйдете со всех других устройств." icon="lock">
-      <LabeledInput
-        label="Текущий пароль"
-        type="password"
-        value={currentPassword}
-        onChange={setCurrentPassword}
-        autoComplete="current-password"
-      />
-      <LabeledInput
-        label="Новый пароль (от 8 символов)"
-        type="password"
-        value={newPassword}
-        onChange={setNewPassword}
-        autoComplete="new-password"
-      />
-      <LabeledInput
-        label="Повторите новый пароль"
-        type="password"
-        value={repeat}
-        onChange={setRepeat}
-        autoComplete="new-password"
-      />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <Button variant="primary" size="md" disabled={busy || !valid} onClick={save}>
+    <div style={{ maxWidth: 520 }}>
+      <Card title="Пароль" desc="После смены пароля вы выйдете со всех других устройств.">
+        <LabeledInput
+          label="Текущий пароль"
+          type="password"
+          value={currentPassword}
+          onChange={setCurrentPassword}
+          autoComplete="current-password"
+        />
+        <LabeledInput
+          label="Новый пароль · от 8 символов"
+          type="password"
+          value={newPassword}
+          onChange={setNewPassword}
+          autoComplete="new-password"
+        />
+        <LabeledInput
+          label="Повторите новый пароль"
+          type="password"
+          value={repeat}
+          onChange={setRepeat}
+          autoComplete="new-password"
+        />
+      </Card>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginTop: 20 }}>
+        <PillSubmit disabled={busy || !valid} onClick={save}>
           {busy ? 'Сохраняем…' : 'Сменить пароль'}
-        </Button>
+        </PillSubmit>
         <StatusLine error={error} success={success} />
       </div>
-    </Card>
+    </div>
   );
 }

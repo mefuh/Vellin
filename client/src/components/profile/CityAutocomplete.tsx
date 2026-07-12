@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../../shared';
 import { geoApi } from '../../api/geo';
-import { inputStyle, labelStyle } from './ProfilePrimitives';
+import { borderlessInputStyle, fieldLabelStyle } from './ProfilePrimitives';
 
 /**
  * Поле «Город» с автодополнением из серверного геосправочника. Свободный ввод
@@ -94,8 +94,8 @@ export function CityAutocomplete({
   const showDropdown = open && !confirmed && value.trim().length >= 2;
 
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 6, position: 'relative' }}>
-      <span style={labelStyle}>{label}</span>
+    <label style={{ display: 'block', position: 'relative' }}>
+      <span style={{ ...fieldLabelStyle, display: 'block', marginBottom: 8 }}>{label}</span>
       <input
         type="text"
         value={value}
@@ -112,7 +112,7 @@ export function CityAutocomplete({
           blurTimer.current = setTimeout(() => setOpen(false), 140);
         }}
         onKeyDown={onKeyDown}
-        style={inputStyle}
+        style={{ ...borderlessInputStyle, fontSize: 17 }}
       />
       {hint && <span style={{ fontSize: 12, color: 'var(--accent-hi)' }}>{hint}</span>}
 

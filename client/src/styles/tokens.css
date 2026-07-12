@@ -42,6 +42,8 @@
 
   --font-ui: "General Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  /* Дисплейный шрифт hero-заголовков на страницах профиля. Откат — на общий UI. */
+  --font-display: "Onest", var(--font-ui);
 }
 
 [data-theme='light'] {

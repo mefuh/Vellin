@@ -11,7 +11,7 @@ import { Avatar, Button, Icon } from '../../shared';
 import { authApi } from '../../api/auth';
 import { friendsApi } from '../../api/friends';
 import { ApiHttpError } from '../../api/client';
-import { Card, StatusLine, labelStyle } from './ProfilePrimitives';
+import { Card, SaveBar, StatusLine } from './ProfilePrimitives';
 
 const CATS: { key: PrivacyCategory; title: string; desc: string }[] = [
   { key: 'online', title: 'Время «был в сети»', desc: 'Кто видит, что вы онлайн и когда заходили.' },
@@ -21,11 +21,17 @@ const CATS: { key: PrivacyCategory; title: string; desc: string }[] = [
   { key: 'messages', title: 'Личные сообщения', desc: 'Кто может писать вам в личку.' },
 ];
 
-const VIS: { value: PrivacyVisibility; label: string }[] = [
-  { value: 'everyone', label: 'Все' },
-  { value: 'friends', label: 'Только друзья' },
-  { value: 'nobody', label: 'Никто' },
+const VIS: { value: PrivacyVisibility; label: string; color: string }[] = [
+  { value: 'everyone', label: 'Все', color: 'var(--ok)' },
+  { value: 'friends', label: 'Только друзья', color: 'var(--warn)' },
+  { value: 'nobody', label: 'Никто', color: 'var(--text-3)' },
 ];
+
+const SENTENCE: Record<PrivacyVisibility, string> = {
+  everyone: 'Видно всем в Vellin',
+  friends: 'Видно только вашим друзьям',
+  nobody: 'Скрыто от всех',
+};
 
 type ExceptionKind = 'allow' | 'deny';
 
@@ -35,7 +41,9 @@ export function PrivacySection() {
   const [friends, setFriends] = useState<FriendUser[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  // Раскрытая категория исключений (одна за раз).
+  const [expanded, setExpanded] = useState<PrivacyCategory | null>(null);
   // Открытый пикер исключений: какая категория и какой список (allow/deny).
   const [picker, setPicker] = useState<{ cat: PrivacyCategory; kind: ExceptionKind } | null>(null);
 
@@ -56,18 +64,22 @@ export function PrivacySection() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!saved) return;
+    const id = setTimeout(() => setSaved(false), 2000);
+    return () => clearTimeout(id);
+  }, [saved]);
+
   const friendsById = useMemo(() => new Map(friends.map((f) => [f.id, f])), [friends]);
   const dirty = loaded !== null && JSON.stringify(loaded) !== JSON.stringify(draft);
 
   const setRule = (cat: PrivacyCategory, patch: Partial<PrivacyRule>) => {
-    setSuccess(null);
     setDraft((d) => ({ ...d, [cat]: { ...d[cat], ...patch } }));
   };
 
   // Установить весь список исключений; ids из противоположного списка убираем
   // (один и тот же друг не может быть и в allow, и в deny).
   const applyException = (cat: PrivacyCategory, kind: ExceptionKind, ids: string[]) => {
-    setSuccess(null);
     setDraft((d) => {
       const other: ExceptionKind = kind === 'allow' ? 'deny' : 'allow';
       const otherList = d[cat][other].filter((id) => !ids.includes(id));
@@ -76,19 +88,17 @@ export function PrivacySection() {
   };
 
   const removeException = (cat: PrivacyCategory, kind: ExceptionKind, id: string) => {
-    setSuccess(null);
     setDraft((d) => ({ ...d, [cat]: { ...d[cat], [kind]: d[cat][kind].filter((x) => x !== id) } }));
   };
 
   const save = async () => {
     setError(null);
-    setSuccess(null);
     setBusy(true);
     try {
       const res = await authApi.updatePrivacy({ privacy: draft });
       setLoaded(res.privacy);
       setDraft(res.privacy);
-      setSuccess('Сохранено');
+      setSaved(true);
     } catch (e) {
       setError(e instanceof ApiHttpError ? e.payload.message : 'Не удалось сохранить');
     } finally {
@@ -98,37 +108,44 @@ export function PrivacySection() {
 
   if (!loaded) {
     return (
-      <Card title="Приватность" desc="Кто и что видит в вашем профиле." icon="lock">
+      <Card title="Кто вас видит" desc="Выберите аудиторию для каждой части профиля." contained={false}>
         <div style={{ color: 'var(--text-3)', fontSize: 14 }}>{error ?? 'Загрузка…'}</div>
       </Card>
     );
   }
 
   return (
-    <Card title="Приватность" desc="Кто и что видит в вашем профиле. Исключения переопределяют общее правило." icon="lock">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {CATS.map((c, i) => (
-          <CategoryRow
-            key={c.key}
-            divider={i > 0}
-            title={c.title}
-            desc={c.desc}
-            rule={draft[c.key]}
-            friendsById={friendsById}
-            hasFriends={friends.length > 0}
-            onVisibility={(v) => setRule(c.key, { visibility: v })}
-            onOpenPicker={(kind) => setPicker({ cat: c.key, kind })}
-            onRemove={(kind, id) => removeException(c.key, kind, id)}
-          />
-        ))}
-      </div>
+    <>
+      <Card
+        title="Кто вас видит"
+        desc="Выберите аудиторию для каждой части профиля. Исключения переопределяют общее правило для конкретных людей."
+        contained={false}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {CATS.map((c) => (
+            <CategoryCard
+              key={c.key}
+              title={c.title}
+              desc={c.desc}
+              rule={draft[c.key]}
+              friendsById={friendsById}
+              hasFriends={friends.length > 0}
+              expanded={expanded === c.key}
+              onToggle={() => setExpanded((e) => (e === c.key ? null : c.key))}
+              onVisibility={(v) => setRule(c.key, { visibility: v })}
+              onOpenPicker={(kind) => setPicker({ cat: c.key, kind })}
+              onRemove={(kind, id) => removeException(c.key, kind, id)}
+            />
+          ))}
+        </div>
+        {error && (
+          <div style={{ marginTop: 14 }}>
+            <StatusLine error={error} />
+          </div>
+        )}
+      </Card>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 6 }}>
-        <Button variant="primary" size="md" disabled={busy || !dirty} onClick={save}>
-          {busy ? 'Сохраняем…' : 'Сохранить'}
-        </Button>
-        <StatusLine error={error} success={success} />
-      </div>
+      <SaveBar dirty={dirty} saved={saved} busy={busy} onSave={() => void save()} onCancel={() => setDraft(loaded)} />
 
       {picker && (
         <FriendPickerModal
@@ -142,79 +159,92 @@ export function PrivacySection() {
           }}
         />
       )}
-    </Card>
+    </>
   );
 }
 
-function CategoryRow({
-  divider,
+function CategoryCard({
   title,
   desc,
   rule,
   friendsById,
   hasFriends,
+  expanded,
+  onToggle,
   onVisibility,
   onOpenPicker,
   onRemove,
 }: {
-  divider: boolean;
   title: string;
   desc: string;
   rule: PrivacyRule;
   friendsById: Map<string, FriendUser>;
   hasFriends: boolean;
+  expanded: boolean;
+  onToggle: () => void;
   onVisibility: (v: PrivacyVisibility) => void;
   onOpenPicker: (kind: ExceptionKind) => void;
   onRemove: (kind: ExceptionKind, id: string) => void;
 }) {
+  const active = VIS.find((v) => v.value === rule.visibility) ?? VIS[0];
   return (
-    <div
-      style={{
-        padding: '16px 0',
-        borderTop: divider ? '1px solid var(--line-1)' : 'none',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
-    >
-      <div>
-        <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
-        <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 3 }}>{desc}</div>
+    <div style={{ borderRadius: 20, background: 'var(--bg-1)', border: '1px solid var(--line-1)', padding: '22px 24px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 180 }}>
+          <div style={{ fontWeight: 600, fontSize: 16 }}>{title}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 3 }}>{desc}</div>
+        </div>
+
+        {/* Сегментированный выбор аудитории. */}
+        <div style={{ display: 'flex', gap: 3, padding: 4, borderRadius: 13, background: 'var(--bg-2)', border: '1px solid var(--line-1)' }}>
+          {VIS.map((v) => {
+            const on = rule.visibility === v.value;
+            return (
+              <button
+                key={v.value}
+                onClick={() => onVisibility(v.value)}
+                style={{
+                  fontFamily: 'inherit',
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  padding: '8px 16px',
+                  borderRadius: 999,
+                  border: 'none',
+                  cursor: 'pointer',
+                  transition: 'background .2s, color .2s',
+                  whiteSpace: 'nowrap',
+                  background: on ? `color-mix(in srgb, ${v.color} 18%, transparent)` : 'transparent',
+                  color: on ? 'var(--text-0)' : 'var(--text-2)',
+                }}
+              >
+                {v.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Сегментированный выбор базовой видимости. */}
-      <div style={{ display: 'inline-flex', gap: 0, border: '1px solid var(--line-2)', borderRadius: 'var(--r-md)', overflow: 'hidden', alignSelf: 'flex-start' }}>
-        {VIS.map((v, i) => {
-          const active = rule.visibility === v.value;
-          return (
-            <button
-              key={v.value}
-              onClick={() => onVisibility(v.value)}
-              style={{
-                padding: '8px 14px',
-                fontSize: 13,
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-                border: 'none',
-                borderLeft: i > 0 ? '1px solid var(--line-2)' : 'none',
-                background: active ? 'var(--accent)' : 'var(--bg-2)',
-                color: active ? '#fff' : 'var(--text-1)',
-                fontWeight: active ? 600 : 400,
-                transition: 'background .12s, color .12s',
-              }}
-            >
-              {v.label}
-            </button>
-          );
-        })}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-1)' }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: active.color }} />
+          {SENTENCE[rule.visibility]}
+        </div>
+        {hasFriends && (
+          <button
+            onClick={onToggle}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12.5, fontWeight: 600, color: 'var(--text-2)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            Исключения
+            <span style={{ display: 'inline-block', transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}>›</span>
+          </button>
+        )}
       </div>
 
-      {/* Исключения. */}
-      {hasFriends ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {expanded && hasFriends && (
+        <div className="hero-anim" style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--line-1)', display: 'flex', flexDirection: 'column', gap: 16, animation: 'heroFadeUp 0.35s both' }}>
           <ExceptionRow
             label="Всегда показывать"
-            kind="allow"
+            color="var(--ok)"
             ids={rule.allow}
             friendsById={friendsById}
             onAdd={() => onOpenPicker('allow')}
@@ -222,16 +252,12 @@ function CategoryRow({
           />
           <ExceptionRow
             label="Никогда не показывать"
-            kind="deny"
+            color="var(--accent-hi)"
             ids={rule.deny}
             friendsById={friendsById}
             onAdd={() => onOpenPicker('deny')}
             onRemove={(id) => onRemove('deny', id)}
           />
-        </div>
-      ) : (
-        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
-          Точечные исключения станут доступны, когда у вас появятся друзья.
         </div>
       )}
     </div>
@@ -240,14 +266,14 @@ function CategoryRow({
 
 function ExceptionRow({
   label,
-  kind,
+  color,
   ids,
   friendsById,
   onAdd,
   onRemove,
 }: {
   label: string;
-  kind: ExceptionKind;
+  color: string;
   ids: string[];
   friendsById: Map<string, FriendUser>;
   onAdd: () => void;
@@ -255,51 +281,54 @@ function ExceptionRow({
 }) {
   const known = ids.map((id) => friendsById.get(id)).filter((f): f is FriendUser => !!f);
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-      <span style={{ ...labelStyle, color: kind === 'deny' ? 'var(--accent-hi)' : 'var(--text-2)' }}>{label}</span>
-      {known.map((f) => (
-        <span
-          key={f.id}
+    <div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color, marginBottom: 10 }}>{label}</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+        {known.map((f) => (
+          <span
+            key={f.id}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 8px 4px 4px',
+              borderRadius: 9,
+              background: `color-mix(in srgb, ${color} 12%, transparent)`,
+              border: `1px solid color-mix(in srgb, ${color} 28%, transparent)`,
+              fontSize: 12.5,
+            }}
+          >
+            <Avatar seed={f.avatarSeed} src={f.avatarUrl} name={f.username} size={20} />
+            {f.username}
+            <button
+              onClick={() => onRemove(f.id)}
+              title="Убрать"
+              style={{ display: 'grid', placeItems: 'center', background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer', padding: 0 }}
+            >
+              <Icon name="close" size={12} />
+            </button>
+          </span>
+        ))}
+        <button
+          onClick={onAdd}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 6,
-            padding: '3px 6px 3px 3px',
-            borderRadius: 999,
-            background: 'var(--bg-3)',
-            border: '1px solid var(--line-2)',
-            fontSize: 12,
+            gap: 5,
+            padding: '5px 11px',
+            borderRadius: 9,
+            background: 'var(--bg-2)',
+            border: '1px dashed var(--line-3)',
+            color: 'var(--text-2)',
+            fontSize: 12.5,
+            fontWeight: 600,
+            fontFamily: 'inherit',
+            cursor: 'pointer',
           }}
         >
-          <Avatar seed={f.avatarSeed} src={f.avatarUrl} name={f.username} size={20} />
-          {f.username}
-          <button
-            onClick={() => onRemove(f.id)}
-            title="Убрать"
-            style={{ display: 'grid', placeItems: 'center', background: 'transparent', border: 'none', color: 'var(--text-3)', cursor: 'pointer', padding: 0 }}
-          >
-            <Icon name="close" size={12} />
-          </button>
-        </span>
-      ))}
-      <button
-        onClick={onAdd}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 5,
-          padding: '4px 10px',
-          borderRadius: 999,
-          background: 'transparent',
-          border: '1px dashed var(--line-2)',
-          color: 'var(--text-2)',
-          fontSize: 12,
-          fontFamily: 'inherit',
-          cursor: 'pointer',
-        }}
-      >
-        <Icon name="plus" size={12} /> Добавить
-      </button>
+          <Icon name="plus" size={12} /> Добавить
+        </button>
+      </div>
     </div>
   );
 }

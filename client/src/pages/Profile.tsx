@@ -1,38 +1,35 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Avatar, Icon, type IconName } from '../shared';
+import type { AuthUser } from '@vellin/shared';
 import { useAuthStore } from '../stores/authStore';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { AppHeader } from '../components/AppHeader';
-import { AvatarSection } from '../components/profile/AvatarSection';
+import { HeroShell } from '../components/profile/ProfileHeroKit';
+import { SettingsHero } from '../components/profile/SettingsHero';
 import { IdentitySection } from '../components/profile/IdentitySection';
 import { FavoritesSection } from '../components/profile/FavoritesSection';
 import { PrivacySection } from '../components/profile/PrivacySection';
 import { EmailSection } from '../components/profile/EmailSection';
 import { PasswordSection } from '../components/profile/PasswordSection';
 import { DevicesSection } from '../components/profile/DevicesSection';
-import type { AuthUser } from '@vellin/shared';
 
-type TabId = 'profile' | 'privacy' | 'email' | 'password' | 'devices';
+type TabId = 'profile' | 'cinema' | 'privacy' | 'email' | 'password' | 'devices';
 
-const NAV: { id: TabId; icon: IconName; label: string }[] = [
-  { id: 'profile', icon: 'user', label: 'Профиль' },
-  { id: 'privacy', icon: 'eye', label: 'Приватность' },
-  { id: 'email', icon: 'globe', label: 'Email' },
-  { id: 'password', icon: 'lock', label: 'Пароль' },
-  { id: 'devices', icon: 'cast', label: 'Устройства' },
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'profile', label: 'Профиль' },
+  { id: 'cinema', label: 'Кино' },
+  { id: 'privacy', label: 'Приватность' },
+  { id: 'email', label: 'Email' },
+  { id: 'password', label: 'Пароль' },
+  { id: 'devices', label: 'Устройства' },
 ];
 
 function renderTab(tab: TabId, user: AuthUser) {
   switch (tab) {
     case 'profile':
-      return (
-        <>
-          <AvatarSection user={user} />
-          <IdentitySection user={user} />
-          <FavoritesSection />
-        </>
-      );
+      return <IdentitySection user={user} />;
+    case 'cinema':
+      return <FavoritesSection />;
     case 'privacy':
       return <PrivacySection />;
     case 'email':
@@ -44,6 +41,20 @@ function renderTab(tab: TabId, user: AuthUser) {
   }
 }
 
+const tabBase: CSSProperties = {
+  fontFamily: 'inherit',
+  fontSize: 13.5,
+  fontWeight: 600,
+  padding: '9px 16px',
+  borderRadius: 999,
+  border: 'none',
+  cursor: 'pointer',
+  transition: 'background .2s, color .2s',
+  whiteSpace: 'nowrap',
+  background: 'transparent',
+  color: 'var(--text-2)',
+};
+
 export function Profile() {
   const user = useAuthStore((s) => s.user);
   const isMobile = useIsMobile();
@@ -53,149 +64,74 @@ export function Profile() {
   if (user && user.kind === 'guest') return <Navigate to="/library" replace />;
   if (!user) return <Navigate to="/login" replace />;
 
-  const header = <AppHeader active="profile" />;
+  const body = (
+    <HeroShell glowColor="var(--ok)" maxWidth={840}>
+      <div style={{ paddingBottom: isMobile ? 120 : 96 }}>
+        <SettingsHero user={user} />
 
-  // ── Мобильная версия: всё стопкой (не трогаем) ─────────────────────────
-  if (isMobile) {
-    return (
-      <div style={{ height: '100svh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
-        {header}
-        <main
+        {/* Липкая таб-навигация. */}
+        <div
           style={{
-            flex: 1,
-            minHeight: 0,
-            overflowY: 'auto',
-            padding: '20px 14px 104px',
-            maxWidth: 760,
-            margin: '0 auto',
-            width: '100%',
+            position: 'sticky',
+            top: 14,
+            zIndex: 40,
+            marginTop: isMobile ? 34 : 44,
             display: 'flex',
-            flexDirection: 'column',
-            gap: 16,
+            justifyContent: isMobile ? 'center' : 'flex-start',
           }}
         >
-          <div>
-            <h1 style={{ fontSize: 24, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>
-              Профиль и настройки
-            </h1>
-            <p style={{ marginTop: 6, color: 'var(--text-2)', fontSize: 14 }}>
-              Управление аккаунтом, безопасностью и устройствами.
-            </p>
-          </div>
-          <AvatarSection user={user} />
-          <IdentitySection user={user} />
-          <FavoritesSection />
-          <PrivacySection />
-          <EmailSection user={user} />
-          <PasswordSection />
-          <DevicesSection />
-        </main>
-      </div>
-    );
-  }
-
-  // ── Десктоп: сайдбар с разделами + контент ─────────────────────────────
-  const active = NAV.find((n) => n.id === tab)!;
-  return (
-    <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
-      {header}
-      <div
-        style={{
-          maxWidth: 1120,
-          margin: '0 auto',
-          padding: '36px max(24px, 4vw) 80px',
-          display: 'grid',
-          gridTemplateColumns: '260px minmax(0, 1fr)',
-          gap: 40,
-          alignItems: 'start',
-        }}
-      >
-        {/* Сайдбар */}
-        <aside style={{ position: 'sticky', top: 24, display: 'flex', flexDirection: 'column', gap: 18 }}>
           <div
             style={{
               display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              padding: 14,
-              background: 'var(--bg-1)',
-              border: '1px solid var(--line-1)',
-              borderRadius: 'var(--r-lg)',
+              gap: 4,
+              padding: 5,
+              borderRadius: 16,
+              background: 'var(--glass-bg)',
+              backdropFilter: 'blur(var(--glass-blur))',
+              WebkitBackdropFilter: 'blur(var(--glass-blur))',
+              border: '1px solid var(--glass-bd)',
+              overflowX: 'auto',
+              width: 'max-content',
+              maxWidth: '100%',
             }}
           >
-            <Avatar name={user.username} seed={user.avatarSeed} src={user.avatarUrl} size={44} />
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: 14,
-                  fontWeight: 600,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {user.username}
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: 'var(--text-2)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {user.email}
-              </div>
-            </div>
-          </div>
-
-          <nav style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {NAV.map((n) => {
-              const isActive = n.id === tab;
+            {TABS.map((t) => {
+              const active = t.id === tab;
               return (
                 <button
-                  key={n.id}
-                  onClick={() => setTab(n.id)}
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 11,
-                    padding: '9px 12px',
-                    borderRadius: 'var(--r-md)',
-                    cursor: 'pointer',
-                    border: 'none',
-                    textAlign: 'left',
-                    fontFamily: 'inherit',
-                    fontSize: 14,
-                    background: isActive ? 'var(--bg-3)' : 'transparent',
-                    color: isActive ? 'var(--text-0)' : 'var(--text-1)',
-                    transition: 'background .12s, color .12s',
+                    ...tabBase,
+                    ...(active
+                      ? { background: 'var(--bg-3)', color: 'var(--text-0)', boxShadow: '0 1px 0 rgba(255,255,255,0.06) inset' }
+                      : {}),
                   }}
                 >
-                  <Icon name={n.icon} size={16} />
-                  {n.label}
+                  {t.label}
                 </button>
               );
             })}
-          </nav>
-        </aside>
-
-        {/* Контент активного раздела */}
-        <main style={{ minWidth: 0, maxWidth: 720 }}>
-          <div style={{ marginBottom: 22 }}>
-            <h1 style={{ fontSize: 28, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>{active.label}</h1>
-            <p style={{ marginTop: 6, color: 'var(--text-2)', fontSize: 14 }}>
-              {tab === 'profile' && 'Аватар, имя пользователя и информация о себе.'}
-              {tab === 'privacy' && 'Кто видит ваш онлайн, друзей, личные данные и любимое кино.'}
-              {tab === 'email' && 'Смена адреса электронной почты.'}
-              {tab === 'password' && 'Обновление пароля и безопасность входа.'}
-              {tab === 'devices' && 'Активные сессии и выход с устройств.'}
-            </p>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>{renderTab(tab, user)}</div>
-        </main>
+        </div>
+
+        <div style={{ marginTop: 34 }}>{renderTab(tab, user)}</div>
       </div>
+    </HeroShell>
+  );
+
+  const header = <AppHeader active="profile" />;
+
+  return (
+    <div
+      style={
+        isMobile
+          ? { height: '100svh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)' }
+          : { minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }
+      }
+    >
+      {header}
+      {isMobile ? <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>{body}</div> : body}
     </div>
   );
 }

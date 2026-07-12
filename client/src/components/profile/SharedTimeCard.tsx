@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { Icon } from '../../shared';
 import { useSpringValue } from '../../hooks/useSpringValue';
+import { useIsMobile } from '../../hooks/useMediaQuery';
 import { useSharedTimeStore } from '../../stores/sharedTimeStore';
 import { formatDurationShort, heroParts } from '../../utils/formatDuration';
+import { SectionLabel, displayFont, monoFont } from './ProfileHeroKit';
 import type { SharedWatchDTO } from '@vellin/shared';
 
 const ZERO: SharedWatchDTO = {
@@ -15,26 +17,11 @@ const ZERO: SharedWatchDTO = {
   togetherSince: null,
 };
 
-const SIZE = 176;
-const SW = 9;
-const R = (SIZE - SW) / 2;
-const CIRC = 2 * Math.PI * R;
-
-/** Прогресс кольца: мягко насыщается с ростом часов, но никогда не «100%». */
-function ringFrac(seconds: number): number {
-  const hours = seconds / 3600;
-  return Math.max(0.02, 1 - Math.exp(-hours / 45));
+const pad = (n: number) => String(n).padStart(2, '0');
+function fmtClock(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
-
-const plural = (n: number, f: [string, string, string]): string => {
-  const m100 = n % 100;
-  const m10 = n % 10;
-  if (m100 >= 11 && m100 <= 14) return f[2];
-  if (m10 === 1) return f[0];
-  if (m10 >= 2 && m10 <= 4) return f[1];
-  return f[2];
-};
-
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
 }
@@ -49,26 +36,43 @@ function fmtRelative(iso: string): string {
   return fmtDate(iso);
 }
 
-function subtitle(dto: SharedWatchDTO, peerName: string): string {
-  if (dto.together) return 'Вы сейчас вместе — история продолжается прямо сейчас.';
-  const h = dto.totalSeconds / 3600;
-  if (h < 1) return `Только начало вашей истории с ${peerName}.`;
-  if (h < 10) return 'Уже несколько вечеров, проведённых вместе в Vellin.';
-  if (h < 50) return 'Отличная компания для совместного просмотра.';
-  return 'Вы провели вместе по-настоящему много времени в Vellin.';
+/** «≈ 1,7 дня, прожитых в одном кадре» — подпись-каптион как в макете. */
+function daysCaption(totalSeconds: number): string {
+  const days = (totalSeconds / 86400).toFixed(1).replace('.', ',');
+  return `≈ ${days} дня, прожитых в одном кадре`;
+}
+
+// Заполнение таймлайна по накопленному совместному времени: насыщающая кривая
+// (1 − e^(−t/K)) от MIN_PCT к MAX_PCT — линия всегда продвигается по мере
+// начисления времени и асимптотически приближается к концу, не упираясь в потолок.
+const FILL_MIN_PCT = 6;
+const FILL_MAX_PCT = 96;
+const FILL_TIME_CONST = 10800; // ~3 часа — за это время линия проходит ~63% пути
+function secondsToFillPct(seconds: number): number {
+  const f = 1 - Math.exp(-Math.max(0, seconds) / FILL_TIME_CONST);
+  return FILL_MIN_PCT + (FILL_MAX_PCT - FILL_MIN_PCT) * f;
 }
 
 /**
- * «Совместное время» — премиальная эмоциональная карточка в чужом профиле:
- * суммарное время в комнатах вместе. Светящееся кольцо + «досчитывающееся»
- * (count-up) число, живой тик при `together`, вторичные метрики, пустое
- * состояние-приглашение. Данные — из {@link useSharedTimeStore} (гидратация из
- * DTO профиля + живые WS-обновления). Всё уважает `prefers-reduced-motion`.
+ * «Ваше время вместе» — премиальная эмоциональная карточка в чужом профиле:
+ * суммарное время в комнатах вместе. Крупное «досчитывающееся» (count-up) число
+ * часов, живой тик и часы-таймер при `together`, вплетённые метрики, таймлайн
+ * первый→последний сеанс, пустое состояние-приглашение. Данные — из
+ * {@link useSharedTimeStore} (гидратация из DTO профиля + живые WS-обновления).
+ * Всё уважает `prefers-reduced-motion` (класс `hero-anim`).
  */
-export function SharedTimeCard({ peerId, peerName }: { peerId: string; peerName: string }): ReactElement {
+export function SharedTimeCard({
+  peerId,
+  peerName,
+  onInvite,
+}: {
+  peerId: string;
+  peerName: string;
+  onInvite?: () => void;
+}): ReactElement {
+  const isMobile = useIsMobile();
   const dto = useSharedTimeStore((s) => s.byPeer[peerId]) ?? ZERO;
-  const togetherSinceMs =
-    dto.together && dto.togetherSince ? Date.parse(dto.togetherSince) : null;
+  const togetherSinceMs = dto.together && dto.togetherSince ? Date.parse(dto.togetherSince) : null;
   const base = dto.totalSeconds;
   const isEmpty = base === 0 && !dto.together && dto.sessionsCount === 0;
 
@@ -90,17 +94,20 @@ export function SharedTimeCard({ peerId, peerName }: { peerId: string; peerName:
       const el = rootRef.current;
       if (!el) return;
       el.style.opacity = String(Math.min(1, v));
-      el.style.transform = `translateY(${(1 - v) * 14}px) scale(${0.97 + v * 0.03})`;
+      el.style.transform = `translateY(${(1 - v) * 14}px) scale(${0.98 + v * 0.02})`;
     },
     { stiffness: 240, damping: 24 },
   );
 
   // Count-up + живой тик: target (секунды) стартует с 0, летит к liveNow, а при
-  // «together» инкрементится раз в секунду — пружина плавно следует.
+  // «together» инкрементится раз в секунду — пружина плавно следует. Часы-таймер
+  // (clockRef) обновляем точным значением (без сглаживания) в том же интервале.
   const bigRef = useRef<HTMLSpanElement>(null);
   const unitRef = useRef<HTMLSpanElement>(null);
-  const subRef = useRef<HTMLDivElement>(null);
-  const ringRef = useRef<SVGCircleElement>(null);
+  const subRef = useRef<HTMLSpanElement>(null);
+  const clockRef = useRef<HTMLSpanElement>(null);
+  const fillRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLDivElement>(null);
   const [target, setTarget] = useState(0);
 
   useEffect(() => {
@@ -111,7 +118,10 @@ export function SharedTimeCard({ peerId, peerName }: { peerId: string; peerName:
 
   useEffect(() => {
     if (isEmpty || !togetherSinceMs) return;
-    const id = window.setInterval(() => setTarget(liveNow()), 1000);
+    const id = window.setInterval(() => {
+      setTarget(liveNow());
+      if (clockRef.current) clockRef.current.textContent = fmtClock((Date.now() - togetherSinceMs) / 1000);
+    }, 1000);
     return () => window.clearInterval(id);
   }, [isEmpty, togetherSinceMs, liveNow]);
 
@@ -121,229 +131,249 @@ export function SharedTimeCard({ peerId, peerName }: { peerId: string; peerName:
       const parts = heroParts(v);
       if (bigRef.current) bigRef.current.textContent = parts.big;
       if (unitRef.current) unitRef.current.textContent = parts.unit;
-      if (subRef.current) subRef.current.textContent = parts.sub ?? '';
-      if (ringRef.current) ringRef.current.style.strokeDashoffset = String(CIRC * (1 - ringFrac(v)));
+      if (subRef.current) subRef.current.textContent = parts.sub ? `и ещё ${parts.sub}` : '';
+      // Голова таймлайна ползёт вперёд синхронно со счётчиком.
+      const pct = secondsToFillPct(v);
+      if (fillRef.current) fillRef.current.style.width = `${pct}%`;
+      if (headRef.current) headRef.current.style.left = `${pct}%`;
     },
     { stiffness: 110, damping: 22 },
   );
 
   return (
-    <section
-      ref={rootRef}
-      style={{
-        opacity: 0,
-        padding: 24,
-        background:
-          'radial-gradient(120% 140% at 15% 0%, var(--accent-soft), transparent 55%), var(--bg-1)',
-        border: '1px solid var(--line-1)',
-        borderRadius: 'var(--r-lg)',
-        overflow: 'hidden',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-        <div style={{ fontSize: 15, fontWeight: 600 }}>Совместное время</div>
-        {dto.together && (
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: 12,
-              fontWeight: 600,
-              lineHeight: 1,
-              color: 'var(--accent-hi)',
-              background: 'var(--accent-soft)',
-              padding: '4px 11px',
-              borderRadius: 999,
-            }}
-          >
-            <span
-              className="shared-ring-halo"
-              style={{
-                flexShrink: 0,
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                background: 'var(--accent-hi)',
-                animation: 'sharedLivePulse 1.6s ease-in-out infinite',
-              }}
-            />
-            <span style={{ lineHeight: 1 }}>сейчас вместе</span>
-          </span>
-        )}
-      </div>
+    <section ref={rootRef} style={{ opacity: 0 }}>
+      <SectionLabel>Ваше время вместе</SectionLabel>
 
-      {isEmpty ? (
-        <EmptyState peerName={peerName} />
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-          <div style={{ position: 'relative', width: SIZE, height: SIZE }}>
-            {/* Вращающийся ореол-свечение позади кольца. */}
+      <div
+        style={{
+          position: 'relative',
+          borderRadius: 28,
+          padding: 'clamp(32px, 6vw, 44px)',
+          background: 'radial-gradient(120% 140% at 15% 0%, var(--accent-soft), transparent 55%), var(--bg-1)',
+          border: '1px solid var(--line-1)',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Внутреннее свечение. */}
+        <div
+          aria-hidden
+          className="hero-anim"
+          style={{
+            position: 'absolute',
+            top: '-40%',
+            right: '-10%',
+            width: 400,
+            height: 400,
+            background: 'radial-gradient(circle, var(--accent-glow), transparent 65%)',
+            filter: 'blur(30px)',
+            animation: 'heroBreathe 6s ease-in-out infinite',
+            pointerEvents: 'none',
+          }}
+        />
+
+        {isEmpty ? (
+          <EmptyState peerName={peerName} onInvite={onInvite} />
+        ) : (
+          <div style={{ position: 'relative' }}>
             <div
-              aria-hidden
-              className="shared-ring-halo"
               style={{
-                position: 'absolute',
-                inset: -6,
-                borderRadius: '50%',
-                background:
-                  'conic-gradient(from 0deg, transparent 0deg, var(--accent-glow) 80deg, transparent 220deg)',
-                filter: 'blur(12px)',
-                opacity: 0.6,
-                animation: 'sharedRingSpin 7s linear infinite',
+                display: 'flex',
+                flexDirection: isMobile ? 'column' : 'row',
+                alignItems: 'flex-start',
+                justifyContent: isMobile ? 'flex-start' : 'space-between',
+                gap: isMobile ? 20 : 16,
+                flexWrap: 'wrap',
               }}
-            />
-            <svg
-              width={SIZE}
-              height={SIZE}
-              viewBox={`0 0 ${SIZE} ${SIZE}`}
-              style={{ position: 'relative', display: 'block' }}
             >
-              <defs>
-                <linearGradient id="sharedRingGrad" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="var(--accent-hi)" />
-                  <stop offset="100%" stopColor="var(--accent)" />
-                </linearGradient>
-              </defs>
-              <circle cx={SIZE / 2} cy={SIZE / 2} r={R} fill="none" stroke="var(--line-2)" strokeWidth={SW} />
-              <circle
-                ref={ringRef}
-                cx={SIZE / 2}
-                cy={SIZE / 2}
-                r={R}
-                fill="none"
-                stroke="url(#sharedRingGrad)"
-                strokeWidth={SW}
-                strokeLinecap="round"
-                strokeDasharray={CIRC}
-                strokeDashoffset={CIRC}
-                style={{
-                  transform: 'rotate(-90deg)',
-                  transformOrigin: 'center',
-                  filter: 'drop-shadow(0 0 6px var(--accent-glow))',
-                }}
-              />
-            </svg>
-            {/* Центр: крупное «досчитывающееся» число. Главная величина
-                привязана строго к центру кольца (translateY -50%), а вторая
-                строка — абсолютно под ней, чтобы её наличие/отсутствие не
-                смещало число вверх. */}
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '50%',
-                  left: 0,
-                  right: 0,
-                  transform: 'translateY(-50%)',
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  justifyContent: 'center',
-                  gap: 4,
-                  lineHeight: 1,
-                }}
-              >
-                <span ref={bigRef} style={{ fontSize: 40, fontWeight: 750, letterSpacing: '-0.02em', color: 'var(--text-0)' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+                <span
+                  ref={bigRef}
+                  style={{
+                    ...displayFont,
+                    fontWeight: 600,
+                    fontSize: 'clamp(104px, 28vw, 150px)',
+                    lineHeight: 0.82,
+                    letterSpacing: '-0.04em',
+                    background: 'linear-gradient(180deg, var(--text-0), var(--text-2))',
+                    WebkitBackgroundClip: 'text',
+                    backgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                  }}
+                >
                   0
                 </span>
-                <span ref={unitRef} style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-2)' }}>
-                  минут
-                </span>
+                <div style={{ paddingBottom: 'clamp(10px, 2vw, 20px)' }}>
+                  <span
+                    ref={unitRef}
+                    style={{ ...displayFont, display: 'block', fontSize: 'clamp(30px, 7vw, 34px)', fontWeight: 500, color: 'var(--text-1)', lineHeight: 1 }}
+                  >
+                    минут
+                  </span>
+                  <span ref={subRef} style={{ display: 'block', fontSize: 17, color: 'var(--text-3)', marginTop: 6 }} />
+                </div>
               </div>
-              <div
-                ref={subRef}
-                style={{
-                  position: 'absolute',
-                  top: 'calc(50% + 22px)',
-                  left: 0,
-                  right: 0,
-                  textAlign: 'center',
-                  fontSize: 13.5,
-                  fontWeight: 500,
-                  color: 'var(--text-3)',
-                }}
-              />
+
+              {/* Чип справа: live-таймер «сейчас вместе» либо «были вместе …». */}
+              {dto.together ? (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '11px 18px',
+                    borderRadius: 999,
+                    background: 'var(--accent-soft)',
+                    border: '1px solid var(--accent-glow)',
+                  }}
+                >
+                  <span className="hero-anim" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-hi)', animation: 'heroLivePip 1.2s infinite' }} />
+                  <span style={{ fontSize: 15, color: 'var(--text-1)' }}>сейчас вместе</span>
+                  <span ref={clockRef} style={{ ...monoFont, fontWeight: 600, fontSize: 16, color: 'var(--accent-hi)', letterSpacing: '0.02em' }}>
+                    {fmtClock(togetherSinceMs ? (Date.now() - togetherSinceMs) / 1000 : 0)}
+                  </span>
+                </div>
+              ) : (
+                dto.lastWatchedAt && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 9, padding: '11px 18px', borderRadius: 999, background: 'var(--bg-2)', border: '1px solid var(--line-2)' }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--text-3)' }} />
+                    <span style={{ fontSize: 15, color: 'var(--text-2)' }}>были вместе {fmtRelative(dto.lastWatchedAt)}</span>
+                  </div>
+                )
+              )}
             </div>
+
+            <div style={{ ...displayFont, fontSize: 'clamp(16px, 4vw, 18px)', color: 'var(--text-2)', marginTop: 24, fontStyle: 'italic' }}>
+              {daysCaption(liveNow())}
+            </div>
+
+            {/* Таймлайн первый → последний сеанс. */}
+            {dto.firstWatchedAt && (
+              <>
+                <div style={{ position: 'relative', marginTop: 30, height: 3, borderRadius: 2, background: 'var(--line-2)' }}>
+                  <div
+                    ref={fillRef}
+                    className="hero-anim"
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: `${secondsToFillPct(0)}%`,
+                      borderRadius: 2,
+                      background: 'linear-gradient(90deg, var(--accent-soft), var(--accent))',
+                      backgroundSize: '200% 100%',
+                      animation: 'heroShimmer 3.5s linear infinite',
+                    }}
+                  />
+                  <div style={{ position: 'absolute', left: 0, top: '50%', width: 9, height: 9, borderRadius: '50%', background: 'var(--accent)', transform: 'translate(-50%, -50%)' }} />
+                  <div
+                    ref={headRef}
+                    style={{ position: 'absolute', left: `${secondsToFillPct(0)}%`, top: '50%', width: 11, height: 11, borderRadius: '50%', background: 'var(--text-0)', transform: 'translate(-50%, -50%)', boxShadow: '0 0 0 4px var(--accent-glow)' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, fontSize: 12, color: 'var(--text-3)' }}>
+                  <span>{fmtDate(dto.firstWatchedAt)} · первый сеанс</span>
+                  <span>{dto.together ? 'сейчас' : dto.lastWatchedAt ? fmtRelative(dto.lastWatchedAt) : ''}</span>
+                </div>
+              </>
+            )}
+
+            <WovenStats dto={dto} />
           </div>
-
-          <p style={{ margin: '18px 0 0', maxWidth: 320, fontSize: 13.5, lineHeight: 1.5, color: 'var(--text-2)' }}>
-            {subtitle(dto, peerName)}
-          </p>
-
-          <SecondaryStats dto={dto} />
-        </div>
-      )}
+        )}
+      </div>
     </section>
   );
 }
 
-function SecondaryStats({ dto }: { dto: SharedWatchDTO }): ReactElement | null {
-  const chips: { icon: 'film' | 'flame' | 'star' | 'heartFilled'; label: string }[] = [];
-  if (dto.sessionsCount > 0) {
-    chips.push({
-      icon: 'film',
-      label: `${dto.sessionsCount} ${plural(dto.sessionsCount, ['совместный просмотр', 'совместных просмотра', 'совместных просмотров'])}`,
-    });
-  }
-  if (dto.longestSessionSeconds > 0) {
-    chips.push({ icon: 'flame', label: `Рекорд: ${formatDurationShort(dto.longestSessionSeconds)}` });
-  }
-  if (dto.firstWatchedAt) {
-    chips.push({ icon: 'star', label: `Вместе с ${fmtDate(dto.firstWatchedAt)}` });
-  }
-  if (dto.lastWatchedAt && !dto.together) {
-    chips.push({ icon: 'heartFilled', label: `Последний раз ${fmtRelative(dto.lastWatchedAt)}` });
-  }
-  if (chips.length === 0) return null;
+/** Вплетённые метрики — до 3 центрированных колонок. */
+function WovenStats({ dto }: { dto: SharedWatchDTO }): ReactElement | null {
+  const stats: { value: string; label: string }[] = [];
+  if (dto.sessionsCount > 0) stats.push({ value: String(dto.sessionsCount), label: 'совместных сеансов' });
+  if (dto.longestSessionSeconds > 0) stats.push({ value: formatDurationShort(dto.longestSessionSeconds), label: 'самая долгая сессия' });
+  if (dto.firstWatchedAt) stats.push({ value: fmtDate(dto.firstWatchedAt), label: 'вы начали вместе' });
+  if (stats.length === 0) return null;
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 16 }}>
-      {chips.map((c, i) => (
-        <span
-          key={i}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 12,
-            fontWeight: 500,
-            color: 'var(--text-1)',
-            background: 'var(--bg-2)',
-            border: '1px solid var(--line-2)',
-            padding: '5px 11px',
-            borderRadius: 999,
-          }}
-        >
-          <Icon name={c.icon} size={13} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
-          {c.label}
-        </span>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 34 }}>
+      {stats.map((s, i) => (
+        <div key={i} style={{ flex: 1, minWidth: 110, textAlign: 'center' }}>
+          <div style={{ ...displayFont, fontWeight: 600, fontSize: 'clamp(23px, 6vw, 28px)', color: 'var(--text-0)', lineHeight: 1 }}>{s.value}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-3)', marginTop: 6, letterSpacing: '0.02em' }}>{s.label}</div>
+        </div>
       ))}
     </div>
   );
 }
 
-function EmptyState({ peerName }: { peerName: string }): ReactElement {
+function EmptyState({ peerName, onInvite }: { peerName: string; onInvite?: () => void }): ReactElement {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '8px 0 4px' }}>
+    <div style={{ position: 'relative', textAlign: 'center', padding: '16px 0 8px' }}>
       <div
         style={{
-          width: 76,
-          height: 76,
-          borderRadius: '50%',
-          display: 'grid',
-          placeItems: 'center',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 64,
+          height: 64,
+          borderRadius: 20,
           background: 'var(--bg-2)',
           border: '1.5px dashed var(--line-3)',
           color: 'var(--text-3)',
-          marginBottom: 14,
+          marginBottom: 22,
         }}
       >
-        <Icon name="film" size={30} />
+        <Icon name="film" size={26} />
       </div>
-      <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-1)' }}>Вы ещё не смотрели ничего вместе</div>
-      <p style={{ margin: '8px 0 0', maxWidth: 300, fontSize: 13.5, lineHeight: 1.5, color: 'var(--text-3)' }}>
-        Пригласите {peerName} в комнату, чтобы начать историю совместных просмотров.
+      <div
+        style={{
+          ...displayFont,
+          fontWeight: 600,
+          fontSize: 'clamp(26px, 3.6vw, 40px)',
+          lineHeight: 1.05,
+          letterSpacing: '-0.02em',
+          background: 'linear-gradient(180deg, var(--text-0), var(--text-2))',
+          WebkitBackgroundClip: 'text',
+          backgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+        }}
+      >
+        Ваша история ещё не началась
+      </div>
+      <p style={{ fontSize: 15, color: 'var(--text-2)', maxWidth: 400, margin: '14px auto 0', lineHeight: 1.55 }}>
+        Проведите первый совместный сеанс — и время рядом с {peerName} начнёт идти здесь, секунда за секундой.
       </p>
+      {onInvite && (
+        <button
+          onClick={onInvite}
+          className="hero-press"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 9,
+            marginTop: 24,
+            padding: '15px 28px',
+            borderRadius: 999,
+            border: 'none',
+            cursor: 'pointer',
+            ...displayFont,
+            fontWeight: 600,
+            fontSize: 15,
+            color: '#fff',
+            background: 'var(--accent)',
+            boxShadow: '0 14px 34px -8px var(--accent-glow)',
+          }}
+        >
+          <Icon name="chat" size={16} /> Позвать смотреть вместе
+        </button>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 26, fontSize: 13, color: 'var(--text-3)' }}>
+        <span>0 сеансов</span>
+        <span style={{ opacity: 0.4 }}>·</span>
+        <span>0 минут вместе</span>
+        <span style={{ opacity: 0.4 }}>·</span>
+        <span>старт сегодня</span>
+      </div>
     </div>
   );
 }
