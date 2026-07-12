@@ -121,7 +121,7 @@ export function AppHeader({ active }: { active?: DockPage }) {
               )}
               {!isMobile && (
                 <button
-                  onClick={() => navigate(`/u/${encodeURIComponent(user.username)}`)}
+                  onClick={() => navigate(`/u/${encodeURIComponent(user.publicId)}`)}
                   title="Мой профиль"
                   aria-label="Мой профиль"
                   style={{

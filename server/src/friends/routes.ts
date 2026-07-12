@@ -129,10 +129,10 @@ export async function friendRoutes(app: FastifyInstance): Promise<void> {
     reply.send({ users: await searchUsers(p.userId, req.query.q ?? '') } satisfies SearchUsersResponse);
   });
 
-  app.get<{ Params: { username: string } }>('/users/:username', async (req, reply) => {
+  app.get<{ Params: { publicId: string } }>('/users/:publicId', async (req, reply) => {
     const p = requireUser(req, reply);
     if (!p) return;
-    reply.send({ profile: await getPublicProfile(p.userId, req.params.username) } satisfies GetPublicProfileResponse);
+    reply.send({ profile: await getPublicProfile(p.userId, req.params.publicId) } satisfies GetPublicProfileResponse);
   });
 
   // ── Уведомления ────────────────────────────────────────────────────────

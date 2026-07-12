@@ -24,6 +24,20 @@ class RoomStore {
     return [...this.rooms.values()];
   }
 
+  /**
+   * «Совместное время»: если два пользователя прямо сейчас вместе в какой-то
+   * комнате — момент (ms) начала их текущего совместного интервала, иначе null.
+   * Пользователь может быть максимум в одной комнате, так что достаточно найти
+   * первую комнату с обоими.
+   */
+  coWatchAnchor(a: string, b: string): number | null {
+    for (const rt of this.rooms.values()) {
+      const since = rt.coWatchAnchor(a, b);
+      if (since !== null) return since;
+    }
+    return null;
+  }
+
   /** Закрыть все сессии конкретного пользователя во всех комнатах. */
   closeUserSessionsEverywhere(userId: string, reason: 'blocked' | 'deleted'): number {
     let closed = 0;

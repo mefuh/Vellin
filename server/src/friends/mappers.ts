@@ -2,10 +2,11 @@ import type { Notification, User } from '@prisma/client';
 import type { AppNotification, NotificationType, PublicUser } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 
-type PublicUserCols = Pick<User, 'id' | 'username' | 'avatarSeed' | 'avatarUrl'>;
+type PublicUserCols = Pick<User, 'id' | 'publicId' | 'username' | 'avatarSeed' | 'avatarUrl'>;
 
 export const PUBLIC_USER_SELECT = {
   id: true,
+  publicId: true,
   username: true,
   avatarSeed: true,
   avatarUrl: true,
@@ -14,6 +15,7 @@ export const PUBLIC_USER_SELECT = {
 export function toPublicUser(u: PublicUserCols): PublicUser {
   return {
     id: u.id,
+    publicId: u.publicId,
     username: u.username,
     avatarSeed: u.avatarSeed,
     avatarUrl: u.avatarUrl ?? null,

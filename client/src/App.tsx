@@ -102,7 +102,7 @@ export function App() {
           }
         />
         <Route
-          path="/messages/:username"
+          path="/messages/:publicId"
           element={
             <ProtectedRoute>
               <Messages />
@@ -110,7 +110,7 @@ export function App() {
           }
         />
         <Route
-          path="/u/:username"
+          path="/u/:publicId"
           element={
             <ProtectedRoute>
               <PublicProfile />

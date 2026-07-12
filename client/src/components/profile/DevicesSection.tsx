@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { DeviceSession } from '@vellin/shared';
-import { Button, Chip, Icon } from '../../shared';
+import { Icon } from '../../shared';
 import { profileApi } from '../../api/profile';
 import { ApiHttpError } from '../../api/client';
 import { useAuthStore } from '../../stores/authStore';
-import { useIsNarrow } from '../../hooks/useMediaQuery';
 import { Card, StatusLine } from './ProfilePrimitives';
 
 function formatDate(iso: string): string {
@@ -24,7 +23,6 @@ function formatDate(iso: string): string {
 export function DevicesSection() {
   const navigate = useNavigate();
   const logout = useAuthStore((s) => s.logout);
-  const isNarrow = useIsNarrow();
   const [sessions, setSessions] = useState<DeviceSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -78,7 +76,7 @@ export function DevicesSection() {
   const hasOthers = (sessions ?? []).some((s) => !s.current);
 
   return (
-    <Card title="Устройства и входы" desc="Активные сессии вашего аккаунта." icon="cast">
+    <Card title="Активные входы" desc="Где открыт ваш аккаунт прямо сейчас. Не узнаёте вход — завершите сессию." contained={false}>
       {sessions === null && !error && <span style={{ fontSize: 13, color: 'var(--text-2)' }}>Загрузка…</span>}
       {sessions !== null && sessions.length === 0 && !error && (
         <span style={{ fontSize: 13, color: 'var(--text-2)' }}>
@@ -87,47 +85,104 @@ export function DevicesSection() {
       )}
       <StatusLine error={error} />
 
-      {sessions?.map((s) => (
-        <div
-          key={s.id}
-          style={{
-            display: 'flex',
-            alignItems: isNarrow ? 'flex-start' : 'center',
-            flexDirection: isNarrow ? 'column' : 'row',
-            gap: isNarrow ? 10 : 14,
-            padding: '12px 0',
-            borderBottom: '1px solid var(--line-1)',
-          }}
-        >
-          <span style={{ color: 'var(--text-2)', display: 'grid', placeItems: 'center', width: 22 }}>
-            <Icon name="cast" size={18} />
-          </span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500 }}>{s.deviceLabel}</span>
-              {s.current && <Chip tone="success">Текущее</Chip>}
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 3 }}>
-              {s.ip ? `${s.ip} · ` : ''}активность {formatDate(s.lastSeenAt)} · вход {formatDate(s.createdAt)}
-            </div>
-          </div>
-          <Button
-            variant={s.current ? 'ghost' : 'danger'}
-            size="sm"
-            disabled={busyId === s.id}
-            onClick={() => void revoke(s)}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {sessions?.map((s) => (
+          <div
+            key={s.id}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 16,
+              padding: '18px 22px',
+              borderRadius: 18,
+              background: s.current ? 'color-mix(in srgb, var(--ok) 7%, var(--bg-1))' : 'var(--bg-1)',
+              border: `1px solid ${s.current ? 'color-mix(in srgb, var(--ok) 22%, transparent)' : 'var(--line-1)'}`,
+            }}
           >
-            {s.current ? 'Выйти здесь' : 'Выйти'}
-          </Button>
-        </div>
-      ))}
+            <div
+              className={s.current ? 'hero-anim' : undefined}
+              style={{
+                flex: 'none',
+                width: 44,
+                height: 44,
+                borderRadius: 13,
+                display: 'grid',
+                placeItems: 'center',
+                background: s.current ? 'color-mix(in srgb, var(--ok) 16%, transparent)' : 'var(--bg-2)',
+                color: s.current ? 'var(--ok)' : 'var(--text-2)',
+                ...(s.current ? ({ ['--hero-pulse' as string]: 'color-mix(in srgb, var(--ok) 50%, transparent)', animation: 'heroDotPulse 2.4s infinite' } as React.CSSProperties) : {}),
+              }}
+            >
+              <Icon name="cast" size={18} />
+            </div>
+
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 600, fontSize: 15 }}>{s.deviceLabel}</span>
+                {s.current && (
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ok)', background: 'color-mix(in srgb, var(--ok) 15%, transparent)', padding: '2px 9px', borderRadius: 999 }}>
+                    это устройство
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-3)', marginTop: 4 }}>
+                {s.ip ? `${s.ip} · ` : ''}активность {formatDate(s.lastSeenAt)} · вход {formatDate(s.createdAt)}
+              </div>
+            </div>
+
+            {s.current ? (
+              <span style={{ fontSize: 13, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>активно</span>
+            ) : (
+              <button
+                onClick={() => void revoke(s)}
+                disabled={busyId === s.id}
+                className="hero-press"
+                style={{
+                  flex: 'none',
+                  padding: '9px 16px',
+                  borderRadius: 999,
+                  border: '1px solid var(--accent-glow)',
+                  background: 'var(--accent-soft)',
+                  color: 'var(--accent-hi)',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  fontFamily: 'inherit',
+                  cursor: busyId === s.id ? 'not-allowed' : 'pointer',
+                  opacity: busyId === s.id ? 0.6 : 1,
+                }}
+              >
+                Выйти
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
 
       {hasOthers && (
-        <div style={{ marginTop: 6 }}>
-          <Button variant="secondary" size="sm" icon="lock" disabled={busyOthers} onClick={revokeOthers}>
-            {busyOthers ? 'Завершаем…' : 'Выйти со всех других устройств'}
-          </Button>
-        </div>
+        <button
+          onClick={() => void revokeOthers()}
+          disabled={busyOthers}
+          className="hero-press"
+          style={{
+            marginTop: 20,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 9,
+            padding: '12px 20px',
+            borderRadius: 999,
+            border: '1px solid var(--line-2)',
+            background: 'var(--bg-3)',
+            color: 'var(--text-0)',
+            fontSize: 14,
+            fontWeight: 600,
+            fontFamily: 'inherit',
+            cursor: busyOthers ? 'not-allowed' : 'pointer',
+            opacity: busyOthers ? 0.6 : 1,
+          }}
+        >
+          <Icon name="lock" size={16} />
+          {busyOthers ? 'Завершаем…' : 'Выйти со всех других устройств'}
+        </button>
       )}
     </Card>
   );

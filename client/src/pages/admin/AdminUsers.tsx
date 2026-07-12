@@ -168,7 +168,7 @@ export function AdminUsers() {
               }}
             >
               <Link
-                to={`/u/${u.username}`}
+                to={`/u/${u.publicId}`}
                 title="Открыть профиль"
                 style={{
                   display: 'flex',
@@ -485,7 +485,7 @@ function UserCard({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
         <Link
-          to={`/u/${u.username}`}
+          to={`/u/${u.publicId}`}
           title="Открыть профиль"
           style={{
             display: 'flex',

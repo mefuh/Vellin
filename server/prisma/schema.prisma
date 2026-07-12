@@ -11,6 +11,9 @@ model User {
   id           String    @id @default(cuid())
   email        String    @unique
   username     String    @unique
+  /// Публичный идентификатор для URL профиля/диалога (короткий непубличный
+  /// токен, не раскрывает username и не является первичным ключом БД).
+  publicId     String    @unique
   passwordHash String
   avatarSeed   String
   /// Путь к загруженному аватару (/api/uploads/avatars/...). Null — рисуем
@@ -51,8 +54,39 @@ model User {
   conversationsA         Conversation[]  @relation("ConvUserA")
   conversationsB         Conversation[]  @relation("ConvUserB")
   directMessages         DirectMessage[] @relation("DmSender")
+  sharedWatchA           SharedWatchStat[] @relation("SharedWatchA")
+  sharedWatchB           SharedWatchStat[] @relation("SharedWatchB")
 
   @@index([isBlocked])
+}
+
+/// «Совместное время» — накопительная попарная статистика совместного
+/// пребывания двух пользователей в комнатах просмотра. Одна строка на
+/// неупорядоченную пару (userAId < userBId канонически). Агрегаты растут при
+/// завершении каждой совместной сессии (server/src/social/sharedTime.ts) —
+/// карточка профиля открывается мгновенно без пересчёта. Сущность спроектирована
+/// на расширение (совместные фильмы/жанры/бейджи/Wrapped) соседними таблицами по
+/// той же паре.
+model SharedWatchStat {
+  id                    String    @id @default(cuid())
+  userAId               String // канонически меньший id пары
+  userBId               String
+  /// Суммарное совместное время в секундах.
+  totalSeconds          Int       @default(0)
+  /// Число завершённых совместных сессий (≈ совместных просмотров).
+  sessionsCount         Int       @default(0)
+  /// Рекорд одной непрерывной совместной сессии, секунды.
+  longestSessionSeconds Int       @default(0)
+  /// Когда впервые оказались вместе в комнате.
+  firstWatchedAt        DateTime?
+  /// Последняя совместная сессия.
+  lastWatchedAt         DateTime?
+
+  userA User @relation("SharedWatchA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB User @relation("SharedWatchB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@unique([userAId, userBId])
+  @@index([userBId])
 }
 
 /// До 5 любимых фильмов/сериалов пользователя (профиль). Снимок данных из

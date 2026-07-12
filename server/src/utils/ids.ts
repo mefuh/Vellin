@@ -31,3 +31,8 @@ export function generateGuestId(): string {
 export function generateAvatarSeed(): string {
   return nanoid(12);
 }
+
+/** Публичный id пользователя для URL профиля/диалога (url-safe, ~12 симв.). */
+export function generatePublicId(): string {
+  return nanoid(12);
+}

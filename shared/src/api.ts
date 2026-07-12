@@ -354,6 +354,8 @@ export interface AdminStatsResponse {
 
 export interface AdminUserSummary {
   id: string;
+  /** Публичный id для ссылки на профиль (`/u/:publicId`). */
+  publicId: string;
   email: string;
   username: string;
   avatarSeed: string;

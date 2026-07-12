@@ -168,6 +168,7 @@ export async function handleDmSend(
     if (!userHub.isViewingConversation(toUserId, res.conversationId)) {
       notifyAsync(toUserId, 'direct_message', {
         username: res.sender.username,
+        publicId: res.sender.publicId,
         message: dmPushPreview(body, !!image, !!voice, !!video),
         conversationId: res.conversationId,
       });

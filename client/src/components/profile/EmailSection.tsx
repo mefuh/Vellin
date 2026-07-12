@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import type { AuthUser } from '@vellin/shared';
-import { Button } from '../../shared';
 import { profileApi } from '../../api/profile';
 import { ApiHttpError } from '../../api/client';
 import { useAuthStore } from '../../stores/authStore';
-import { Card, LabeledInput, StatusLine } from './ProfilePrimitives';
+import { Card, LabeledInput, PillSubmit, StatusLine } from './ProfilePrimitives';
 
 export function EmailSection({ user }: { user: AuthUser }) {
   const applyAuthUpdate = useAuthStore((s) => s.applyAuthUpdate);
@@ -34,21 +33,23 @@ export function EmailSection({ user }: { user: AuthUser }) {
   };
 
   return (
-    <Card title="Email" desc="Для смены почты подтвердите текущий пароль." icon="globe">
-      <LabeledInput label="Новый email" type="email" value={email} onChange={setEmail} autoComplete="email" />
-      <LabeledInput
-        label="Текущий пароль"
-        type="password"
-        value={currentPassword}
-        onChange={setCurrentPassword}
-        autoComplete="current-password"
-      />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <Button variant="primary" size="md" disabled={busy || !valid} onClick={save}>
+    <div style={{ maxWidth: 520 }}>
+      <Card title="Почта" desc="На неё приходят входы и важные уведомления. Для смены подтвердите текущий пароль.">
+        <LabeledInput label="Новый email" type="email" value={email} onChange={setEmail} autoComplete="email" />
+        <LabeledInput
+          label="Текущий пароль"
+          type="password"
+          value={currentPassword}
+          onChange={setCurrentPassword}
+          autoComplete="current-password"
+        />
+      </Card>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginTop: 20 }}>
+        <PillSubmit disabled={busy || !valid} onClick={save}>
           {busy ? 'Сохраняем…' : 'Сменить email'}
-        </Button>
+        </PillSubmit>
         <StatusLine error={error} success={success} />
       </div>
-    </Card>
+    </div>
   );
 }

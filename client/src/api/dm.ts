@@ -11,9 +11,9 @@ import { apiFetch, apiUpload } from './client';
 
 export const dmApi = {
   conversations: () => apiFetch<ListConversationsResponse>('/dm/conversations'),
-  thread: (username: string, before?: string) =>
+  thread: (publicId: string, before?: string) =>
     apiFetch<ConversationThreadResponse>(
-      `/dm/with/${encodeURIComponent(username)}${before ? `?before=${encodeURIComponent(before)}` : ''}`,
+      `/dm/with/${encodeURIComponent(publicId)}${before ? `?before=${encodeURIComponent(before)}` : ''}`,
     ),
   uploadImage: (file: File) => {
     const fd = new FormData();

@@ -4,27 +4,27 @@ import { Icon } from '../../shared';
 import { titlesApi } from '../../api/titles';
 import { ApiHttpError } from '../../api/client';
 import { Card } from './ProfilePrimitives';
-import { TitlePoster } from './TitlePoster';
+import { PosterCover } from './ProfileHeroKit';
+import { typeLabel } from './TitlePoster';
 import { TitleSearchModal } from './TitleSearchModal';
 
 // Пользовательского лимита нет (безлимитное добавление); MAX — только зеркало
 // серверного предохранителя от абьюза, чтобы UX не расходился с бэком.
 const MAX = 100;
-const POSTER_W = 112;
 
-/** Иконка-кнопка управления (перенос/удаление) под постером. */
-function CtrlButton({
-  icon,
+/** Кнопка действия над постером (перенос/удаление). */
+function ActBtn({
+  children,
   title,
   onClick,
   disabled,
-  flip,
+  danger,
 }: {
-  icon: 'chevron' | 'trash';
+  children: React.ReactNode;
   title: string;
   onClick: () => void;
   disabled?: boolean;
-  flip?: boolean;
+  danger?: boolean;
 }) {
   return (
     <button
@@ -33,22 +33,25 @@ function CtrlButton({
       aria-label={title}
       onClick={onClick}
       disabled={disabled}
+      className="hero-press"
       style={{
-        display: 'grid',
-        placeItems: 'center',
-        width: 28,
-        height: 26,
-        borderRadius: 7,
-        border: '1px solid var(--line-1)',
-        background: 'var(--bg-2)',
-        color: disabled ? 'var(--text-3)' : 'var(--text-1)',
+        width: 36,
+        height: 36,
+        borderRadius: 11,
+        border: 'none',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         cursor: disabled ? 'default' : 'pointer',
-        opacity: disabled ? 0.45 : 1,
+        color: '#fff',
+        fontSize: 15,
+        background: danger ? 'var(--accent)' : 'rgba(255,255,255,0.18)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        opacity: disabled ? 0.35 : 1,
       }}
     >
-      <span style={{ display: 'grid', transform: flip ? 'rotate(180deg)' : undefined }}>
-        <Icon name={icon} size={14} />
-      </span>
+      {children}
     </button>
   );
 }
@@ -107,52 +110,61 @@ export function FavoritesSection() {
 
   const statusEl =
     status === 'saving' ? (
-      <span style={{ color: 'var(--text-3)' }}>Сохранение…</span>
+      <span style={{ fontSize: 12.5, color: 'var(--text-3)' }}>Сохранение…</span>
     ) : status === 'saved' ? (
-      <span style={{ color: 'var(--ok)' }}>Сохранено</span>
+      <span style={{ fontSize: 12.5, color: 'var(--ok)' }}>Сохранено</span>
     ) : status === 'error' ? (
-      <span style={{ color: 'var(--accent-hi)' }}>Не удалось сохранить</span>
+      <span style={{ fontSize: 12.5, color: 'var(--accent-hi)' }}>Не удалось сохранить</span>
     ) : null;
 
   const existingIds = new Set(titles.map((t) => t.kpId));
 
   return (
-    <Card title="Любимое кино" desc="Любимые фильмы и сериалы — ваша визитка вкуса." icon="film">
-      <div style={{ minHeight: 20, fontSize: 12.5 }}>{statusEl}</div>
-
+    <Card
+      title="Ваша коллекция"
+      desc="Фильмы и сериалы, которые говорят о вас. Наведите на постер, чтобы поменять местами или убрать."
+      contained={false}
+      headingRight={statusEl}
+    >
       {loading ? (
         <div style={{ color: 'var(--text-3)', fontSize: 14, padding: '8px 0' }}>Загрузка…</div>
       ) : (
-        <div style={{ display: 'flex', flexWrap: 'nowrap', gap: 18, overflowX: 'auto', paddingBottom: 4 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 20 }}>
           {titles.map((t, i) => (
-            <div
-              key={t.kpId}
-              style={{ width: POSTER_W, flexShrink: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}
-            >
-              {/* Ранг */}
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 6,
-                  right: 6,
-                  zIndex: 2,
-                  background: 'rgba(0,0,0,0.74)',
-                  color: '#fff',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  padding: '2px 6px',
-                  borderRadius: 6,
-                }}
+            <div key={t.kpId} className="fav-card hero-poster">
+              <PosterCover
+                t={t}
+                radius={16}
+                topRight={<span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}>#{i + 1}</span>}
               >
-                #{i + 1}
-              </div>
-              <TitlePoster t={t} />
-              {/* margin-top:auto прижимает кнопки к низу — выравнивает их по
-                  одной линии при подписях разной длины. */}
-              <div style={{ display: 'flex', gap: 5, marginTop: 'auto', paddingTop: 8, justifyContent: 'space-between' }}>
-                <CtrlButton icon="chevron" flip title="Левее" disabled={i === 0} onClick={() => move(i, -1)} />
-                <CtrlButton icon="trash" title="Убрать" onClick={() => remove(t.kpId)} />
-                <CtrlButton icon="chevron" title="Правее" disabled={i === titles.length - 1} onClick={() => move(i, 1)} />
+                <div
+                  className="fav-acts"
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    justifyContent: 'center',
+                    gap: 8,
+                    paddingBottom: 14,
+                    background: 'linear-gradient(to top, rgba(0,0,0,0.72), transparent 58%)',
+                  }}
+                >
+                  <ActBtn title="Левее" disabled={i === 0} onClick={() => move(i, -1)}>
+                    ‹
+                  </ActBtn>
+                  <ActBtn title="Убрать" danger onClick={() => remove(t.kpId)}>
+                    <Icon name="trash" size={14} />
+                  </ActBtn>
+                  <ActBtn title="Правее" disabled={i === titles.length - 1} onClick={() => move(i, 1)}>
+                    ›
+                  </ActBtn>
+                </div>
+              </PosterCover>
+              <div style={{ marginTop: 10, fontWeight: 600, fontSize: 14, lineHeight: 1.2, color: 'var(--text-0)' }}>{t.title}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 3 }}>
+                {[t.year, typeLabel(t.type)].filter(Boolean).join(' · ')}
+                {t.ratingImdb != null && ` · IMDb ${t.ratingImdb.toFixed(1)}`}
               </div>
             </div>
           ))}
@@ -161,26 +173,24 @@ export function FavoritesSection() {
             <button
               type="button"
               onClick={() => setModalOpen(true)}
+              className="hero-press"
               style={{
-                width: POSTER_W,
-                flexShrink: 0,
-                height: Math.round(POSTER_W * 1.5),
-                borderRadius: 10,
-                border: '1.5px dashed var(--line-2)',
+                aspectRatio: '2 / 3',
+                borderRadius: 16,
+                border: '1.5px dashed var(--line-3)',
                 background: 'var(--bg-2)',
                 color: 'var(--text-2)',
-                cursor: 'pointer',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: 6,
+                gap: 10,
+                cursor: 'pointer',
                 fontFamily: 'inherit',
-                fontSize: 12.5,
               }}
             >
-              <Icon name="plus" size={22} />
-              Добавить
+              <Icon name="plus" size={30} />
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Добавить</span>
             </button>
           )}
         </div>
@@ -191,6 +201,7 @@ export function FavoritesSection() {
           existingIds={existingIds}
           full={titles.length >= MAX}
           onPick={add}
+          onRemove={remove}
           onClose={() => setModalOpen(false)}
         />
       )}

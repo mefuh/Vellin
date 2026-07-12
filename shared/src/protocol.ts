@@ -12,6 +12,7 @@ import type {
   RoomPermissions,
   RoomRole,
   RtcConfig,
+  SharedWatchDTO,
   SyncStatus,
   VideoState,
   VideoStatus,
@@ -408,6 +409,7 @@ export type UserS2C =
   | UserS2CNotificationsRemoved
   | UserS2CPresence
   | UserS2CRoomVideo
+  | UserS2CSharedTime
   | UserS2CFriendsChanged
   | UserS2CDmMessage
   | UserS2CDmMessageUpdated
@@ -456,6 +458,17 @@ export interface UserS2CRoomVideo {
   slug: string;
   videoPoster: string | null;
   videoTitle: string | null;
+}
+/**
+ * Живое обновление «совместного времени» с конкретным пользователем. Шлётся
+ * обоим участникам пары на переходах co-presence (начало/конец совместной
+ * сессии). `peerId` — второй пользователь пары (с чьей карточкой это связано у
+ * получателя). Клиент обновляет стор и, если открыт профиль `peerId`, тикает
+ * число локально из `togetherSince`.
+ */
+export interface UserS2CSharedTime extends SharedWatchDTO {
+  t: 'shared_time';
+  peerId: string;
 }
 /** Сигнал «список друзей/заявок изменился — перезапроси по REST». */
 export interface UserS2CFriendsChanged {

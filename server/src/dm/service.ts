@@ -271,8 +271,8 @@ export async function sendMessage(
   return {
     conversationId: conv.id,
     message: dmRowToDto(message),
-    sender: me ? toPublicUser(me) : { id: meId, username: '', avatarSeed: '', avatarUrl: null, kind: 'user' },
-    recipient: { id: peer.id, username: peer.username, avatarSeed: peer.avatarSeed, avatarUrl: peer.avatarUrl, kind: 'user' },
+    sender: me ? toPublicUser(me) : { id: meId, publicId: meId, username: '', avatarSeed: '', avatarUrl: null, kind: 'user' },
+    recipient: { id: peer.id, publicId: peer.publicId, username: peer.username, avatarSeed: peer.avatarSeed, avatarUrl: peer.avatarUrl, kind: 'user' },
   };
 }
 
@@ -404,8 +404,8 @@ export async function createOrUpdateRoomInviteCard(
   return {
     conversationId: conv.id,
     message: dmRowToDto(row),
-    sender: me ? toPublicUser(me) : { id: meId, username: '', avatarSeed: '', avatarUrl: null, kind: 'user' },
-    recipient: { id: peer.id, username: peer.username, avatarSeed: peer.avatarSeed, avatarUrl: peer.avatarUrl, kind: 'user' },
+    sender: me ? toPublicUser(me) : { id: meId, publicId: meId, username: '', avatarSeed: '', avatarUrl: null, kind: 'user' },
+    recipient: { id: peer.id, publicId: peer.publicId, username: peer.username, avatarSeed: peer.avatarSeed, avatarUrl: peer.avatarUrl, kind: 'user' },
     isNew,
   };
 }
@@ -671,13 +671,13 @@ export interface ThreadResult {
  * чтении — только при первой отправке. Статус сети/«был в сети»/пол отдаются
  * с тем же гейтингом приватности, что и в публичном профиле.
  */
-export async function getThreadByUsername(
+export async function getThreadByPublicId(
   meId: string,
-  username: string,
+  publicId: string,
   before?: string,
 ): Promise<ThreadResult> {
   const u = await prisma.user.findUnique({
-    where: { username },
+    where: { publicId },
     select: { ...PUBLIC_USER_SELECT, privacyJson: true, gender: true, lastSeenAt: true },
   });
   if (!u) {

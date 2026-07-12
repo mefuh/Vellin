@@ -26,7 +26,7 @@ import { parsePrivacy, serializePrivacy } from '../privacy/privacy.js';
 import { userHub } from '../realtime/UserHub.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { signSession, signUserTicket, type Principal } from './jwt.js';
-import { generateAvatarSeed, generateGuestId } from '../utils/ids.js';
+import { generateAvatarSeed, generateGuestId, generatePublicId } from '../utils/ids.js';
 import { requireAuth } from './middleware.js';
 import { isAdminEmail } from '../env.js';
 import { createSession, forgetTouch, toDeviceSession, type DbSession } from './sessions.js';
@@ -118,6 +118,7 @@ const updatePrivacySchema = z.object({
 
 interface DbUserCore {
   id: string;
+  publicId: string;
   email: string;
   username: string;
   avatarSeed: string;
@@ -132,6 +133,7 @@ interface DbUserCore {
 function toAuthUser(u: DbUserCore): AuthUser {
   return {
     id: u.id,
+    publicId: u.publicId,
     email: u.email,
     username: u.username,
     avatarSeed: u.avatarSeed,
@@ -204,6 +206,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           username: body.username,
           passwordHash,
           avatarSeed: generateAvatarSeed(),
+          publicId: generatePublicId(),
         },
       });
       const session = await createSession(user.id, req);
@@ -252,6 +255,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const token = signSession(app, principal);
       const user: AuthUser = {
         id: guestId,
+        publicId: guestId,
         email: null,
         username: principal.username,
         avatarSeed,
@@ -273,6 +277,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (principal.kind === 'guest') {
       const user: AuthUser = {
         id: principal.userId,
+        publicId: principal.userId,
         email: null,
         username: principal.username,
         avatarSeed: principal.avatarSeed,
