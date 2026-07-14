@@ -10,8 +10,29 @@ import { useSharedTimeStore } from '../stores/sharedTimeStore';
 import { realtimeApi } from '../api/realtime';
 import { UserSocket } from '../ws/UserSocket';
 import { playDmSound } from '../utils/sound';
-import { createActivityTracker, type ActivityTracker } from './activityTracker';
+import {
+  createActivityTracker,
+  IDLE_TIMEOUT_MS,
+  ROOM_IDLE_TIMEOUT_MS,
+  type ActivityPolicy,
+  type ActivityTracker,
+} from './activityTracker';
+import { useRoomStore } from '../stores/roomStore';
 import { isMobileDevice } from '../utils/platform';
+
+/**
+ * Порог простоя зависит от того, чем занят пользователь:
+ * — вне комнаты: минута бездействия и он офлайн;
+ * — в комнате, где ничего не играет и нет звонка: пять минут;
+ * — в комнате с играющим видео или в звонке: онлайн всегда, простой не считаем
+ *   (он смотрит/разговаривает, а мышь при этом трогать незачем).
+ */
+const activityPolicy = (): ActivityPolicy => {
+  const { room, video, myCallState } = useRoomStore.getState();
+  if (!room) return { idleMs: IDLE_TIMEOUT_MS, keepAlive: false };
+  const keepAlive = video?.status === 'playing' || myCallState === 'in';
+  return { idleMs: ROOM_IDLE_TIMEOUT_MS, keepAlive };
+};
 
 /**
  * Держит app-wide пользовательский realtime-канал для авторизованного
@@ -122,13 +143,22 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
     // На тач-устройствах события активности редкие (скролл/тап раз в минуту —
     // это нормальное чтение, а не «ушёл»), а сворачивание/блокировка экрана уже
     // само по себе рвёт сокет и корректно уводит в офлайн через detach().
+    let unsubRoom: (() => void) | null = null;
     if (!isMobileDevice()) {
-      activity = createActivityTracker((active) => socket.send({ t: 'activity', active }));
+      activity = createActivityTracker(
+        (active) => socket.send({ t: 'activity', active }),
+        activityPolicy,
+      );
+      // Политика зависит от комнаты — пересчитываем при её смене (вошёл/вышел,
+      // видео заиграло/встало, зашёл/вышел из звонка), а не только по событиям ввода.
+      const tracker = activity;
+      unsubRoom = useRoomStore.subscribe(() => tracker.refresh());
     }
     void socket.connect();
 
     return () => {
       socket.close();
+      unsubRoom?.();
       activity?.stop();
       useNotificationsStore.getState().reset();
       useFriendsStore.getState().reset();
