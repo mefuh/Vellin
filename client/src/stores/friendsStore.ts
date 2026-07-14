@@ -53,7 +53,17 @@ export const useFriendsStore = create<FriendsState>((set) => ({
   applyPresence: (p) =>
     set((s) => ({
       friends: s.friends.map((f) =>
-        f.id === p.userId ? { ...f, online: p.online, currentRoom: p.currentRoom } : f,
+        f.id === p.userId
+          ? {
+              ...f,
+              online: p.online,
+              currentRoom: p.currentRoom,
+              // Без этого у друга, ушедшего в офлайн при открытой странице,
+              // оставался lastSeenAt: null (каким он был, пока тот был онлайн),
+              // и статус показывался как «не в сети» вместо времени захода.
+              lastSeenAt: p.lastSeenAt ?? f.lastSeenAt,
+            }
+          : f,
       ),
     })),
 

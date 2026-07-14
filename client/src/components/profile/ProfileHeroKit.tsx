@@ -47,7 +47,11 @@ export function HeroShell({
   glowLive?: boolean;
 }) {
   return (
-    <div style={{ position: 'relative', width: '100%', overflow: 'hidden' }}>
+    // overflow:hidden клипует свечения по габаритам оболочки, а её высоту задаёт
+    // контент. На «коротких» экранах (пустое состояние, свёрнутая вкладка) она
+    // схлопывалась и обрезала градиент ровной линией по нижней кромке. minHeight
+    // держит оболочку хотя бы во весь вьюпорт за вычетом AppHeader (72px).
+    <div style={{ position: 'relative', width: '100%', minHeight: 'calc(100svh - 72px)', overflow: 'hidden' }}>
       {/* Верхнее «дышащее» свечение по центру. */}
       <div
         aria-hidden

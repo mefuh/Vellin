@@ -616,3 +616,140 @@ input[type='date']::-webkit-datetime-edit {
     animation: none;
   }
 }
+
+/* ─── Страница «Друзья» (редизайн) ──────────────────────────────────────────
+   Карточки людей построены на тех же hero-примитивах, что и профиль: мягкое
+   всплытие при появлении, лёгкий подъём на ховер, тактильное вдавливание на
+   нажатие, и layout-схлопывание при принятии/отклонении/удалении. Всё движение
+   глушится в prefers-reduced-motion. */
+.friend-card {
+  transition:
+    transform 0.4s cubic-bezier(0.22, 1.2, 0.36, 1),
+    background 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .friend-card:not([data-exiting='true']):hover {
+    transform: translateY(-3px);
+    border-color: var(--line-2);
+  }
+}
+
+/* Пилюля-кнопка карточки («Написать», «Присоединиться», действия заявок). */
+.friend-pill {
+  transition:
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    filter 0.2s ease;
+}
+.friend-pill:active {
+  transform: scale(0.96);
+}
+@media (hover: hover) and (pointer: fine) {
+  .friend-pill:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.06);
+  }
+}
+/* «Написать» подсвечивается акцентом на ховер. */
+@media (hover: hover) and (pointer: fine) {
+  .friend-msg:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent-glow);
+    color: var(--accent-hi);
+  }
+}
+
+/* Поле поиска: мягкая реакция на фокус. */
+.friend-search {
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+.friend-search:focus-within {
+  border-color: var(--line-3);
+  background: var(--bg-2);
+}
+/* Подсказка — фоновый слой, а не контент: приглушена до уровня подложки, чтобы
+   пустое поле не перетягивало внимание со списка. Введённый текст при этом
+   остаётся полноконтрастным. */
+.friend-search input::placeholder {
+  color: var(--text-3);
+  font-weight: 400;
+  opacity: 1; /* Firefox по умолчанию приглушает placeholder ещё и своей opacity. */
+}
+
+/* Круглая кнопка «отклонить» (×) во входящих заявках. */
+.friend-x {
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .friend-x:hover {
+    background: var(--bg-3);
+    color: var(--text-0);
+    border-color: var(--line-3);
+  }
+}
+
+/* Приём заявки: карточка вспыхивает зелёным и схлопывается вверх. */
+@keyframes friendAccept {
+  0% {
+    max-height: 140px;
+    opacity: 1;
+    transform: scale(1);
+    margin-bottom: 0;
+  }
+  12% {
+    transform: scale(1.02);
+    border-color: color-mix(in srgb, var(--ok) 55%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--ok) 50%, transparent),
+      0 18px 44px -14px color-mix(in srgb, var(--ok) 50%, transparent);
+  }
+  45% {
+    max-height: 140px;
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    max-height: 0;
+    opacity: 0;
+    transform: scale(0.97) translateY(-6px);
+    margin-bottom: -12px;
+    border-width: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+/* Отклонение/отмена/удаление: карточка уезжает вбок и схлопывается. */
+@keyframes friendReject {
+  0% {
+    max-height: 140px;
+    opacity: 1;
+    transform: translateX(0);
+    margin-bottom: 0;
+  }
+  100% {
+    max-height: 0;
+    opacity: 0;
+    transform: translateX(44px);
+    margin-bottom: -12px;
+    border-width: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .friend-card,
+  .friend-pill:hover,
+  .friend-pill:active {
+    transform: none !important;
+  }
+  /* Exit-анимации оставляем как мгновенное затухание (удаление всё равно
+     должно произойти по завершении), без движения. */
+  .friend-card[data-exiting='true'] {
+    animation: heroFadeOut 0.2s ease both !important;
+  }
+}
