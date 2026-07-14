@@ -165,8 +165,8 @@ export async function listFriends(userId: string): Promise<FriendUser[]> {
       OR: [{ requesterId: userId }, { addresseeId: userId }],
     },
     include: {
-      requester: { select: { ...PUBLIC_USER_SELECT, privacyJson: true } },
-      addressee: { select: { ...PUBLIC_USER_SELECT, privacyJson: true } },
+      requester: { select: { ...PUBLIC_USER_SELECT, privacyJson: true, lastSeenAt: true } },
+      addressee: { select: { ...PUBLIC_USER_SELECT, privacyJson: true, lastSeenAt: true } },
     },
     orderBy: { respondedAt: 'desc' },
   });
@@ -184,7 +184,10 @@ export async function listFriends(userId: string): Promise<FriendUser[]> {
       friendshipId: r.id,
       online: presence.online,
       currentRoom: presence.currentRoom,
-      lastSeenAt: lastSeenIso(presence),
+      // Фолбэк на сохранённое в БД время — иначе друг, который не подключался с
+      // момента рестарта сервера, отдавался бы с lastSeenAt: null и выглядел
+      // просто «не в сети», без конкретного времени.
+      lastSeenAt: lastSeenIso(presence, showOnline ? other.lastSeenAt : null),
     };
   });
 }
