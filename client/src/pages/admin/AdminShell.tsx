@@ -21,6 +21,7 @@ const NAV: NavItem[] = [
   { to: '/admin/reports', label: 'Жалобы', icon: 'flame', perm: 'reports.view' },
   { to: '/admin/dm', label: 'Модерация ЛС', icon: 'chat', perm: 'moderation.dm.view' },
   { to: '/admin/push', label: 'Push', icon: 'bell', perm: 'push.view' },
+  { to: '/admin/system', label: 'Система', icon: 'cast', perm: 'system.view' },
   { to: '/admin/platform', label: 'Платформа', icon: 'settings', perm: 'platform.manage' },
   { to: '/admin/roles', label: 'Роли и доступ', icon: 'lock', perm: 'roles.manage' },
   { to: '/admin/audit', label: 'Журнал', icon: 'list', perm: 'audit.view' },

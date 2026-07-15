@@ -296,6 +296,84 @@ export interface SocialAnalytics {
   };
 }
 
+// ── Системный мониторинг ─────────────────────────────────────────────────────
+
+export interface WsRoomStat {
+  roomId: string;
+  slug: string;
+  name: string;
+  participants: number;
+}
+
+export interface RecentError {
+  ts: string;
+  where: string;
+  message: string;
+}
+
+export interface WsSnapshot {
+  connections: number;
+  distinctUsers: number;
+  online: number;
+  watchers: number;
+  librarySubs: number;
+  roomSessions: number;
+  activeRooms: number;
+  rooms: WsRoomStat[];
+  eventTotal: number;
+  eventPerSec: number;
+  recentErrors: RecentError[];
+}
+
+export interface PerfRouteStat {
+  route: string;
+  count: number;
+  avgMs: number;
+  maxMs: number;
+}
+
+export interface PerfSnapshot {
+  uptimeSec: number;
+  memory: { rssMb: number; heapUsedMb: number; heapTotalMb: number; externalMb: number };
+  cpuPercent: number;
+  requests: { last1m: number; rps: number; errorRate: number; avgMs: number; p95Ms: number };
+  slowest: { route: string; ms: number; status: number; ts: string }[];
+  byRoute: PerfRouteStat[];
+  recentErrors: RecentError[];
+}
+
+export type HealthStatus = 'ok' | 'degraded' | 'down' | 'disabled';
+
+export interface HealthCheck {
+  name: string;
+  status: HealthStatus;
+  latencyMs: number | null;
+  detail: string | null;
+}
+
+export interface HealthSnapshot {
+  overall: HealthStatus;
+  checks: HealthCheck[];
+  serverTime: string;
+}
+
+export interface SystemJobDTO {
+  id: string;
+  kind: 'push' | 'transcode';
+  status: string;
+  attempts: number;
+  maxAttempts: number;
+  label: string;
+  nextAttemptAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+}
+
+export interface SystemJobsResponse {
+  push: { counts: Record<string, number>; jobs: SystemJobDTO[] };
+  transcode: { processing: number; jobs: SystemJobDTO[] };
+}
+
 // ── Управление платформой ────────────────────────────────────────────────────
 
 /** Тумблеры функциональности (enforce на сервере при соответствующих действиях). */

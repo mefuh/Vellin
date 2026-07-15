@@ -21,6 +21,8 @@ import { reportPublicRoutes, adminReportRoutes } from './admin/moderation/report
 import { adminDmModerationRoutes } from './admin/moderation/dm.js';
 import { adminPlatformRoutes } from './admin/platform/routes.js';
 import { runtimeRoutes } from './admin/platform/runtime.js';
+import { adminSystemRoutes } from './admin/system/routes.js';
+import { recordError, recordRequest, startMetricsSampler } from './admin/system/metrics.js';
 import { seedRolesAndBootstrapAdmin } from './admin/rbac/roles.js';
 import { friendRoutes } from './friends/routes.js';
 import { dmRoutes } from './dm/routes.js';
@@ -115,9 +117,20 @@ export async function buildApp(): Promise<FastifyInstance> {
       });
       return;
     }
+    recordError(`${_req.method} ${_req.url}`, (err as Error).message);
     app.log.error({ err }, 'Unhandled error');
     reply.code(500).send({ error: 'InternalServerError', message: 'Internal error', statusCode: 500 });
   });
+
+  // Телеметрия латентности: пишем каждый ответ в кольцевой буфер (для раздела
+  // «Производительность» админ-панели). Маршрут берём паттерном (…/:id), а не
+  // сырым URL, чтобы агрегация по эндпоинтам была осмысленной.
+  app.addHook('onResponse', (req, reply, done) => {
+    const route = (req.routeOptions?.url as string | undefined) ?? req.url;
+    recordRequest(req.method, route, reply.statusCode, reply.elapsedTime);
+    done();
+  });
+  startMetricsSampler();
 
   app.get('/health', async () => ({ ok: true, version: '0.25.0' }));
 
@@ -136,6 +149,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(adminReportRoutes);
       await api.register(adminDmModerationRoutes);
       await api.register(adminPlatformRoutes);
+      await api.register(adminSystemRoutes);
       await api.register(reportPublicRoutes);
       await api.register(runtimeRoutes);
       await api.register(friendRoutes);

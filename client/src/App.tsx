@@ -28,6 +28,7 @@ import { AdminAnalytics } from './pages/admin/AdminAnalytics';
 import { AdminReports } from './pages/admin/AdminReports';
 import { AdminDmModeration } from './pages/admin/AdminDmModeration';
 import { AdminPlatform } from './pages/admin/AdminPlatform';
+import { AdminSystem } from './pages/admin/AdminSystem';
 import { RuntimeLayer } from './components/RuntimeLayer';
 
 function ProtectedRoute({ children }: { children: React.ReactElement }) {
@@ -161,6 +162,7 @@ export function App() {
         <Route path="roles" element={<AdminRoles />} />
         <Route path="audit" element={<AdminAudit />} />
         <Route path="platform" element={<AdminPlatform />} />
+        <Route path="system" element={<AdminSystem />} />
       </Route>
       <Route path="*" element={<NotFound />} />
       </Routes>

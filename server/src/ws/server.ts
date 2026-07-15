@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
+import { incWsEvent } from '../admin/system/metrics.js';
 import {
   isC2S,
   ALL_PERMISSIONS,
@@ -99,6 +100,7 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
     // присланное сразу после open (watch_presence), теряется (ws роняет события
     // без слушателя). Входящие: подписка на присутствие + keep-alive (pong).
     socket.on('message', (raw) => {
+      incWsEvent();
       let msg: unknown;
       try {
         msg = JSON.parse(raw.toString());
@@ -366,6 +368,7 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
     }
 
     socket.on('message', (raw) => {
+      incWsEvent();
       // `ws` types `raw` as Buffer | ArrayBuffer | Buffer[]; only Buffer/Uint8Array
       // has .length, so normalise via byteLength on whichever shape arrives.
       const size =
