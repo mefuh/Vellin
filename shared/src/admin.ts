@@ -217,6 +217,124 @@ export interface AuditLogListResponse {
   nextCursor: string | null;
 }
 
+// ── Модерация пользователей / Профиль-360 ────────────────────────────────────
+
+/** Расширенный профиль пользователя для админ-карточки. */
+export interface AdminUserProfile {
+  id: string;
+  publicId: string;
+  email: string;
+  username: string;
+  avatarSeed: string;
+  avatarUrl: string | null;
+  bio: string | null;
+  gender: string | null;
+  birthDate: string | null;
+  city: string | null;
+  createdAt: string;
+  lastSeenAt: string | null;
+  isBlocked: boolean;
+  blockedAt: string | null;
+  blockReason: string | null;
+  /** Административная роль пользователя (если он сотрудник). */
+  roleName: string | null;
+}
+
+export interface AdminUserStats {
+  friends: number;
+  roomsOwned: number;
+  messagesSent: number;
+  dmSent: number;
+  devices: number;
+  pushDevices: number;
+}
+
+/** Совместное время с одним из партнёров (для секции в профиле-360). */
+export interface AdminSharedWatchPeer {
+  peer: PublicUserRef;
+  totalSeconds: number;
+  sessionsCount: number;
+  longestSessionSeconds: number;
+  lastWatchedAt: string | null;
+}
+
+/** Лёгкая ссылка на пользователя (без импорта domain в этот модуль). */
+export interface PublicUserRef {
+  id: string;
+  publicId: string;
+  username: string;
+  avatarSeed: string;
+  avatarUrl: string | null;
+}
+
+/** Мета последнего сообщения пользователя в комнате (для профиля-360). */
+export interface AdminUserMessageMeta {
+  id: string;
+  roomSlug: string;
+  roomName: string;
+  body: string;
+  createdAt: string;
+}
+
+/** Push-устройство пользователя (админ-вид). */
+export interface AdminPushDevice {
+  id: string;
+  browser: string;
+  os: string;
+  deviceLabel: string;
+  active: boolean;
+  createdAt: string;
+  lastUsedAt: string;
+}
+
+/** Сессия/устройство пользователя (админ-вид). */
+export interface AdminUserSession {
+  id: string;
+  deviceLabel: string;
+  browser: string;
+  os: string;
+  ip: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+}
+
+/** Полный агрегированный ответ профиля-360. */
+export interface AdminUserFullResponse {
+  user: AdminUserProfile;
+  stats: AdminUserStats;
+  friends: PublicUserRef[];
+  friendsTotal: number;
+  sharedWatch: AdminSharedWatchPeer[];
+  favorites: AdminFavoriteTitle[];
+  rooms: AdminUserRoomRef[];
+  recentMessages: AdminUserMessageMeta[];
+  sessions: AdminUserSession[];
+  pushDevices: AdminPushDevice[];
+  history: AuditLogEntryDTO[];
+}
+
+/** Избранный фильм (снимок из профиля пользователя). */
+export interface AdminFavoriteTitle {
+  kpId: number;
+  title: string;
+  year: number | null;
+  posterUrl: string | null;
+  ratingKp: number | null;
+}
+
+/** Комната, которой владеет пользователь (админ-вид). */
+export interface AdminUserRoomRef {
+  id: string;
+  slug: string;
+  name: string;
+  isPrivate: boolean;
+  createdAt: string;
+}
+
+export interface AdminUserSessionsResponse {
+  sessions: AdminUserSession[];
+}
+
 /** Различимые действия в аудите (не исчерпывающе — строка расширяема). */
 export type AuditAction =
   | 'user.block'

@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
-import type { AuditLogEntryDTO, AuditLogListResponse } from '@vellin/shared';
+import type { AuditLogListResponse } from '@vellin/shared';
 import { prisma } from '../../db/prisma.js';
 import { requirePermission } from '../rbac/middleware.js';
+import { toAuditDTO } from './audit.js';
 
 const querySchema = z.object({
   q: z.string().trim().min(1).max(200).optional(),
@@ -16,38 +17,6 @@ const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   format: z.enum(['json', 'csv']).default('json'),
 });
-
-function safeParse(json: string | null): unknown {
-  if (!json) return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
-
-function rowToDTO(r: {
-  id: string; actorId: string | null; actorEmail: string; action: string;
-  targetType: string; targetId: string | null; targetLabel: string | null;
-  beforeJson: string | null; afterJson: string | null; metaJson: string;
-  ip: string | null; userAgent: string | null; createdAt: Date;
-}): AuditLogEntryDTO {
-  return {
-    id: r.id,
-    actorId: r.actorId,
-    actorEmail: r.actorEmail,
-    action: r.action,
-    targetType: r.targetType,
-    targetId: r.targetId,
-    targetLabel: r.targetLabel,
-    before: safeParse(r.beforeJson),
-    after: safeParse(r.afterJson),
-    meta: (safeParse(r.metaJson) as Record<string, unknown>) ?? {},
-    ip: r.ip,
-    userAgent: r.userAgent,
-    createdAt: r.createdAt.toISOString(),
-  };
-}
 
 function csvCell(v: unknown): string {
   const s = v === null || v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v);
@@ -89,7 +58,7 @@ export async function adminAuditRoutes(app: FastifyInstance): Promise<void> {
       const header = ['createdAt', 'actorEmail', 'action', 'targetType', 'targetId', 'targetLabel', 'ip', 'userAgent', 'before', 'after', 'meta'];
       const lines = [header.join(',')];
       for (const r of rows) {
-        const dto = rowToDTO(r);
+        const dto = toAuditDTO(r);
         lines.push(
           [dto.createdAt, dto.actorEmail, dto.action, dto.targetType, dto.targetId, dto.targetLabel, dto.ip, dto.userAgent, dto.before, dto.after, dto.meta]
             .map(csvCell)
@@ -112,7 +81,7 @@ export async function adminAuditRoutes(app: FastifyInstance): Promise<void> {
     const hasMore = rows.length > q.limit;
     const page = hasMore ? rows.slice(0, q.limit) : rows;
     reply.send({
-      entries: page.map(rowToDTO),
+      entries: page.map(toAuditDTO),
       nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
     } satisfies AuditLogListResponse);
   });

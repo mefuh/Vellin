@@ -14,6 +14,7 @@ import { roomRoutes } from './rooms/routes.js';
 import { adminRoutes } from './admin/routes.js';
 import { adminRbacRoutes } from './admin/rbac/routes.js';
 import { adminAuditRoutes } from './admin/audit/routes.js';
+import { adminModerationRoutes } from './admin/moderation/routes.js';
 import { seedRolesAndBootstrapAdmin } from './admin/rbac/roles.js';
 import { friendRoutes } from './friends/routes.js';
 import { dmRoutes } from './dm/routes.js';
@@ -124,6 +125,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(adminRoutes);
       await api.register(adminRbacRoutes);
       await api.register(adminAuditRoutes);
+      await api.register(adminModerationRoutes);
       await api.register(friendRoutes);
       await api.register(dmRoutes);
       await api.register(geoRoutes);
