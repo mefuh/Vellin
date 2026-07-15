@@ -128,6 +128,8 @@ interface DbUserCore {
   birthDate: Date | null;
   city: string | null;
   createdAt: Date;
+  /** RBAC-роль админки. Непустая → пользователь имеет доступ к /admin. */
+  adminRoleId?: string | null;
 }
 
 function toAuthUser(u: DbUserCore): AuthUser {
@@ -144,7 +146,9 @@ function toAuthUser(u: DbUserCore): AuthUser {
     city: u.city ?? null,
     kind: 'user',
     createdAt: u.createdAt.toISOString(),
-    isAdmin: isAdminEmail(u.email),
+    // Доступ к админке даёт любая RBAC-роль; ADMIN_EMAIL остаётся break-glass
+    // (работает и до бутстрапа роли на старте / до перезапуска).
+    isAdmin: !!u.adminRoleId || isAdminEmail(u.email),
   };
 }
 

@@ -38,6 +38,11 @@ model User {
   blockedAt    DateTime?
   blockReason  String?
 
+  /// Административная роль (RBAC админ-панели). Null — обычный пользователь без
+  /// доступа к /admin. Заменяет прежнюю проверку по единственному ADMIN_EMAIL.
+  adminRoleId  String?
+  adminRole    AdminRole? @relation(fields: [adminRoleId], references: [id], onDelete: SetNull)
+
   rooms        Room[]       @relation("RoomOwner")
   messages     Message[]
   memberships  Membership[]
@@ -58,6 +63,48 @@ model User {
   sharedWatchB           SharedWatchStat[] @relation("SharedWatchB")
 
   @@index([isBlocked])
+  @@index([adminRoleId])
+}
+
+/// Роль администратора (RBAC). permissionsJson — JSON-массив ключей пермишенов
+/// из каталога shared (ADMIN_PERMISSIONS). isSystem — предустановленная роль;
+/// super_admin неудаляем и всегда имеет все права (вычисляется на сервере, не по
+/// хранимому набору). Пользователи ссылаются на роль через User.adminRoleId.
+model AdminRole {
+  id              String   @id @default(cuid())
+  key             String   @unique // super_admin | administrator | moderator | support | analyst | custom-*
+  name            String
+  description     String?
+  permissionsJson String   @default("[]")
+  isSystem        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users User[]
+}
+
+/// Журнал административных действий. before/after — снапшоты JSON состояния
+/// объекта до/после. Все мутирующие admin-роуты пишут сюда. Хранит actorEmail
+/// снапшотом, чтобы запись пережила удаление/смену email актора.
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorId     String? // null — системное действие (сид/бутстрап)
+  actorEmail  String
+  action      String // 'user.block' | 'room.delete' | 'dm.view' | ...
+  targetType  String // user | room | message | conversation | role | flag | config | ...
+  targetId    String?
+  targetLabel String? // человекочитаемое (username/slug) на момент действия
+  beforeJson  String?
+  afterJson   String?
+  metaJson    String   @default("{}")
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([targetType, targetId])
+  @@index([action, createdAt])
+  @@index([createdAt])
 }
 
 /// «Совместное время» — накопительная попарная статистика совместного

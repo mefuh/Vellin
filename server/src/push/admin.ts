@@ -11,7 +11,8 @@ import type {
   PushBroadcastsResponse,
   SendBroadcastResponse,
 } from '@vellin/shared';
-import { requireAdmin } from '../auth/middleware.js';
+import { requirePermission } from '../admin/rbac/middleware.js';
+import { writeAudit } from '../admin/audit/audit.js';
 import { prisma } from '../db/prisma.js';
 import { loadEnv } from '../env.js';
 import { logger } from '../utils/logger.js';
@@ -150,33 +151,38 @@ const updateTemplateSchema = z.object({
  * их история. Отдельный плагин с собственным requireAdmin-хуком (как adminRoutes).
  */
 export async function adminPushRoutes(app: FastifyInstance): Promise<void> {
-  app.addHook('preHandler', requireAdmin);
-
-  app.get('/admin/push/dashboard', async (_req, reply) => {
+  app.get('/admin/push/dashboard', { preHandler: requirePermission('push.view') }, async (_req, reply) => {
     const [dashboard, stats] = await Promise.all([buildDashboard(), buildStats()]);
     reply.send({ dashboard, stats } satisfies PushDashboardResponse);
   });
 
-  app.get('/admin/push/templates', async (_req, reply) => {
+  app.get('/admin/push/templates', { preHandler: requirePermission('push.view') }, async (_req, reply) => {
     const rows = await prisma.notificationTemplate.findMany({ orderBy: { type: 'asc' } });
     reply.send({ templates: rows.map(rowToTemplateDTO) } satisfies PushTemplatesResponse);
   });
 
-  app.put<{ Params: { type: string } }>('/admin/push/templates/:type', async (req, reply) => {
-    const patch = updateTemplateSchema.parse(req.body);
-    try {
-      const updated = await prisma.notificationTemplate.update({
-        where: { type: req.params.type },
-        data: { ...patch, updatedBy: req.principal!.userId },
-      });
-      invalidateTemplateCache();
-      reply.send({ template: rowToTemplateDTO(updated) });
-    } catch {
-      reply.code(404).send({ error: 'NotFound', message: 'Шаблон не найден', statusCode: 404 });
-    }
-  });
+  app.put<{ Params: { type: string } }>(
+    '/admin/push/templates/:type',
+    { preHandler: requirePermission('push.templates') },
+    async (req, reply) => {
+      const patch = updateTemplateSchema.parse(req.body);
+      try {
+        const updated = await prisma.notificationTemplate.update({
+          where: { type: req.params.type },
+          data: { ...patch, updatedBy: req.principal!.userId },
+        });
+        invalidateTemplateCache();
+        await writeAudit(req, 'push.template_update', { type: 'push_template', id: req.params.type, label: req.params.type }, {
+          after: patch,
+        });
+        reply.send({ template: rowToTemplateDTO(updated) });
+      } catch {
+        reply.code(404).send({ error: 'NotFound', message: 'Шаблон не найден', statusCode: 404 });
+      }
+    },
+  );
 
-  app.get('/admin/push/broadcasts', async (_req, reply) => {
+  app.get('/admin/push/broadcasts', { preHandler: requirePermission('push.view') }, async (_req, reply) => {
     const rows = await prisma.pushBroadcast.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
     const broadcasts: PushBroadcastDTO[] = rows.map((r) => ({
       id: r.id,
@@ -193,7 +199,7 @@ export async function adminPushRoutes(app: FastifyInstance): Promise<void> {
     reply.send({ broadcasts } satisfies PushBroadcastsResponse);
   });
 
-  app.post('/admin/push/broadcast', async (req, reply) => {
+  app.post('/admin/push/broadcast', { preHandler: requirePermission('push.send') }, async (req, reply) => {
     const body = broadcastSchema.parse(req.body);
     const adminId = req.principal!.userId;
     const targets = await resolveAudience(body.audience);
@@ -211,6 +217,9 @@ export async function adminPushRoutes(app: FastifyInstance): Promise<void> {
     // Постановка в очередь — в фоне (аудитория может быть большой); итоги
     // sent/failed дописываем в запись истории по завершении.
     void runBroadcast(record.id, body.type, body.title, body.body, body.url, targets);
+    await writeAudit(req, 'push.broadcast', { type: 'push_broadcast', id: record.id, label: body.title }, {
+      meta: { audience: body.audience, totalTargets: targets.length, type: body.type },
+    });
     reply.send({ ok: true, totalTargets: targets.length, queued: targets.length } satisfies SendBroadcastResponse);
   });
 }

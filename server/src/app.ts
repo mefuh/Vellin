@@ -12,6 +12,9 @@ import { loadEnv } from './env.js';
 import { authRoutes } from './auth/routes.js';
 import { roomRoutes } from './rooms/routes.js';
 import { adminRoutes } from './admin/routes.js';
+import { adminRbacRoutes } from './admin/rbac/routes.js';
+import { adminAuditRoutes } from './admin/audit/routes.js';
+import { seedRolesAndBootstrapAdmin } from './admin/rbac/roles.js';
 import { friendRoutes } from './friends/routes.js';
 import { dmRoutes } from './dm/routes.js';
 import { geoRoutes } from './geo/routes.js';
@@ -119,6 +122,8 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(authRoutes);
       await api.register(roomRoutes);
       await api.register(adminRoutes);
+      await api.register(adminRbacRoutes);
+      await api.register(adminAuditRoutes);
       await api.register(friendRoutes);
       await api.register(dmRoutes);
       await api.register(geoRoutes);
@@ -148,6 +153,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await registerWebSocket(app);
+
+  // RBAC админ-панели: сидируем системные роли и бутстрапим ADMIN_EMAIL в
+  // super_admin (идемпотентно). Не блокирует старт — ошибка лишь логируется.
+  void seedRolesAndBootstrapAdmin().catch((err) =>
+    logger.error({ err }, 'rbac: seed/bootstrap failed'),
+  );
 
   // Засеять дефолтные шаблоны push (идемпотентно) и запустить фоновый воркер
   // очереди отправки (no-op, если push выключен — нет VAPID-ключей).
