@@ -25,6 +25,8 @@ import { AdminRoles } from './pages/admin/AdminRoles';
 import { AdminAudit } from './pages/admin/AdminAudit';
 import { AdminUserProfile } from './pages/admin/AdminUserProfile';
 import { AdminAnalytics } from './pages/admin/AdminAnalytics';
+import { AdminReports } from './pages/admin/AdminReports';
+import { AdminDmModeration } from './pages/admin/AdminDmModeration';
 
 function ProtectedRoute({ children }: { children: React.ReactElement }) {
   const token = useAuthStore((s) => s.token);
@@ -151,6 +153,8 @@ export function App() {
         <Route path="users" element={<AdminUsers />} />
         <Route path="users/:id" element={<AdminUserProfile />} />
         <Route path="rooms" element={<AdminRooms />} />
+        <Route path="reports" element={<AdminReports />} />
+        <Route path="dm" element={<AdminDmModeration />} />
         <Route path="push" element={<AdminPush />} />
         <Route path="roles" element={<AdminRoles />} />
         <Route path="audit" element={<AdminAudit />} />

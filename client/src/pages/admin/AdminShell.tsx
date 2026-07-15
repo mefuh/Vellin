@@ -18,6 +18,8 @@ const NAV: NavItem[] = [
   { to: '/admin/analytics', label: 'Аналитика', icon: 'waveform', perm: 'analytics.view' },
   { to: '/admin/users', label: 'Пользователи', icon: 'users', perm: 'users.view' },
   { to: '/admin/rooms', label: 'Комнаты', icon: 'film', perm: 'rooms.view' },
+  { to: '/admin/reports', label: 'Жалобы', icon: 'flame', perm: 'reports.view' },
+  { to: '/admin/dm', label: 'Модерация ЛС', icon: 'chat', perm: 'moderation.dm.view' },
   { to: '/admin/push', label: 'Push', icon: 'bell', perm: 'push.view' },
   { to: '/admin/roles', label: 'Роли и доступ', icon: 'lock', perm: 'roles.manage' },
   { to: '/admin/audit', label: 'Журнал', icon: 'list', perm: 'audit.view' },

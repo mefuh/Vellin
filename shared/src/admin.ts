@@ -296,6 +296,98 @@ export interface SocialAnalytics {
   };
 }
 
+// ── Жалобы (Reports) ─────────────────────────────────────────────────────────
+
+export type ReportTargetType = 'message' | 'user' | 'room' | 'image' | 'video' | 'dm';
+export type ReportReason = 'spam' | 'harassment' | 'nsfw' | 'illegal' | 'other';
+export type ReportStatus = 'open' | 'reviewing' | 'accepted' | 'rejected';
+
+export const REPORT_REASON_LABELS: Record<ReportReason, string> = {
+  spam: 'Спам',
+  harassment: 'Оскорбления / травля',
+  nsfw: 'Непристойный контент',
+  illegal: 'Противозаконное',
+  other: 'Другое',
+};
+
+/** Запрос пользователя на подачу жалобы. */
+export interface CreateReportRequest {
+  targetType: ReportTargetType;
+  targetId: string;
+  reason: ReportReason;
+  comment?: string;
+}
+
+export interface ReportDTO {
+  id: string;
+  reporterId: string | null;
+  reporterName: string | null;
+  targetType: ReportTargetType;
+  targetId: string;
+  targetUserId: string | null;
+  targetLabel: string | null;
+  reason: ReportReason;
+  comment: string | null;
+  snapshot: Record<string, unknown>;
+  status: ReportStatus;
+  handledByEmail: string | null;
+  handledAt: string | null;
+  resolutionNote: string | null;
+  createdAt: string;
+}
+
+export interface ReportListResponse {
+  reports: ReportDTO[];
+  nextCursor: string | null;
+  openCount: number;
+}
+
+/** Решение по жалобе. При accept можно заблокировать/предупредить нарушителя. */
+export interface ResolveReportRequest {
+  decision: 'accept' | 'reject';
+  block?: boolean;
+  warn?: boolean;
+  note?: string;
+}
+
+// ── Модерация ЛС ─────────────────────────────────────────────────────────────
+
+export interface ModConversationDTO {
+  id: string;
+  userA: PublicUserRef;
+  userB: PublicUserRef;
+  lastMessageAt: string;
+  messageCount: number;
+}
+
+export interface ModConversationListResponse {
+  conversations: ModConversationDTO[];
+  nextCursor: string | null;
+  /** Включён ли раздел глобально (env DM_MODERATION_ENABLED). */
+  enabled: boolean;
+}
+
+export interface ModMessageDTO {
+  id: string;
+  senderId: string;
+  senderName: string;
+  body: string;
+  imageUrl: string | null;
+  voiceUrl: string | null;
+  videoUrl: string | null;
+  videoStatus: string | null;
+  inviteRoomName: string | null;
+  createdAt: string;
+}
+
+export interface ModMessagesResponse {
+  conversationId: string;
+  userA: PublicUserRef;
+  userB: PublicUserRef;
+  messages: ModMessageDTO[];
+  nextCursor: string | null;
+}
+
 // ── Модерация пользователей / Профиль-360 ────────────────────────────────────
 
 /** Расширенный профиль пользователя для админ-карточки. */

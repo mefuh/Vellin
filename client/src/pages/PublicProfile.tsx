@@ -25,6 +25,7 @@ import { friendsApi } from '../api/friends';
 import { titlesApi } from '../api/titles';
 import { ApiHttpError } from '../api/client';
 import { AppHeader } from '../components/AppHeader';
+import { ReportModal } from '../components/ReportModal';
 
 const GENDER_LABEL: Record<string, string> = { male: 'Мужской', female: 'Женский', other: 'Другой' };
 const MONTHS_GEN = [
@@ -62,6 +63,7 @@ export function PublicProfile() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   // Избранное самого зрителя — чтобы подсветить «общие любимые».
   const [myFavIds, setMyFavIds] = useState<Set<number>>(new Set());
 
@@ -268,7 +270,12 @@ export function PublicProfile() {
                 Настройки профиля
               </Button>
             ) : (
-              <ProfileActions profile={profile} busy={busy} act={act} navigate={navigate} isMobile={isMobile} />
+              <>
+                <ProfileActions profile={profile} busy={busy} act={act} navigate={navigate} isMobile={isMobile} />
+                <Button variant="ghost" icon="flame" style={PILL} onClick={() => setReportOpen(true)}>
+                  Пожаловаться
+                </Button>
+              </>
             )}
           </div>
         </div>
@@ -360,6 +367,9 @@ export function PublicProfile() {
     >
       {header}
       {isMobile ? <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>{body}</div> : body}
+      {reportOpen && profile && (
+        <ReportModal targetType="user" targetId={profile.id} targetLabel={profile.username} onClose={() => setReportOpen(false)} />
+      )}
     </div>
   );
 }

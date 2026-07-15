@@ -83,6 +83,36 @@ model AdminRole {
   users User[]
 }
 
+/// Жалоба пользователя на контент/пользователя/комнату. Снапшоты имён и контента
+/// (targetLabel, snapshotJson) замораживаются на момент подачи — жалоба остаётся
+/// читаемой даже после удаления цели. reporterId/handledById хранятся как plain
+/// id без FK (лог модерации переживает удаление участников).
+model Report {
+  id             String    @id @default(cuid())
+  reporterId     String?
+  reporterName   String?
+  /// message | user | room | image | video | dm
+  targetType     String
+  targetId       String
+  /// Владелец контента-нарушитель — для группировки жалоб по пользователю.
+  targetUserId   String?
+  targetLabel    String?
+  reason         String
+  comment        String?
+  snapshotJson   String    @default("{}")
+  /// open | reviewing | accepted | rejected
+  status         String    @default("open")
+  handledById    String?
+  handledByEmail String?
+  handledAt      DateTime?
+  resolutionNote String?
+  createdAt      DateTime  @default(now())
+
+  @@index([status, createdAt])
+  @@index([targetUserId])
+  @@index([targetType, targetId])
+}
+
 /// Суточный снапшот метрик — источник исторических рядов, которые нельзя
 /// восстановить из createdAt (DAU, число гостей, мгновенные значения online/
 /// активных комнат). Пишется фоновым rollup-джобом раз в сутки (и по требованию).
