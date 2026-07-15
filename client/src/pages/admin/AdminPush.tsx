@@ -7,7 +7,8 @@ import type {
   PushStatsDTO,
   PushNotificationType,
 } from '@vellin/shared';
-import { Button } from '../../shared';
+import { Link } from 'react-router-dom';
+import { Button, Icon } from '../../shared';
 import { adminPushApi } from '../../api/adminPush';
 
 type Tab = 'dashboard' | 'templates' | 'broadcasts';
@@ -24,7 +25,12 @@ export function AdminPush(): React.ReactElement {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <h1 style={{ fontSize: 24, margin: 0, fontWeight: 600 }}>Push-уведомления</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h1 style={{ fontSize: 24, margin: 0, fontWeight: 600 }}>Push-уведомления</h1>
+          <Link to="/admin/push/analytics" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--accent-hi)', textDecoration: 'none', fontWeight: 500 }}>
+            <Icon name="waveform" size={15} /> Аналитика
+          </Link>
+        </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {(['dashboard', 'templates', 'broadcasts'] as Tab[]).map((t) => (
             <button

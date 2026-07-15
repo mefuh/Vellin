@@ -4,6 +4,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { Button, Chip, Icon, VellinLogo, type IconName } from '../../shared';
 import { useIsMobile } from '../../hooks/useMediaQuery';
 import { AdminAccessProvider, useAdminAccess } from './AdminAccessContext';
+import { AdminSearchCommand } from './AdminSearchCommand';
 
 interface NavItem {
   to: string;
@@ -21,7 +22,9 @@ const NAV: NavItem[] = [
   { to: '/admin/reports', label: 'Жалобы', icon: 'flame', perm: 'reports.view' },
   { to: '/admin/dm', label: 'Модерация ЛС', icon: 'chat', perm: 'moderation.dm.view' },
   { to: '/admin/push', label: 'Push', icon: 'bell', perm: 'push.view' },
-  { to: '/admin/system', label: 'Система', icon: 'cast', perm: 'system.view' },
+  { to: '/admin/geo', label: 'География', icon: 'mapPin', perm: 'analytics.view' },
+  { to: '/admin/media', label: 'Media-кэш', icon: 'cast', perm: 'media.manage' },
+  { to: '/admin/system', label: 'Система', icon: 'compass', perm: 'system.view' },
   { to: '/admin/platform', label: 'Платформа', icon: 'settings', perm: 'platform.manage' },
   { to: '/admin/roles', label: 'Роли и доступ', icon: 'lock', perm: 'roles.manage' },
   { to: '/admin/audit', label: 'Журнал', icon: 'list', perm: 'audit.view' },
@@ -108,6 +111,7 @@ function AdminShellInner() {
         <main style={{ padding: '18px 14px 40px', minWidth: 0, flex: 1 }}>
           <Outlet />
         </main>
+        <AdminSearchCommand />
       </div>
     );
   }
@@ -174,6 +178,7 @@ function AdminShellInner() {
       <main style={{ padding: '28px max(20px, 3vw) 60px', minWidth: 0 }}>
         <Outlet />
       </main>
+      <AdminSearchCommand />
     </div>
   );
 }

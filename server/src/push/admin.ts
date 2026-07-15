@@ -81,6 +81,45 @@ async function buildStats(windowDays = 30): Promise<PushStatsDTO> {
   };
 }
 
+// ── Расширенная аналитика ──────────────────────────────────────────────────
+
+async function buildPushAnalytics(windowDays: number): Promise<import('@vellin/shared').PushAnalyticsResponse> {
+  const since = new Date(Date.now() - windowDays * 24 * 3600_000);
+  const [hourRows, browsers, sentByType, clickedByType, totalSent, totalClicked] = await Promise.all([
+    prisma.$queryRaw<{ hour: number; count: bigint }[]>`
+      SELECT EXTRACT(HOUR FROM "sentAt")::int AS hour, COUNT(*)::int AS count
+      FROM "PushDelivery" WHERE status = 'sent' AND "sentAt" >= ${since}
+      GROUP BY hour ORDER BY hour`,
+    prisma.pushDelivery.groupBy({ by: ['browser'], where: { status: 'sent', sentAt: { gte: since } }, _count: { _all: true }, orderBy: { _count: { browser: 'desc' } }, take: 8 }),
+    prisma.pushDelivery.groupBy({ by: ['type'], where: { status: 'sent', sentAt: { gte: since } }, _count: { _all: true } }),
+    prisma.pushDelivery.groupBy({ by: ['type'], where: { clickedAt: { not: null }, sentAt: { gte: since } }, _count: { _all: true } }),
+    prisma.pushDelivery.count({ where: { status: 'sent', sentAt: { gte: since } } }),
+    prisma.pushDelivery.count({ where: { clickedAt: { not: null }, sentAt: { gte: since } } }),
+  ]);
+
+  const hourMap = new Map(hourRows.map((r) => [Number(r.hour), Number(r.count)]));
+  const byHour = Array.from({ length: 24 }, (_, hour) => ({ hour, count: hourMap.get(hour) ?? 0 }));
+
+  const clickedMap = new Map(clickedByType.map((r) => [r.type, r._count._all]));
+  const byType = sentByType
+    .map((r) => {
+      const sent = r._count._all;
+      const clicked = clickedMap.get(r.type) ?? 0;
+      return { type: r.type, sent, clicked, ctr: sent > 0 ? Math.round((clicked / sent) * 1000) / 10 : 0 };
+    })
+    .sort((a, b) => b.sent - a.sent);
+
+  return {
+    windowDays,
+    totalSent,
+    totalClicked,
+    ctr: totalSent > 0 ? Math.round((totalClicked / totalSent) * 1000) / 10 : 0,
+    byHour,
+    byBrowser: browsers.map((b) => ({ browser: b.browser || 'неизвестно', sent: b._count._all })),
+    byType,
+  };
+}
+
 // ── Templates ────────────────────────────────────────────────────────────
 
 function rowToTemplateDTO(r: {
@@ -181,6 +220,10 @@ export async function adminPushRoutes(app: FastifyInstance): Promise<void> {
       }
     },
   );
+
+  app.get('/admin/push/analytics', { preHandler: requirePermission('push.view') }, async (_req, reply) => {
+    reply.send(await buildPushAnalytics(30));
+  });
 
   app.get('/admin/push/broadcasts', { preHandler: requirePermission('push.view') }, async (_req, reply) => {
     const rows = await prisma.pushBroadcast.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });

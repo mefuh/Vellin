@@ -29,6 +29,9 @@ import { AdminReports } from './pages/admin/AdminReports';
 import { AdminDmModeration } from './pages/admin/AdminDmModeration';
 import { AdminPlatform } from './pages/admin/AdminPlatform';
 import { AdminSystem } from './pages/admin/AdminSystem';
+import { AdminMedia } from './pages/admin/AdminMedia';
+import { AdminGeo } from './pages/admin/AdminGeo';
+import { AdminPushAnalytics } from './pages/admin/AdminPushAnalytics';
 import { RuntimeLayer } from './components/RuntimeLayer';
 
 function ProtectedRoute({ children }: { children: React.ReactElement }) {
@@ -159,6 +162,9 @@ export function App() {
         <Route path="reports" element={<AdminReports />} />
         <Route path="dm" element={<AdminDmModeration />} />
         <Route path="push" element={<AdminPush />} />
+        <Route path="push/analytics" element={<AdminPushAnalytics />} />
+        <Route path="media" element={<AdminMedia />} />
+        <Route path="geo" element={<AdminGeo />} />
         <Route path="roles" element={<AdminRoles />} />
         <Route path="audit" element={<AdminAudit />} />
         <Route path="platform" element={<AdminPlatform />} />

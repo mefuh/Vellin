@@ -296,6 +296,85 @@ export interface SocialAnalytics {
   };
 }
 
+// ── Media-кэш (ResolvedMedia) ────────────────────────────────────────────────
+
+export interface MediaCacheEntry {
+  sourceUrl: string;
+  kind: string;
+  title: string | null;
+  mime: string | null;
+  durationSec: number | null;
+  hasPoster: boolean;
+  resolvedAt: string;
+  expiresAt: string | null;
+}
+
+export interface MediaCacheListResponse {
+  entries: MediaCacheEntry[];
+  nextCursor: string | null;
+  total: number;
+}
+
+// ── География ────────────────────────────────────────────────────────────────
+
+export interface GeoBucket {
+  name: string;
+  count: number;
+}
+
+export interface GeoResponse {
+  totalUsers: number;
+  totalWithCity: number;
+  topCities: GeoBucket[];
+  topCountries: GeoBucket[];
+}
+
+// ── Расширенная push-аналитика ───────────────────────────────────────────────
+
+export interface PushHeatCell {
+  hour: number;
+  count: number;
+}
+
+export interface PushTypeEffectiveness {
+  type: string;
+  sent: number;
+  clicked: number;
+  ctr: number;
+}
+
+export interface PushAnalyticsResponse {
+  windowDays: number;
+  totalSent: number;
+  totalClicked: number;
+  ctr: number;
+  byHour: PushHeatCell[];
+  byBrowser: { browser: string; sent: number }[];
+  byType: PushTypeEffectiveness[];
+}
+
+// ── Глобальный поиск (Cmd/K) ─────────────────────────────────────────────────
+
+export interface SearchUserHit {
+  id: string;
+  publicId: string;
+  username: string;
+  email: string;
+  avatarSeed: string;
+  avatarUrl: string | null;
+}
+
+export interface SearchRoomHit {
+  id: string;
+  slug: string;
+  name: string;
+}
+
+export interface AdminSearchResponse {
+  users: SearchUserHit[];
+  rooms: SearchRoomHit[];
+}
+
 // ── Системный мониторинг ─────────────────────────────────────────────────────
 
 export interface WsRoomStat {
