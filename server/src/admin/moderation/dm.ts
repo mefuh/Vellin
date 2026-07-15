@@ -7,9 +7,9 @@ import type {
   PublicUserRef,
 } from '@vellin/shared';
 import { prisma } from '../../db/prisma.js';
-import { loadEnv } from '../../env.js';
 import { requirePermission } from '../rbac/middleware.js';
 import { writeAudit } from '../audit/audit.js';
+import { isDmModerationEnabled } from '../platform/flags.js';
 
 const userSelect = { id: true, publicId: true, username: true, avatarSeed: true, avatarUrl: true } as const;
 
@@ -27,7 +27,7 @@ export async function adminDmModerationRoutes(app: FastifyInstance): Promise<voi
     '/admin/moderation/conversations',
     { preHandler: requirePermission('moderation.dm.view') },
     async (req, reply) => {
-      const enabled = loadEnv().DM_MODERATION_ENABLED;
+      const enabled = await isDmModerationEnabled();
       if (!enabled) {
         reply.send({ conversations: [], nextCursor: null, enabled: false } satisfies ModConversationListResponse);
         return;
@@ -82,7 +82,7 @@ export async function adminDmModerationRoutes(app: FastifyInstance): Promise<voi
     '/admin/moderation/conversations/:id/messages',
     { preHandler: requirePermission('moderation.dm.view') },
     async (req, reply) => {
-      if (!loadEnv().DM_MODERATION_ENABLED) {
+      if (!(await isDmModerationEnabled())) {
         reply.code(403).send({ error: 'Forbidden', message: 'Раздел модерации ЛС отключён', statusCode: 403 });
         return;
       }

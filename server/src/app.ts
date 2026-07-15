@@ -19,6 +19,8 @@ import { adminAnalyticsRoutes } from './admin/analytics/routes.js';
 import { startRollupJob } from './admin/analytics/rollup.js';
 import { reportPublicRoutes, adminReportRoutes } from './admin/moderation/reports.js';
 import { adminDmModerationRoutes } from './admin/moderation/dm.js';
+import { adminPlatformRoutes } from './admin/platform/routes.js';
+import { runtimeRoutes } from './admin/platform/runtime.js';
 import { seedRolesAndBootstrapAdmin } from './admin/rbac/roles.js';
 import { friendRoutes } from './friends/routes.js';
 import { dmRoutes } from './dm/routes.js';
@@ -133,7 +135,9 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(adminAnalyticsRoutes);
       await api.register(adminReportRoutes);
       await api.register(adminDmModerationRoutes);
+      await api.register(adminPlatformRoutes);
       await api.register(reportPublicRoutes);
+      await api.register(runtimeRoutes);
       await api.register(friendRoutes);
       await api.register(dmRoutes);
       await api.register(geoRoutes);

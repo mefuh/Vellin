@@ -27,6 +27,8 @@ import { AdminUserProfile } from './pages/admin/AdminUserProfile';
 import { AdminAnalytics } from './pages/admin/AdminAnalytics';
 import { AdminReports } from './pages/admin/AdminReports';
 import { AdminDmModeration } from './pages/admin/AdminDmModeration';
+import { AdminPlatform } from './pages/admin/AdminPlatform';
+import { RuntimeLayer } from './components/RuntimeLayer';
 
 function ProtectedRoute({ children }: { children: React.ReactElement }) {
   const token = useAuthStore((s) => s.token);
@@ -158,12 +160,14 @@ export function App() {
         <Route path="push" element={<AdminPush />} />
         <Route path="roles" element={<AdminRoles />} />
         <Route path="audit" element={<AdminAudit />} />
+        <Route path="platform" element={<AdminPlatform />} />
       </Route>
       <Route path="*" element={<NotFound />} />
       </Routes>
       <MobileDock />
       <PushBridge />
       <PushPrompt />
+      <RuntimeLayer />
     </RealtimeProvider>
   );
 }

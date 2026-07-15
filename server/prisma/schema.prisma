@@ -126,6 +126,51 @@ model DailyStat {
   updatedAt DateTime @updatedAt
 }
 
+/// Конфиг платформы (key-value). Значение — JSON-строка. Категории задаются
+/// префиксом ключа: toggles.* (тумблеры регистрации/гостей/комнат/загрузок),
+/// maintenance.* (режим обслуживания), limits.* (лимиты), webrtc.*, heartbeat.*.
+/// Читается через кэш в памяти с инвалидацией при PUT (см. platform/config.ts).
+model PlatformSetting {
+  key       String   @id
+  valueJson String
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+/// Feature flag: включение/отключение функциональности без деплоя. rolloutJson —
+/// стратегия выката {kind:'all'|'role'|'percent'|'users', ...} (в v2 используется
+/// как булев выключатель; расширяемо).
+model FeatureFlag {
+  key         String   @id
+  enabled     Boolean  @default(false)
+  description String?
+  rolloutJson String   @default("{\"kind\":\"all\"}")
+  updatedAt   DateTime @updatedAt
+  updatedBy   String?
+}
+
+/// Внутриплатформенное объявление (баннер/модалка/новость) с таргетингом по
+/// аудитории (audienceJson: all|role|new-users) и временным окном. Активные
+/// отдаются клиенту через публичный /api/runtime; закрытие хранится на клиенте.
+model Announcement {
+  id           String    @id @default(cuid())
+  kind         String // banner | modal | news
+  title        String
+  body         String
+  ctaLabel     String?
+  ctaUrl       String?
+  style        String    @default("info") // info | accent | warn
+  audienceJson String    @default("{\"kind\":\"all\"}")
+  active       Boolean   @default(false)
+  startsAt     DateTime?
+  endsAt       DateTime?
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([active, startsAt])
+}
+
 /// Журнал административных действий. before/after — снапшоты JSON состояния
 /// объекта до/после. Все мутирующие admin-роуты пишут сюда. Хранит actorEmail
 /// снапшотом, чтобы запись пережила удаление/смену email актора.

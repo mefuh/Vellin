@@ -45,6 +45,7 @@ import { loadEnv } from '../env.js';
 import { generateInviteToken } from '../utils/ids.js';
 import { resolveWithCache } from '../media/resolveWithCache.js';
 import { ResolveError } from '../media/Resolver.js';
+import { assertRoomCreationEnabled } from '../admin/platform/gate.js';
 
 const URL_PATTERN = /^https?:\/\/.+/i;
 const RESOLVE_URL_PATTERN = /^(https?:\/\/|magnet:).+/i;
@@ -101,6 +102,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireAuth);
 
   app.post('/rooms', async (req, reply) => {
+    await assertRoomCreationEnabled();
     const body = createRoomSchema.parse(req.body);
     const principal = req.principal!;
     if (principal.kind === 'guest') {

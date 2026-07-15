@@ -296,6 +296,132 @@ export interface SocialAnalytics {
   };
 }
 
+// ── Управление платформой ────────────────────────────────────────────────────
+
+/** Тумблеры функциональности (enforce на сервере при соответствующих действиях). */
+export interface PlatformToggles {
+  registration: boolean;
+  guests: boolean;
+  roomCreation: boolean;
+  uploads: boolean;
+}
+
+export interface PlatformMaintenance {
+  enabled: boolean;
+  message: string;
+}
+
+/** Числовые лимиты платформы (значения по умолчанию — в platform/config.ts). */
+export interface PlatformLimits {
+  maxRoomParticipants: number;
+  avatarMaxMb: number;
+  dmImageMaxMb: number;
+  dmVoiceMaxMb: number;
+  dmVideoMaxMb: number;
+}
+
+export interface PlatformSettingsDTO {
+  toggles: PlatformToggles;
+  maintenance: PlatformMaintenance;
+  limits: PlatformLimits;
+}
+
+export interface PlatformSettingsResponse {
+  settings: PlatformSettingsDTO;
+}
+
+export interface UpdatePlatformSettingsRequest {
+  toggles?: Partial<PlatformToggles>;
+  maintenance?: Partial<PlatformMaintenance>;
+  limits?: Partial<PlatformLimits>;
+}
+
+// ── Feature flags ────────────────────────────────────────────────────────────
+
+export interface FeatureFlagDTO {
+  key: string;
+  enabled: boolean;
+  description: string | null;
+  updatedAt: string;
+}
+
+export interface FeatureFlagListResponse {
+  flags: FeatureFlagDTO[];
+}
+
+export interface UpsertFeatureFlagRequest {
+  key: string;
+  enabled: boolean;
+  description?: string | null;
+}
+
+// ── Объявления ───────────────────────────────────────────────────────────────
+
+export type AnnouncementKind = 'banner' | 'modal' | 'news';
+export type AnnouncementStyle = 'info' | 'accent' | 'warn';
+export type AnnouncementAudienceKind = 'all' | 'role' | 'new-users';
+
+export interface AnnouncementAudience {
+  kind: AnnouncementAudienceKind;
+  /** Для kind='role' — ключ роли. 'new-users' = аккаунты младше 7 дней. */
+  role?: string;
+}
+
+export interface AnnouncementDTO {
+  id: string;
+  kind: AnnouncementKind;
+  title: string;
+  body: string;
+  ctaLabel: string | null;
+  ctaUrl: string | null;
+  style: AnnouncementStyle;
+  audience: AnnouncementAudience;
+  active: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+  createdAt: string;
+}
+
+export interface AnnouncementListResponse {
+  announcements: AnnouncementDTO[];
+}
+
+export interface UpsertAnnouncementRequest {
+  kind: AnnouncementKind;
+  title: string;
+  body: string;
+  ctaLabel?: string | null;
+  ctaUrl?: string | null;
+  style?: AnnouncementStyle;
+  audience?: AnnouncementAudience;
+  active?: boolean;
+  startsAt?: string | null;
+  endsAt?: string | null;
+}
+
+// ── Публичный runtime-конфиг (GET /api/runtime) ──────────────────────────────
+
+export interface RuntimeAnnouncement {
+  id: string;
+  kind: AnnouncementKind;
+  title: string;
+  body: string;
+  ctaLabel: string | null;
+  ctaUrl: string | null;
+  style: AnnouncementStyle;
+}
+
+/**
+ * Публичный снапшот конфигурации для клиента: режим обслуживания, тумблеры (для
+ * скрытия/блокировки UI), включённые флаги и активные объявления для зрителя.
+ */
+export interface RuntimeConfig {
+  maintenance: PlatformMaintenance;
+  toggles: PlatformToggles;
+  flags: string[];
+  announcements: RuntimeAnnouncement[];
+}
+
 // ── Жалобы (Reports) ─────────────────────────────────────────────────────────
 
 export type ReportTargetType = 'message' | 'user' | 'room' | 'image' | 'video' | 'dm';
