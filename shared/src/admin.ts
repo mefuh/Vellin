@@ -217,6 +217,85 @@ export interface AuditLogListResponse {
   nextCursor: string | null;
 }
 
+// ── Аналитика ────────────────────────────────────────────────────────────────
+
+export type AnalyticsRange = '7d' | '30d' | '90d';
+
+/** Точка временного ряда (date = YYYY-MM-DD). */
+export interface AnalyticsPoint {
+  date: string;
+  value: number;
+}
+
+export interface AnalyticsSeries {
+  points: AnalyticsPoint[];
+  total: number;
+}
+
+/** Сводка для витринного обзора. */
+export interface AnalyticsOverview {
+  users: { total: number; online: number; blocked: number; guestsOnline: number; newToday: number; new7d: number };
+  rooms: { total: number; active: number; private: number };
+  social: { messages: number; dmSent: number; friendships: number };
+  sharedWatch: { totalHours: number; sessions: number };
+  registrations7d: AnalyticsSeries;
+  generatedAt: string;
+}
+
+export interface UsersAnalytics {
+  registrations: AnalyticsSeries;
+  dau: AnalyticsSeries;
+  totals: { total: number; blocked: number; online: number; guestsOnline: number; deleted: number };
+  /** Активность (входы) по часам суток, 0..23. */
+  byHour: { hour: number; value: number }[];
+}
+
+export interface AnalyticsTopRoom {
+  id: string;
+  slug: string;
+  name: string;
+  messages: number;
+  members: number;
+  isPrivate: boolean;
+}
+
+export interface RoomsAnalytics {
+  created: AnalyticsSeries;
+  totals: { total: number; active: number; private: number; avgLiveParticipants: number };
+  topRooms: AnalyticsTopRoom[];
+}
+
+export interface AnalyticsPair {
+  userAId: string;
+  userAName: string;
+  userBId: string;
+  userBName: string;
+  totalSeconds: number;
+  sessionsCount: number;
+  longestSessionSeconds: number;
+  lastWatchedAt: string | null;
+}
+
+export interface SharedWatchAnalytics {
+  totals: { totalHours: number; sessions: number; avgSessionMinutes: number; pairs: number };
+  topPairs: AnalyticsPair[];
+  longestSessions: AnalyticsPair[];
+}
+
+export interface SocialAnalytics {
+  messages: AnalyticsSeries;
+  friendships: AnalyticsSeries;
+  totals: {
+    messages: number;
+    photos: number;
+    voice: number;
+    video: number;
+    invites: number;
+    friendships: number;
+    blocks: number;
+  };
+}
+
 // ── Модерация пользователей / Профиль-360 ────────────────────────────────────
 
 /** Расширенный профиль пользователя для админ-карточки. */

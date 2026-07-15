@@ -15,6 +15,8 @@ import { adminRoutes } from './admin/routes.js';
 import { adminRbacRoutes } from './admin/rbac/routes.js';
 import { adminAuditRoutes } from './admin/audit/routes.js';
 import { adminModerationRoutes } from './admin/moderation/routes.js';
+import { adminAnalyticsRoutes } from './admin/analytics/routes.js';
+import { startRollupJob } from './admin/analytics/rollup.js';
 import { seedRolesAndBootstrapAdmin } from './admin/rbac/roles.js';
 import { friendRoutes } from './friends/routes.js';
 import { dmRoutes } from './dm/routes.js';
@@ -126,6 +128,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(adminRbacRoutes);
       await api.register(adminAuditRoutes);
       await api.register(adminModerationRoutes);
+      await api.register(adminAnalyticsRoutes);
       await api.register(friendRoutes);
       await api.register(dmRoutes);
       await api.register(geoRoutes);
@@ -161,6 +164,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   void seedRolesAndBootstrapAdmin().catch((err) =>
     logger.error({ err }, 'rbac: seed/bootstrap failed'),
   );
+
+  // Аналитика: периодический суточный снапшот метрик (DAU/online/активность),
+  // которые нельзя восстановить из createdAt задним числом.
+  startRollupJob();
 
   // Засеять дефолтные шаблоны push (идемпотентно) и запустить фоновый воркер
   // очереди отправки (no-op, если push выключен — нет VAPID-ключей).

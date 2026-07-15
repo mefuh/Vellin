@@ -15,6 +15,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: '/admin/dashboard', label: 'Обзор', icon: 'grid', perm: 'analytics.view' },
+  { to: '/admin/analytics', label: 'Аналитика', icon: 'waveform', perm: 'analytics.view' },
   { to: '/admin/users', label: 'Пользователи', icon: 'users', perm: 'users.view' },
   { to: '/admin/rooms', label: 'Комнаты', icon: 'film', perm: 'rooms.view' },
   { to: '/admin/push', label: 'Push', icon: 'bell', perm: 'push.view' },

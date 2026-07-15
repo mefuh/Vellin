@@ -140,6 +140,53 @@ export function AdminSurface({ children, style }: { children: ReactNode; style?:
   );
 }
 
+/**
+ * Метрика: крупная цифра дисплейным шрифтом + моно-микролейбл. По желанию —
+ * подсказка (дельта/период) и иконка-акцент. Базовый кирпич витринных обзоров.
+ */
+export function StatTile({
+  label,
+  value,
+  hint,
+  accent,
+}: {
+  label: string;
+  value: string | number;
+  hint?: string;
+  accent?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        padding: '16px 18px',
+        background: 'var(--bg-1)',
+        borderRadius: 'var(--r-xl)',
+        boxShadow: 'inset 0 0 0 1px var(--line-1)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+      }}
+    >
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
+        {label}
+      </div>
+      <div
+        style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: 'clamp(28px, 4vw, 40px)',
+          fontWeight: 700,
+          letterSpacing: '-0.03em',
+          lineHeight: 1,
+          color: accent ? 'var(--accent-hi)' : 'var(--text-0)',
+        }}
+      >
+        {value}
+      </div>
+      {hint && <div style={{ fontSize: 12, color: 'var(--text-2)' }}>{hint}</div>}
+    </div>
+  );
+}
+
 /** Пустое состояние в духе дизайн-кода — приглушённо, «будто так и задумано». */
 export function AdminEmpty({ children }: { children: ReactNode }) {
   return (
