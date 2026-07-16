@@ -8,64 +8,47 @@ import type {
   PushNotificationType,
 } from '@vellin/shared';
 import { Link } from 'react-router-dom';
-import { Button, Icon } from '../../shared';
+import { Button, Chip, Icon } from '../../shared';
 import { adminPushApi } from '../../api/adminPush';
+import { AdminPage, AdminSurface, AdminEmpty, StatTile } from './components/AdminPage';
 
 type Tab = 'dashboard' | 'templates' | 'broadcasts';
-
-const card: React.CSSProperties = {
-  background: 'var(--bg-1)',
-  border: '1px solid var(--line-1)',
-  borderRadius: 'var(--r-md)',
-  padding: 14,
-};
+const TAB_LABEL: Record<Tab, string> = { dashboard: 'Дашборд', templates: 'Шаблоны', broadcasts: 'Рассылки' };
 
 export function AdminPush(): React.ReactElement {
   const [tab, setTab] = useState<Tab>('dashboard');
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <h1 style={{ fontSize: 24, margin: 0, fontWeight: 600 }}>Push-уведомления</h1>
-          <Link to="/admin/push/analytics" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--accent-hi)', textDecoration: 'none', fontWeight: 500 }}>
-            <Icon name="waveform" size={15} /> Аналитика
-          </Link>
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {(['dashboard', 'templates', 'broadcasts'] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              style={{
-                padding: '7px 13px',
-                borderRadius: 'var(--r-md)',
-                border: '1px solid var(--line-2)',
-                background: tab === t ? 'var(--bg-3)' : 'var(--bg-1)',
-                color: tab === t ? 'var(--text-0)' : 'var(--text-1)',
-                fontSize: 13,
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-              }}
-            >
-              {t === 'dashboard' ? 'Дашборд' : t === 'templates' ? 'Шаблоны' : 'Рассылки'}
-            </button>
-          ))}
-        </div>
+    <AdminPage
+      eyebrow="Push"
+      title="Push-уведомления"
+      subtitle="Дашборд доставок, редактор шаблонов и массовые рассылки."
+      actions={
+        <Link to="/admin/push/analytics" style={{ textDecoration: 'none' }}>
+          <Button variant="secondary" size="sm" icon="waveform">Аналитика</Button>
+        </Link>
+      }
+    >
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        {(['dashboard', 'templates', 'broadcasts'] as Tab[]).map((t) => {
+          const active = t === tab;
+          return (
+            <button key={t} onClick={() => setTab(t)} style={{
+              padding: '7px 16px', borderRadius: 999, border: 'none', cursor: 'pointer', fontSize: 13.5, fontWeight: 500,
+              background: active ? 'var(--bg-3)' : 'var(--bg-1)', color: active ? 'var(--text-0)' : 'var(--text-2)',
+              boxShadow: active ? 'inset 0 0 0 1px var(--line-2)' : 'inset 0 0 0 1px var(--line-1)',
+            }}>{TAB_LABEL[t]}</button>
+          );
+        })}
       </div>
       {tab === 'dashboard' && <DashboardTab />}
       {tab === 'templates' && <TemplatesTab />}
       {tab === 'broadcasts' && <BroadcastsTab />}
-    </div>
+    </AdminPage>
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: React.ReactNode; accent?: boolean }) {
-  return (
-    <div style={card}>
-      <div style={{ fontSize: 22, fontWeight: 700, color: accent ? 'var(--accent-hi)' : 'var(--text-0)' }}>{value}</div>
-      <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 2 }}>{label}</div>
-    </div>
-  );
+function SectionH({ children }: { children: React.ReactNode }) {
+  return <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 700, margin: '0 0 10px', letterSpacing: '-0.01em' }}>{children}</h3>;
 }
 
 function DashboardTab(): React.ReactElement {
@@ -74,50 +57,56 @@ function DashboardTab(): React.ReactElement {
   useEffect(() => {
     adminPushApi.dashboard().then(setData).catch(() => setErr('Не удалось загрузить'));
   }, []);
-  if (err) return <div style={{ color: 'var(--text-3)' }}>{err}</div>;
-  if (!data) return <div style={{ color: 'var(--text-3)' }}>Загрузка…</div>;
+  if (err) return <AdminSurface><AdminEmpty>{err}</AdminEmpty></AdminSurface>;
+  if (!data) return <AdminSurface><AdminEmpty>Загрузка…</AdminEmpty></AdminSurface>;
   const d = data.dashboard;
   const s = data.stats;
-  const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 };
+  const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 };
+  const max = s.byBrowser.reduce((m, b) => Math.max(m, b.sent), 0) || 1;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={grid}>
-        <Stat label="Всего устройств" value={d.totalDevices} />
-        <Stat label="Активных устройств" value={d.activeDevices} />
-        <Stat label="С включёнными Push" value={d.usersWithPush} accent />
-        <Stat label="С отключёнными Push" value={d.usersPushDisabled} />
-        <Stat label="Opt-in" value={`${d.optInPercent}%`} accent />
-        <Stat label="В очереди" value={d.queuePending} />
+        <StatTile label="Всего устройств" value={d.totalDevices} />
+        <StatTile label="Активных устройств" value={d.activeDevices} />
+        <StatTile label="С включёнными Push" value={d.usersWithPush} accent />
+        <StatTile label="С отключёнными Push" value={d.usersPushDisabled} />
+        <StatTile label="Opt-in" value={`${d.optInPercent}%`} accent />
+        <StatTile label="В очереди" value={d.queuePending} />
       </div>
       <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', margin: '4px 2px 8px' }}>Отправлено</div>
+        <SectionH>Отправлено</SectionH>
         <div style={grid}>
-          <Stat label="За день" value={d.sentDay} />
-          <Stat label="За неделю" value={d.sentWeek} />
-          <Stat label="За месяц" value={d.sentMonth} />
+          <StatTile label="За день" value={d.sentDay} />
+          <StatTile label="За неделю" value={d.sentWeek} />
+          <StatTile label="За месяц" value={d.sentMonth} />
         </div>
       </div>
       <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', margin: '4px 2px 8px' }}>
-          Доставки за 30 дней
-        </div>
+        <SectionH>Доставки за 30 дней</SectionH>
         <div style={grid}>
-          <Stat label="Доставлено" value={s.sent} accent />
-          <Stat label="Ошибки" value={s.failed} />
-          <Stat label="Устаревшие" value={s.expired} />
-          <Stat label="Отклонено" value={s.rejected} />
-          <Stat label="Кликов" value={s.clicked} />
-          <Stat label="CTR" value={`${s.ctr}%`} accent />
+          <StatTile label="Доставлено" value={s.sent} accent />
+          <StatTile label="Ошибки" value={s.failed} />
+          <StatTile label="Устаревшие" value={s.expired} />
+          <StatTile label="Отклонено" value={s.rejected} />
+          <StatTile label="Кликов" value={s.clicked} />
+          <StatTile label="CTR" value={`${s.ctr}%`} accent />
         </div>
         {s.byBrowser.length > 0 && (
-          <div style={{ ...card, marginTop: 10 }}>
-            <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginBottom: 8 }}>По браузерам</div>
-            {s.byBrowser.map((b) => (
-              <div key={b.browser} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '3px 0' }}>
-                <span>{b.browser}</span>
-                <span style={{ color: 'var(--text-2)' }}>{b.sent}</span>
-              </div>
-            ))}
+          <div style={{ marginTop: 14 }}>
+            <SectionH>По браузерам</SectionH>
+            <AdminSurface style={{ padding: '10px 16px' }}>
+              {s.byBrowser.map((b) => (
+                <div key={b.browser} style={{ padding: '7px 0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                    <span style={{ color: 'var(--text-1)' }}>{b.browser}</span>
+                    <span style={{ color: 'var(--text-2)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.sent}</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 999, background: 'var(--bg-3)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${(b.sent / max) * 100}%`, background: 'linear-gradient(90deg, var(--accent-lo), var(--accent-hi))' }} />
+                  </div>
+                </div>
+              ))}
+            </AdminSurface>
           </div>
         )}
       </div>
@@ -129,16 +118,16 @@ const field: React.CSSProperties = {
   width: '100%',
   background: 'var(--bg-2)',
   border: '1px solid var(--line-2)',
-  borderRadius: 'var(--r-sm)',
+  borderRadius: 'var(--r-md)',
   color: 'var(--text-0)',
-  fontSize: 13,
+  fontSize: 13.5,
   fontFamily: 'inherit',
-  padding: '8px 10px',
+  padding: '9px 11px',
   boxSizing: 'border-box',
 };
 
 function Label({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 12, color: 'var(--text-2)', margin: '8px 0 4px' }}>{children}</div>;
+  return <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-3)', margin: '10px 0 5px' }}>{children}</div>;
 }
 
 function TemplatesTab(): React.ReactElement {
@@ -169,12 +158,12 @@ function TemplatesTab(): React.ReactElement {
     const e = editing;
     const set = (p: Partial<NotificationTemplateDTO>): void => setEditing({ ...e, ...p });
     return (
-      <div style={{ ...card, maxWidth: 560 }}>
+      <AdminSurface style={{ padding: 20, maxWidth: 580 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-          <div style={{ fontWeight: 600 }}>Шаблон: {e.type}</div>
-          <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>Назад</Button>
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18 }}>Шаблон: {e.type}</div>
+          <Button size="sm" variant="ghost" icon="arrow" onClick={() => setEditing(null)}>Назад</Button>
         </div>
-        <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginBottom: 6 }}>
+        <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginBottom: 6, fontFamily: 'var(--font-mono)' }}>
           Переменные: {'{{username}} {{message}} {{roomName}} {{movie}} {{title}}'}
         </div>
         <Label>Заголовок</Label>
@@ -209,7 +198,7 @@ function TemplatesTab(): React.ReactElement {
         </div>
         <Label>Tag (группировка ОС, может быть пустым)</Label>
         <input style={field} value={e.tag ?? ''} onChange={(ev) => set({ tag: ev.target.value || null })} />
-        <div style={{ display: 'flex', gap: 16, margin: '12px 0' }}>
+        <div style={{ display: 'flex', gap: 16, margin: '14px 0' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
             <input type="checkbox" checked={e.requireInteraction} onChange={(ev) => set({ requireInteraction: ev.target.checked })} />
             Require Interaction
@@ -225,29 +214,30 @@ function TemplatesTab(): React.ReactElement {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <Button size="sm" variant="primary" onClick={() => void save()}>Сохранить</Button>
-          {saved === e.type && <span style={{ fontSize: 12.5, color: 'var(--accent-hi)' }}>Сохранено</span>}
-          {saved === 'error' && <span style={{ fontSize: 12.5, color: '#e5484d' }}>Ошибка</span>}
+          {saved === e.type && <Chip tone="success">Сохранено</Chip>}
+          {saved === 'error' && <span style={{ fontSize: 12.5, color: 'var(--accent-hi)' }}>Ошибка</span>}
         </div>
-      </div>
+      </AdminSurface>
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {templates.map((t) => (
-        <div key={t.type} style={{ ...card, display: 'flex', alignItems: 'center', gap: 12 }}>
+    <AdminSurface>
+      {templates.length === 0 ? <AdminEmpty>Шаблонов нет</AdminEmpty> : templates.map((t) => (
+        <div key={t.type} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--line-1)' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 600 }}>
-              {t.type} {!t.enabled && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>(выкл)</span>}
+            <div style={{ fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontFamily: 'var(--font-mono)' }}>{t.type}</span>
+              {!t.enabled && <Chip tone="neutral">выкл</Chip>}
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {t.title} — {t.body}
             </div>
           </div>
-          <Button size="sm" variant="secondary" onClick={() => setEditing(t)}>Изменить</Button>
+          <Button size="sm" variant="secondary" icon="edit" onClick={() => setEditing(t)}>Изменить</Button>
         </div>
       ))}
-    </div>
+    </AdminSurface>
   );
 }
 
@@ -295,9 +285,9 @@ function BroadcastsTab(): React.ReactElement {
   const canSend = title.trim() && body.trim() && !sending;
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 18 }}>
-      <div style={{ ...card, maxWidth: 560 }}>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>Новая рассылка</div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 20 }}>
+      <AdminSurface style={{ padding: 20, maxWidth: 580 }}>
+        <SectionH>Новая рассылка</SectionH>
         <div style={{ display: 'flex', gap: 10 }}>
           <div style={{ flex: 1 }}>
             <Label>Тип</Label>
@@ -339,42 +329,39 @@ function BroadcastsTab(): React.ReactElement {
         <input style={field} value={url} onChange={(e) => setUrl(e.target.value)} />
 
         {/* Предпросмотр (обязателен по ТЗ). */}
-        <div style={{ marginTop: 12 }}>
-          <Label>Предпросмотр</Label>
-          <div style={{ display: 'flex', gap: 10, padding: 12, borderRadius: 'var(--r-md)', background: 'var(--bg-2)', border: '1px solid var(--line-2)' }}>
-            <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--accent-soft)', flexShrink: 0 }} />
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 600 }}>{title || 'Заголовок'}</div>
-              <div style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{body || 'Текст уведомления'}</div>
-            </div>
+        <Label>Предпросмотр</Label>
+        <div style={{ display: 'flex', gap: 10, padding: 12, borderRadius: 'var(--r-md)', background: 'var(--bg-2)', boxShadow: 'inset 0 0 0 1px var(--line-1)' }}>
+          <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--accent-soft)', flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600 }}>{title || 'Заголовок'}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{body || 'Текст уведомления'}</div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
           <Button size="sm" variant="primary" disabled={!canSend} onClick={() => void send()}>
             {sending ? 'Отправка…' : 'Отправить'}
           </Button>
           {result && <span style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{result}</span>}
         </div>
-      </div>
+      </AdminSurface>
 
       <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', margin: '0 2px 8px' }}>История рассылок</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {history.length === 0 && <div style={{ color: 'var(--text-3)', fontSize: 13 }}>Пока нет рассылок</div>}
-          {history.map((b) => (
-            <div key={b.id} style={card}>
+        <SectionH>История рассылок</SectionH>
+        <AdminSurface>
+          {history.length === 0 ? <AdminEmpty>Пока нет рассылок</AdminEmpty> : history.map((b) => (
+            <div key={b.id} style={{ padding: '13px 16px', borderBottom: '1px solid var(--line-1)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{b.title}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{new Date(b.createdAt).toLocaleString('ru')}</div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{b.title}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>{new Date(b.createdAt).toLocaleString('ru')}</div>
               </div>
               <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 2 }}>{b.body}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 6 }}>
-                {b.type} · {audienceLabel(b.audience)} · цель: {b.totalTargets} · доставлено воркеру: {b.sent} · без подписки/выкл: {b.failed}
+              <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 6, fontFamily: 'var(--font-mono)' }}>
+                {b.type} · {audienceLabel(b.audience)} · цель: {b.totalTargets} · воркеру: {b.sent} · без подписки/выкл: {b.failed}
               </div>
             </div>
           ))}
-        </div>
+        </AdminSurface>
       </div>
     </div>
   );

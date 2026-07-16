@@ -6,7 +6,7 @@ import { ApiHttpError } from '../../api/client';
 import { Button, Chip, Icon } from '../../shared';
 import { AdminRoomEdit } from './AdminRoomEdit';
 import { ConfirmShell, DialogActions } from './AdminUsers';
-import { useIsNarrow } from '../../hooks/useMediaQuery';
+import { AdminPage, AdminSurface, AdminEmpty } from './components/AdminPage';
 
 const PAGE_LIMIT = 20;
 
@@ -14,13 +14,13 @@ export const ADMIN_TICKET_STORAGE_PREFIX = 'vellin.admin.ticket.';
 
 export function AdminRooms() {
   const navigate = useNavigate();
-  const isNarrow = useIsNarrow();
   const [rooms, setRooms] = useState<AdminRoomSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<AdminRoomSummary | null>(null);
   const [closeTarget, setCloseTarget] = useState<AdminRoomSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminRoomSummary | null>(null);
@@ -73,17 +73,12 @@ export function AdminRooms() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
-        <div>
-          <h1 style={{ fontSize: isNarrow ? 22 : 28, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>
-            Комнаты
-          </h1>
-          <p style={{ marginTop: 6, color: 'var(--text-1)', fontSize: 13 }}>
-            Все комнаты сервиса, включая приватные. Кнопка «Войти» обходит пароль и capacity.
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 280px', maxWidth: isNarrow ? '100%' : 360, width: isNarrow ? '100%' : undefined }}>
+    <AdminPage
+      eyebrow="Модерация"
+      title="Комнаты"
+      subtitle="Все комнаты сервиса, включая приватные. «Войти» обходит пароль и capacity, «Подсмотреть» — невидимый shadow-режим."
+      actions={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 260px', maxWidth: 340 }}>
           <Icon name="search" size={16} style={{ color: 'var(--text-2)' }} />
           <input
             value={query}
@@ -93,7 +88,7 @@ export function AdminRooms() {
               flex: 1,
               height: 36,
               padding: '0 12px',
-              borderRadius: 'var(--r-md)',
+              borderRadius: 999,
               border: '1px solid var(--line-2)',
               background: 'var(--bg-2)',
               color: 'var(--text-0)',
@@ -101,101 +96,67 @@ export function AdminRooms() {
             }}
           />
         </div>
-      </header>
-
+      }
+    >
       {error && (
-        <div style={{ background: 'rgba(209,39,27,0.12)', color: 'var(--accent-hi)', padding: '10px 14px', borderRadius: 'var(--r-md)', fontSize: 13 }}>
+        <div style={{ background: 'var(--accent-soft)', color: 'var(--accent-hi)', padding: '10px 14px', borderRadius: 'var(--r-md)', fontSize: 13 }}>
           {error}
         </div>
       )}
+      {notice && (
+        <div style={{ background: 'rgba(74,222,128,0.1)', color: 'var(--ok)', padding: '10px 14px', borderRadius: 'var(--r-md)', fontSize: 13 }}>
+          {notice}
+        </div>
+      )}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))',
-          gap: 14,
-        }}
-      >
-        {rooms.length === 0 && !loading && (
-          <div style={{ gridColumn: '1 / -1', padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
-            Ничего не найдено
-          </div>
-        )}
-        {rooms.map((room) => (
-          <article
-            key={room.id}
-            style={{
-              background: 'var(--bg-1)',
-              border: '1px solid var(--line-2)',
-              borderRadius: 'var(--r-lg)',
-              padding: 16,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              minWidth: 0,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start' }}>
-              <div style={{ minWidth: 0 }}>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {room.name}
-                </h3>
-                <div style={{ color: 'var(--text-2)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                  <Icon name="hash" size={11} /> {room.slug}
+      {rooms.length === 0 && !loading ? (
+        <AdminSurface><AdminEmpty>Ничего не найдено</AdminEmpty></AdminSurface>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 330px), 1fr))', gap: 14 }}>
+          {rooms.map((room) => (
+            <AdminSurface key={room.id} style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start' }}>
+                <div style={{ minWidth: 0 }}>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {room.name}
+                  </h3>
+                  <div style={{ color: 'var(--text-3)', fontSize: 11.5, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: 5, marginTop: 4 }}>
+                    <Icon name="hash" size={11} /> {room.slug}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  {room.isPrivate ? (
+                    <Chip tone="neutral" icon="lock">приватная</Chip>
+                  ) : (
+                    <Chip tone="success" icon="globe">публичная</Chip>
+                  )}
+                  {room.isActive && <Chip tone="live">LIVE · {room.liveParticipants}</Chip>}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                {room.isPrivate ? (
-                  <Chip tone="neutral" icon="lock">приватная</Chip>
-                ) : (
-                  <Chip tone="success" icon="globe">публичная</Chip>
-                )}
-                {room.isActive && (
-                  <Chip tone="live">LIVE · {room.liveParticipants}</Chip>
-                )}
+
+              <div style={{ color: 'var(--text-2)', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                <Icon name="user" size={12} /> {room.ownerUsername}
+                <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--text-3)', flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={room.ownerEmail ?? ''}>{room.ownerEmail}</span>
               </div>
-            </div>
 
-            <div style={{ color: 'var(--text-2)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Icon name="user" size={12} /> {room.ownerUsername}
-              <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--text-3)' }} />
-              <span title={room.ownerEmail ?? ''}>{room.ownerEmail}</span>
-            </div>
+              <div style={{ height: 1, background: 'var(--line-1)', margin: '2px 0' }} />
 
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
-              <Button variant="primary" size="sm" icon="arrow" onClick={() => void enterAs(room, 'normal')}>
-                Войти
-              </Button>
-              <Button variant="secondary" size="sm" icon="eye" onClick={() => void enterAs(room, 'shadow')}>
-                Подсмотреть
-              </Button>
-              <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditTarget(room)}>
-                Изменить
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                icon="close"
-                disabled={!room.isActive}
-                onClick={() => setCloseTarget(room)}
-              >
-                Закрыть
-              </Button>
-              <Button variant="danger" size="sm" icon="trash" onClick={() => setDeleteTarget(room)}>
-                Удалить
-              </Button>
-            </div>
-          </article>
-        ))}
-      </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <Button variant="primary" size="sm" icon="arrow" onClick={() => void enterAs(room, 'normal')}>Войти</Button>
+                <Button variant="secondary" size="sm" icon="eye" onClick={() => void enterAs(room, 'shadow')}>Подсмотреть</Button>
+                <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditTarget(room)}>Изменить</Button>
+                <Button variant="ghost" size="sm" icon="close" disabled={!room.isActive} onClick={() => setCloseTarget(room)}>Закрыть</Button>
+                <Button variant="danger" size="sm" icon="trash" onClick={() => setDeleteTarget(room)}>Удалить</Button>
+              </div>
+            </AdminSurface>
+          ))}
+        </div>
+      )}
 
       {nextCursor && (
         <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <Button
-            variant="ghost"
-            disabled={loading}
-            onClick={() => void load(nextCursor)}
-          >
+          <Button variant="ghost" disabled={loading} onClick={() => void load(nextCursor)}>
             {loading ? 'Загрузка…' : 'Показать ещё'}
           </Button>
         </div>
@@ -226,8 +187,8 @@ export function AdminRooms() {
                   const r = await adminApi.closeRoom(closeTarget.id);
                   applyUpdated({ ...closeTarget, isActive: false, liveParticipants: 0 });
                   setCloseTarget(null);
-                  setError(`Закрыто. Отключено ${r.kicked} участников.`);
-                  window.setTimeout(() => setError(null), 4000);
+                  setNotice(`Закрыто. Отключено ${r.kicked} участников.`);
+                  window.setTimeout(() => setNotice(null), 4000);
                 } catch (e) {
                   setError(e instanceof ApiHttpError ? e.payload.message : 'Ошибка');
                 }
@@ -263,6 +224,6 @@ export function AdminRooms() {
           </DialogActions>
         </ConfirmShell>
       )}
-    </div>
+    </AdminPage>
   );
 }
