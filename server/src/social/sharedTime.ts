@@ -52,6 +52,45 @@ export async function getSharedWatch(x: string, y: string): Promise<SharedWatchA
   };
 }
 
+/**
+ * Ручная корректировка совместного времени администратором: начисление
+ * (delta>0) или списание (delta<0). Итог не опускается ниже нуля. Рассылает
+ * обоим участникам обновлённые агрегаты, чтобы открытые карточки перерисовались.
+ */
+export async function adjustSharedWatch(x: string, y: string, deltaSeconds: number): Promise<SharedWatchAggregates> {
+  const { userAId, userBId } = pairOf(x, y);
+  const agg = await prisma.$transaction(async (tx) => {
+    const existing = await tx.sharedWatchStat.findUnique({
+      where: { userAId_userBId: { userAId, userBId } },
+    });
+    const next = Math.max(0, (existing?.totalSeconds ?? 0) + Math.round(deltaSeconds));
+    const row = await tx.sharedWatchStat.upsert({
+      where: { userAId_userBId: { userAId, userBId } },
+      create: { userAId, userBId, totalSeconds: next, sessionsCount: 0, longestSessionSeconds: 0 },
+      update: { totalSeconds: next },
+    });
+    return {
+      totalSeconds: row.totalSeconds,
+      sessionsCount: row.sessionsCount,
+      longestSessionSeconds: row.longestSessionSeconds,
+      firstWatchedAt: iso(row.firstWatchedAt),
+      lastWatchedAt: iso(row.lastWatchedAt),
+    } satisfies SharedWatchAggregates;
+  });
+  pushBoth(x, y, agg, false, null);
+  return agg;
+}
+
+/**
+ * Аннулирование совместного времени пары (полный сброс агрегатов). Строку
+ * удаляем и рассылаем обоим нулевые агрегаты.
+ */
+export async function resetSharedWatch(x: string, y: string): Promise<void> {
+  const { userAId, userBId } = pairOf(x, y);
+  await prisma.sharedWatchStat.deleteMany({ where: { userAId, userBId } });
+  pushBoth(x, y, ZERO, false, null);
+}
+
 /** Разослать живое обновление обоим участникам пары (peerId — «другой»). */
 function pushBoth(x: string, y: string, agg: SharedWatchAggregates, together: boolean, togetherSince: string | null): void {
   userHub.pushTo(x, { t: 'shared_time', peerId: y, ...agg, together, togetherSince });

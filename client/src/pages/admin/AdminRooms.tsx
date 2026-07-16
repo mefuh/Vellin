@@ -3,10 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import type { AdminAccessMode, AdminRoomSummary } from '@vellin/shared';
 import { adminApi } from '../../api/admin';
 import { ApiHttpError } from '../../api/client';
-import { Button, Chip, Icon } from '../../shared';
+import { Button, Chip, Icon, MountainPoster } from '../../shared';
 import { AdminRoomEdit } from './AdminRoomEdit';
+import { AdminRoomDetail } from './AdminRoomDetail';
 import { ConfirmShell, DialogActions } from './AdminUsers';
 import { AdminPage, AdminSurface, AdminEmpty } from './components/AdminPage';
+
+function hashSeed(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
 
 const PAGE_LIMIT = 20;
 
@@ -22,6 +29,7 @@ export function AdminRooms() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<AdminRoomSummary | null>(null);
+  const [detailTarget, setDetailTarget] = useState<AdminRoomSummary | null>(null);
   const [closeTarget, setCloseTarget] = useState<AdminRoomSummary | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminRoomSummary | null>(null);
 
@@ -114,40 +122,56 @@ export function AdminRooms() {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 330px), 1fr))', gap: 14 }}>
           {rooms.map((room) => (
-            <AdminSurface key={room.id} style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start' }}>
-                <div style={{ minWidth: 0 }}>
-                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <AdminSurface key={room.id} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {/* Превью — кликабельно, открывает детали */}
+              <button
+                onClick={() => setDetailTarget(room)}
+                title="Подробнее о комнате"
+                style={{ position: 'relative', height: 132, border: 'none', padding: 0, cursor: 'pointer', background: 'var(--bg-3)', display: 'block', width: '100%' }}
+              >
+                {room.videoPoster ? (
+                  <img src={room.videoPoster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <MountainPoster seed={hashSeed(room.slug)} label={room.videoTitle ?? undefined} />
+                )}
+                <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(10,8,7,0.85))' }} />
+                <div style={{ position: 'absolute', top: 8, left: 8, right: 8, display: 'flex', gap: 4, justifyContent: 'space-between' }}>
+                  {room.isPrivate ? <Chip tone="neutral" icon="lock">приватная</Chip> : <Chip tone="success" icon="globe">публичная</Chip>}
+                  {room.isActive ? <Chip tone="live">LIVE · {room.liveParticipants}</Chip> : <Chip tone="neutral" icon="users">{room.liveParticipants}</Chip>}
+                </div>
+                {room.videoTitle && (
+                  <div style={{ position: 'absolute', left: 10, right: 10, bottom: 8, fontSize: 12, color: 'rgba(255,255,255,0.85)', display: 'flex', alignItems: 'center', gap: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <Icon name="play" size={12} /> {room.videoTitle}
+                  </div>
+                )}
+              </button>
+
+              <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {room.name}
                   </h3>
-                  <div style={{ color: 'var(--text-3)', fontSize: 11.5, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: 5, marginTop: 4 }}>
+                  <div style={{ color: 'var(--text-3)', fontSize: 11.5, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
                     <Icon name="hash" size={11} /> {room.slug}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  {room.isPrivate ? (
-                    <Chip tone="neutral" icon="lock">приватная</Chip>
-                  ) : (
-                    <Chip tone="success" icon="globe">публичная</Chip>
-                  )}
-                  {room.isActive && <Chip tone="live">LIVE · {room.liveParticipants}</Chip>}
+
+                <div style={{ color: 'var(--text-2)', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flexWrap: 'wrap' }}>
+                  <Icon name="user" size={12} /> {room.ownerUsername}
+                  <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--text-3)', flexShrink: 0 }} />
+                  <span title="Дата создания">создана {new Date(room.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                 </div>
-              </div>
 
-              <div style={{ color: 'var(--text-2)', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-                <Icon name="user" size={12} /> {room.ownerUsername}
-                <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--text-3)', flexShrink: 0 }} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={room.ownerEmail ?? ''}>{room.ownerEmail}</span>
-              </div>
+                <div style={{ height: 1, background: 'var(--line-1)', margin: '2px 0' }} />
 
-              <div style={{ height: 1, background: 'var(--line-1)', margin: '2px 0' }} />
-
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                <Button variant="primary" size="sm" icon="arrow" onClick={() => void enterAs(room, 'normal')}>Войти</Button>
-                <Button variant="secondary" size="sm" icon="eye" onClick={() => void enterAs(room, 'shadow')}>Подсмотреть</Button>
-                <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditTarget(room)}>Изменить</Button>
-                <Button variant="ghost" size="sm" icon="close" disabled={!room.isActive} onClick={() => setCloseTarget(room)}>Закрыть</Button>
-                <Button variant="danger" size="sm" icon="trash" onClick={() => setDeleteTarget(room)}>Удалить</Button>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  <Button variant="primary" size="sm" icon="list" onClick={() => setDetailTarget(room)}>Подробнее</Button>
+                  <Button variant="secondary" size="sm" icon="arrow" onClick={() => void enterAs(room, 'normal')}>Войти</Button>
+                  <Button variant="ghost" size="sm" icon="eye" onClick={() => void enterAs(room, 'shadow')}>Подсмотреть</Button>
+                  <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditTarget(room)}>Изменить</Button>
+                  <Button variant="ghost" size="sm" icon="close" disabled={!room.isActive} onClick={() => setCloseTarget(room)}>Закрыть</Button>
+                  <Button variant="danger" size="sm" icon="trash" onClick={() => setDeleteTarget(room)}>Удалить</Button>
+                </div>
               </div>
             </AdminSurface>
           ))}
@@ -162,6 +186,13 @@ export function AdminRooms() {
         </div>
       )}
 
+      {detailTarget && (
+        <AdminRoomDetail
+          room={detailTarget}
+          onClose={() => setDetailTarget(null)}
+          onChanged={() => void load(null)}
+        />
+      )}
       {editTarget && (
         <AdminRoomEdit
           room={editTarget}

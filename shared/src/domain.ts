@@ -353,6 +353,9 @@ export interface AdminRoomSummary {
   /** Запущен ли рантайм в памяти. */
   isActive: boolean;
   videoUrl: string | null;
+  /** Постер/название играющего сейчас медиа — для превью карточки в админке. */
+  videoPoster: string | null;
+  videoTitle: string | null;
 }
 
 export interface InviteLink {

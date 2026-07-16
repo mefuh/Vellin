@@ -528,11 +528,31 @@ model Room {
   messages    Message[]
   inviteLinks InviteLink[]
   memberships Membership[]
+  events      RoomEvent[]
 
   createdAt DateTime @default(now())
 
   @@index([ownerId])
   @@index([isPrivate])
+}
+
+/// Журнал событий комнаты для админ-панели: входы/выходы участников, смена медиа,
+/// управление плеером, звонки (join/leave + сессии start/end с длительностью),
+/// изменение ролей/прав, кики. actorName — снапшот имени на момент события (чтобы
+/// запись читалась после удаления пользователя/гостя). dataJson — детали события.
+model RoomEvent {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  /// join | leave | media_change | play | pause | seek | ended | call_join |
+  /// call_leave | call_start | call_end | role_change | permissions_change | kick
+  type      String
+  actorId   String? // кто вызвал (null — система)
+  actorName String?
+  dataJson  String   @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([roomId, createdAt])
 }
 
 model Membership {

@@ -296,6 +296,40 @@ export interface SocialAnalytics {
   };
 }
 
+// ── Журнал и участники комнаты ───────────────────────────────────────────────
+
+export interface RoomEventDTO {
+  id: string;
+  type: string;
+  actorId: string | null;
+  actorName: string | null;
+  data: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface RoomEventListResponse {
+  events: RoomEventDTO[];
+  nextCursor: string | null;
+}
+
+/** Участник комнаты для админ-управления (объединяет персистентных членов и live). */
+export interface AdminRoomMemberDTO {
+  userId: string;
+  username: string;
+  avatarSeed: string;
+  avatarUrl: string | null;
+  kind: 'user' | 'guest';
+  role: 'owner' | 'admin' | 'member' | 'guest';
+  /** Сейчас подключён к комнате. */
+  isLive: boolean;
+  /** Есть персистентная запись членства (можно менять роль). */
+  isMember: boolean;
+}
+
+export interface AdminRoomMembersResponse {
+  members: AdminRoomMemberDTO[];
+}
+
 // ── Media-кэш (ResolvedMedia) ────────────────────────────────────────────────
 
 export interface MediaCacheEntry {
@@ -789,6 +823,47 @@ export interface AdminUserSessionsResponse {
   sessions: AdminUserSession[];
 }
 
+// ── Редактирование профиля пользователя администратором ──────────────────────
+
+/**
+ * Патч редактируемых полей профиля. Все поля опциональны — отправляется только
+ * то, что меняется. `null` очищает поле (город/пол/дата рождения), email —
+ * непустая строка. Пропущенные ключи не трогаются.
+ */
+export interface AdminUserProfilePatch {
+  email?: string;
+  city?: string | null;
+  gender?: 'male' | 'female' | 'other' | null;
+  /** YYYY-MM-DD или null для очистки. */
+  birthDate?: string | null;
+}
+
+export interface AdminUpdateUserProfileResponse {
+  user: AdminUserProfile;
+}
+
+/** Ответ на операции с избранным (актуальный порядок после изменения). */
+export interface AdminFavoritesResponse {
+  favorites: AdminFavoriteTitle[];
+}
+
+/** Новый порядок избранного — массив kpId в желаемой последовательности. */
+export interface AdminFavoritesReorderRequest {
+  order: number[];
+}
+
+/** Начисление/списание совместного времени: знак задаёт направление. */
+export interface AdminSharedTimeAdjustRequest {
+  deltaSeconds: number;
+}
+
+/** Актуальные агрегаты пары после изменения совместного времени. */
+export interface AdminSharedTimeResponse {
+  totalSeconds: number;
+  sessionsCount: number;
+  longestSessionSeconds: number;
+}
+
 /** Различимые действия в аудите (не исчерпывающе — строка расширяема). */
 export type AuditAction =
   | 'user.block'
@@ -797,6 +872,11 @@ export type AuditAction =
   | 'user.reset_avatar'
   | 'user.reset_bio'
   | 'user.reset_favorites'
+  | 'user.edit_profile'
+  | 'user.favorite_remove'
+  | 'user.favorites_reorder'
+  | 'user.shared_time_adjust'
+  | 'user.shared_time_reset'
   | 'user.push_disable'
   | 'user.session_revoke'
   | 'user.sessions_revoke_all'

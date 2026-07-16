@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { incWsEvent } from '../admin/system/metrics.js';
+import { logRoomEvent } from '../rooms/events.js';
 import {
   isC2S,
   ALL_PERMISSIONS,
@@ -365,6 +366,11 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       void runtime
         .appendSystemMessage(`${ctx.principal.username} joined the room`)
         .catch((e) => logger.error({ err: e }, 'append system message failed'));
+      logRoomEvent(runtime.roomId, 'join', {
+        actorId: ctx.principal.kind === 'user' ? ctx.principal.userId : null,
+        actorName: ctx.principal.username,
+        data: { kind: ctx.principal.kind, role },
+      });
     }
 
     socket.on('message', (raw) => {
@@ -434,6 +440,13 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         },
         'ws:close',
       );
+      if (!isShadowTicket) {
+        logRoomEvent(runtime.roomId, 'leave', {
+          actorId: ctx.principal.kind === 'user' ? ctx.principal.userId : null,
+          actorName: ctx.principal.username,
+          data: { kind: ctx.principal.kind },
+        });
+      }
       runtime.detachSession(ctx);
     });
 

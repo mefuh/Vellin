@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { AdminUserFullResponse } from '@vellin/shared';
+import type {
+  AdminFavoriteTitle,
+  AdminSharedWatchPeer,
+  AdminUserFullResponse,
+  AdminUserProfile as AdminUserProfileDTO,
+  AdminUserProfilePatch,
+} from '@vellin/shared';
 import { adminModerationApi } from '../../api/adminModeration';
 import { adminApi } from '../../api/admin';
 import { ApiHttpError } from '../../api/client';
 import { Avatar, Button, Chip, Icon } from '../../shared';
+import type { IconName } from '../../shared/Icon';
 import { AdminPage, AdminSurface, AdminEmpty } from './components/AdminPage';
 import { useAdminAccess } from './AdminAccessContext';
 import { ConfirmShell, DialogActions } from './AdminUsers';
@@ -30,6 +37,10 @@ export function AdminUserProfile() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<null | 'block' | 'delete' | 'reset-avatar' | 'reset-bio' | 'reset-favorites' | 'push-off' | 'revoke-all'>(null);
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [resetShareTarget, setResetShareTarget] = useState<AdminSharedWatchPeer | null>(null);
+  const [favs, setFavs] = useState<AdminFavoriteTitle[]>([]);
+  const [shared, setShared] = useState<AdminSharedWatchPeer[]>([]);
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -48,6 +59,15 @@ export function AdminUserProfile() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Локальные зеркала редактируемых коллекций — обновляются оптимистично, без
+  // полной перезагрузки профиля.
+  useEffect(() => {
+    if (data) {
+      setFavs(data.favorites);
+      setShared(data.sharedWatch);
+    }
+  }, [data]);
 
   useEffect(() => {
     if (!toast) return;
@@ -93,6 +113,61 @@ export function AdminUserProfile() {
     }
   };
 
+  const failMsg = (e: unknown) => setError(e instanceof ApiHttpError ? e.payload.message : 'Ошибка действия');
+
+  // Избранное: точечное удаление и перемещение (оптимистично + откат при ошибке).
+  const removeFav = async (kpId: number) => {
+    const prev = favs;
+    setFavs((cur) => cur.filter((f) => f.kpId !== kpId));
+    try {
+      const r = await adminModerationApi.removeFavorite(u.id, kpId);
+      setFavs(r.favorites);
+      setToast('Фильм удалён из избранного');
+    } catch (e) {
+      setFavs(prev);
+      failMsg(e);
+    }
+  };
+  const moveFav = async (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= favs.length) return;
+    const prev = favs;
+    const next = [...favs];
+    [next[index], next[target]] = [next[target], next[index]];
+    setFavs(next);
+    try {
+      const r = await adminModerationApi.reorderFavorites(u.id, next.map((f) => f.kpId));
+      setFavs(r.favorites);
+    } catch (e) {
+      setFavs(prev);
+      failMsg(e);
+    }
+  };
+
+  // Совместное время: начисление/списание и аннулирование.
+  const adjustShared = async (peerId: string, deltaSeconds: number) => {
+    try {
+      const r = await adminModerationApi.adjustSharedTime(u.id, peerId, deltaSeconds);
+      setShared((cur) => cur.map((s) => (s.peer.id === peerId
+        ? { ...s, totalSeconds: r.totalSeconds, sessionsCount: r.sessionsCount, longestSessionSeconds: r.longestSessionSeconds }
+        : s)));
+      setToast(deltaSeconds >= 0 ? 'Время начислено' : 'Время списано');
+    } catch (e) {
+      failMsg(e);
+    }
+  };
+  const resetShared = async (peerId: string) => {
+    try {
+      await adminModerationApi.resetSharedTime(u.id, peerId);
+      setShared((cur) => cur.filter((s) => s.peer.id !== peerId));
+      setResetShareTarget(null);
+      setToast('Совместное время аннулировано');
+    } catch (e) {
+      setResetShareTarget(null);
+      failMsg(e);
+    }
+  };
+
   return (
     <AdminPage
       eyebrow="Модерация · профиль-360"
@@ -130,8 +205,10 @@ export function AdminUserProfile() {
             </div>
             <div style={{ marginTop: 8, color: 'var(--text-2)', fontSize: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{u.email}</span>
-              <span style={{ color: 'var(--text-3)' }}>·</span>
-              <CopyId value={u.publicId} />
+            </div>
+            <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <CopyId label="Публичный ID" hint="для ссылки на профиль" value={u.publicId} />
+              <CopyId label="ID для рассылки" hint="внутренний — для точечной push-рассылки" value={u.id} accent />
             </div>
             <div style={{ marginTop: 6, color: 'var(--text-2)', fontSize: 13 }}>
               {metaParts.map((p, i) => (
@@ -153,6 +230,9 @@ export function AdminUserProfile() {
               <Link to={`/u/${u.publicId}`} style={{ textDecoration: 'none' }}>
                 <Button variant="secondary" size="sm" icon="eye">Публичный профиль</Button>
               </Link>
+              {canModerate && (
+                <Button variant="secondary" size="sm" icon="edit" onClick={() => setEditProfileOpen(true)}>Изменить данные</Button>
+              )}
               {canModerate && (
                 u.isBlocked ? (
                   <Button variant="secondary" size="sm" icon="check" onClick={() => void doAction(() => adminApi.unblockUser(u.id), 'Разблокирован')}>
@@ -195,18 +275,17 @@ export function AdminUserProfile() {
       )}
 
       {/* Совместное время */}
-      {data.sharedWatch.length > 0 && (
+      {shared.length > 0 && (
         <Section title="Совместное время">
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {data.sharedWatch.map((s) => (
-              <div key={s.peer.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderBottom: '1px solid var(--line-1)' }}>
-                <Avatar seed={s.peer.avatarSeed} src={s.peer.avatarUrl} name={s.peer.username} size={32} />
-                <Link to={`/admin/users/${s.peer.id}`} style={{ flex: 1, minWidth: 0, color: 'var(--text-0)', textDecoration: 'none', fontWeight: 500, fontSize: 14 }}>
-                  {s.peer.username}
-                </Link>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-2)' }}>{s.sessionsCount} сессий</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-0)', minWidth: 90, textAlign: 'right' }}>{fmtDur(s.totalSeconds)}</span>
-              </div>
+            {shared.map((s) => (
+              <SharedTimeRow
+                key={s.peer.id}
+                s={s}
+                canModerate={canModerate}
+                onAdjust={(delta) => void adjustShared(s.peer.id, delta)}
+                onReset={() => setResetShareTarget(s)}
+              />
             ))}
           </div>
         </Section>
@@ -229,19 +308,21 @@ export function AdminUserProfile() {
           )}
         </Section>
 
-        <Section title={`Избранное · ${data.favorites.length}`}>
-          {data.favorites.length === 0 ? (
+        <Section title={`Избранное · ${favs.length}`}>
+          {favs.length === 0 ? (
             <AdminEmpty>Нет избранных фильмов</AdminEmpty>
           ) : (
-            <div style={{ display: 'flex', gap: 10, padding: 16, overflowX: 'auto' }}>
-              {data.favorites.map((f) => (
-                <div key={f.kpId} style={{ width: 92, flexShrink: 0 }}>
-                  <div style={{ aspectRatio: '2/3', borderRadius: 12, overflow: 'hidden', background: 'var(--bg-3)', boxShadow: 'inset 0 0 0 1px var(--line-1)' }}>
-                    {f.posterUrl && <img src={f.posterUrl} alt={f.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
-                  </div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text-1)', marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.title}</div>
-                  {f.year && <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{f.year}</div>}
-                </div>
+            <div style={{ display: 'flex', gap: 12, padding: 16, overflowX: 'auto' }}>
+              {favs.map((f, i) => (
+                <FavoriteCard
+                  key={f.kpId}
+                  fav={f}
+                  index={i}
+                  total={favs.length}
+                  canModerate={canModerate}
+                  onMove={(dir) => void moveFav(i, dir)}
+                  onRemove={() => void removeFav(f.kpId)}
+                />
               ))}
             </div>
           )}
@@ -351,6 +432,23 @@ export function AdminUserProfile() {
         )}
       </Section>
 
+      {editProfileOpen && (
+        <EditProfileDialog
+          user={u}
+          onClose={() => setEditProfileOpen(false)}
+          onSaved={() => { setEditProfileOpen(false); setToast('Данные профиля обновлены'); void load(); }}
+        />
+      )}
+      {resetShareTarget && (
+        <SimpleConfirm
+          title="Аннулировать совместное время"
+          text={`Вся совместная статистика ${u.username} ↔ ${resetShareTarget.peer.username} (${fmtDur(resetShareTarget.totalSeconds)}) будет сброшена до нуля. Действие необратимо.`}
+          danger
+          onClose={() => setResetShareTarget(null)}
+          onConfirm={() => void resetShared(resetShareTarget.peer.id)}
+        />
+      )}
+
       {toast && (
         <div style={{ position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', background: 'var(--ok)', color: '#04120a', padding: '10px 18px', borderRadius: 999, fontSize: 14, fontWeight: 600, zIndex: 1200, boxShadow: 'var(--shadow-2)' }}>
           {toast} ✓
@@ -417,16 +515,26 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function CopyId({ value }: { value: string }) {
+function CopyId({ label, value, hint, accent }: { label: string; value: string; hint?: string; accent?: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
       onClick={() => { void navigator.clipboard?.writeText(value); setCopied(true); window.setTimeout(() => setCopied(false), 1200); }}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontFamily: 'var(--font-mono)', fontSize: 12, padding: 0 }}
-      title="Скопировать publicId"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '6px 10px',
+        borderRadius: 999, background: 'var(--bg-2)',
+        border: '1px solid ' + (accent ? 'var(--accent-line, var(--line-2))' : 'var(--line-1)'),
+        color: 'var(--text-1)', textAlign: 'left',
+      }}
+      title={hint ? `${label} · ${hint} — нажмите, чтобы скопировать` : `Скопировать ${label}`}
     >
-      <Icon name={copied ? 'check' : 'copy'} size={12} />
-      {value}
+      <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+        <span style={{ fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: accent ? 'var(--accent-hi)' : 'var(--text-3)' }}>
+          {label}{hint && <span style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--text-3)', fontWeight: 400 }}> · {hint}</span>}
+        </span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-1)' }}>{value}</span>
+      </span>
+      <Icon name={copied ? 'check' : 'copy'} size={13} style={{ color: copied ? 'var(--ok)' : 'var(--text-3)', flexShrink: 0 }} />
     </button>
   );
 }
@@ -461,6 +569,179 @@ function SimpleConfirm({ title, text, danger, onClose, onConfirm }: { title: str
       <DialogActions>
         <Button variant="ghost" onClick={onClose}>Отмена</Button>
         <Button variant={danger ? 'danger' : 'primary'} onClick={onConfirm}>Подтвердить</Button>
+      </DialogActions>
+    </ConfirmShell>
+  );
+}
+
+// ── Карточка избранного фильма с управлением (перемещение / удаление) ─────────
+function IconBtn({ icon, title, onClick, disabled, flip }: { icon: IconName; title: string; onClick: () => void; disabled?: boolean; flip?: boolean }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        flex: 1, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        borderRadius: 8, border: '1px solid var(--line-2)', cursor: disabled ? 'default' : 'pointer',
+        background: 'var(--glass-1)', color: 'var(--text-1)',
+        opacity: disabled ? 0.35 : 1,
+      }}
+    >
+      <Icon name={icon} size={13} style={flip ? { transform: 'rotate(180deg)' } : undefined} />
+    </button>
+  );
+}
+
+function FavoriteCard({ fav, index, total, canModerate, onMove, onRemove }: {
+  fav: AdminFavoriteTitle; index: number; total: number; canModerate: boolean;
+  onMove: (dir: -1 | 1) => void; onRemove: () => void;
+}) {
+  return (
+    <div style={{ width: 104, flexShrink: 0 }}>
+      <div style={{ position: 'relative', aspectRatio: '2/3', borderRadius: 12, overflow: 'hidden', background: 'var(--bg-3)', boxShadow: 'inset 0 0 0 1px var(--line-1)' }}>
+        {fav.posterUrl && <img src={fav.posterUrl} alt={fav.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+        <div style={{ position: 'absolute', top: 6, left: 6, fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 700, color: '#fff', background: 'rgba(10,8,7,0.7)', borderRadius: 6, padding: '1px 6px' }}>
+          #{index + 1}
+        </div>
+        {canModerate && (
+          <button
+            type="button"
+            title="Удалить из избранного"
+            onClick={onRemove}
+            style={{ position: 'absolute', top: 6, right: 6, width: 24, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 7, border: 'none', cursor: 'pointer', background: 'rgba(10,8,7,0.7)', color: '#fff' }}
+          >
+            <Icon name="close" size={13} />
+          </button>
+        )}
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-1)', marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fav.title}</div>
+      {fav.year && <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{fav.year}</div>}
+      {canModerate && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          <IconBtn icon="chevron" title="Левее" flip onClick={() => onMove(-1)} disabled={index === 0} />
+          <IconBtn icon="chevron" title="Правее" onClick={() => onMove(1)} disabled={index === total - 1} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Строка совместного времени с корректировкой ──────────────────────────────
+function SharedTimeRow({ s, canModerate, onAdjust, onReset }: {
+  s: AdminSharedWatchPeer; canModerate: boolean;
+  onAdjust: (deltaSeconds: number) => void; onReset: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [minutes, setMinutes] = useState('10');
+
+  const applyDelta = (sign: 1 | -1) => {
+    const mins = Math.abs(Math.round(Number(minutes)));
+    if (!Number.isFinite(mins) || mins <= 0) return;
+    onAdjust(sign * mins * 60);
+  };
+
+  return (
+    <div style={{ padding: '11px 16px', borderBottom: '1px solid var(--line-1)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Avatar seed={s.peer.avatarSeed} src={s.peer.avatarUrl} name={s.peer.username} size={32} />
+        <Link to={`/admin/users/${s.peer.id}`} style={{ flex: 1, minWidth: 0, color: 'var(--text-0)', textDecoration: 'none', fontWeight: 500, fontSize: 14 }}>
+          {s.peer.username}
+        </Link>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-2)' }}>{s.sessionsCount} сессий</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-0)', minWidth: 90, textAlign: 'right' }}>{fmtDur(s.totalSeconds)}</span>
+        {canModerate && (
+          <Button variant="ghost" size="sm" icon="edit" onClick={() => setOpen((o) => !o)}>Время</Button>
+        )}
+      </div>
+      {canModerate && open && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap', paddingLeft: 44 }}>
+          <input
+            type="number"
+            min={1}
+            value={minutes}
+            onChange={(e) => setMinutes(e.target.value)}
+            style={{ width: 74, height: 32, padding: '0 10px', borderRadius: 'var(--r-md)', border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-0)', fontSize: 13, fontFamily: 'var(--font-mono)' }}
+          />
+          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>минут</span>
+          <Button variant="secondary" size="sm" icon="plus" onClick={() => applyDelta(1)}>Начислить</Button>
+          <Button variant="ghost" size="sm" onClick={() => applyDelta(-1)}>Списать</Button>
+          <Button variant="danger" size="sm" icon="trash" onClick={onReset}>Аннулировать</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Диалог редактирования полей профиля ──────────────────────────────────────
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-3)' }}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+const INPUT_STYLE: React.CSSProperties = {
+  height: 38, padding: '0 12px', borderRadius: 'var(--r-md)', border: '1px solid var(--line-2)',
+  background: 'var(--bg-2)', color: 'var(--text-0)', fontFamily: 'inherit', fontSize: 14, width: '100%', boxSizing: 'border-box',
+};
+
+function EditProfileDialog({ user, onClose, onSaved }: { user: AdminUserProfileDTO; onClose: () => void; onSaved: () => void }) {
+  const [email, setEmail] = useState(user.email);
+  const [city, setCity] = useState(user.city ?? '');
+  const [gender, setGender] = useState(user.gender ?? '');
+  const [birthDate, setBirthDate] = useState(user.birthDate ?? '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const save = async () => {
+    setSaving(true);
+    setErr(null);
+    const patch: AdminUserProfilePatch = {
+      email: email.trim(),
+      city: city.trim() || null,
+      gender: (gender || null) as AdminUserProfilePatch['gender'],
+      birthDate: birthDate || null,
+    };
+    try {
+      await adminModerationApi.updateProfile(user.id, patch);
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof ApiHttpError ? e.payload.message : 'Не удалось сохранить');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ConfirmShell title="Редактирование данных" onClose={onClose}>
+      <div style={{ display: 'grid', gap: 14 }}>
+        <Field label="Email">
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} style={INPUT_STYLE} />
+        </Field>
+        <Field label="Город">
+          <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Не указан" style={INPUT_STYLE} />
+        </Field>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="Пол">
+            <select value={gender} onChange={(e) => setGender(e.target.value)} style={{ ...INPUT_STYLE, appearance: 'auto' }}>
+              <option value="">— не указан</option>
+              <option value="male">муж.</option>
+              <option value="female">жен.</option>
+              <option value="other">другой</option>
+            </select>
+          </Field>
+          <Field label="Дата рождения">
+            <input type="date" value={birthDate ?? ''} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setBirthDate(e.target.value)} style={{ ...INPUT_STYLE, appearance: 'auto' }} />
+          </Field>
+        </div>
+        {err && <div style={{ color: 'var(--accent-hi)', fontSize: 12.5 }}>{err}</div>}
+      </div>
+      <DialogActions>
+        <Button variant="ghost" onClick={onClose} disabled={saving}>Отмена</Button>
+        <Button variant="primary" onClick={() => void save()} disabled={saving}>{saving ? 'Сохранение…' : 'Сохранить'}</Button>
       </DialogActions>
     </ConfirmShell>
   );

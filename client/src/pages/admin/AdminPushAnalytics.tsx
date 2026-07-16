@@ -5,6 +5,7 @@ import { adminPushAnalyticsApi } from '../../api/adminInsights';
 import { ApiHttpError } from '../../api/client';
 import { Button } from '../../shared';
 import { AdminPage, AdminSurface, AdminEmpty, StatTile } from './components/AdminPage';
+import { METRIC_HINTS, typeLabel } from './pushMeta';
 
 export function AdminPushAnalytics() {
   const navigate = useNavigate();
@@ -32,10 +33,10 @@ export function AdminPushAnalytics() {
       glow="rgba(53,208,127,0.14)"
       actions={back}
     >
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-        <StatTile label="Отправлено" value={data.totalSent} />
-        <StatTile label="Открыто" value={data.totalClicked} />
-        <StatTile label="CTR" value={`${data.ctr}%`} accent />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
+        <StatTile label="Доставлено" value={data.totalSent} hint={METRIC_HINTS.delivered} />
+        <StatTile label="Открытий" value={data.totalClicked} hint={METRIC_HINTS.clicked} />
+        <StatTile label="Открываемость" value={`${data.ctr}%`} accent hint={METRIC_HINTS.ctr} />
       </div>
 
       {/* Тепловая карта по часам */}
@@ -62,13 +63,13 @@ export function AdminPushAnalytics() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
         {/* Эффективность шаблонов */}
         <div>
-          <SectionH>Эффективность по типам</SectionH>
+          <SectionH>Какие уведомления открывают чаще</SectionH>
           <AdminSurface>
             {data.byType.length === 0 ? <AdminEmpty>Нет данных</AdminEmpty> : data.byType.map((t) => (
               <div key={t.type} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderBottom: '1px solid var(--line-1)' }}>
-                <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--text-1)' }}>{t.type}</span>
+                <span style={{ flex: 1, fontSize: 13, color: 'var(--text-1)' }}>{typeLabel(t.type)}</span>
                 <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{t.sent} отпр.</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: t.ctr >= 10 ? 'var(--ok)' : 'var(--text-2)', minWidth: 56, textAlign: 'right' }}>CTR {t.ctr}%</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: t.ctr >= 10 ? 'var(--ok)' : 'var(--text-2)', minWidth: 90, textAlign: 'right' }}>открыли {t.ctr}%</span>
               </div>
             ))}
           </AdminSurface>

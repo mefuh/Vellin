@@ -8,7 +8,9 @@ import type {
   AdminStatsResponse,
   AdminUserDetailResponse,
   AdminUserListResponse,
+  AdminRoomMembersResponse,
   BlockUserResponse,
+  RoomEventListResponse,
   UpdateRoomRequest,
   UpdateRoomResponse,
 } from '@vellin/shared';
@@ -70,5 +72,20 @@ export const adminApi = {
     apiFetch<AdminBroadcastResponse>('/admin/broadcast', {
       method: 'POST',
       body: { body },
+    }),
+
+  // Журнал событий и участники комнаты
+  roomEvents: (id: string, cursor?: string) =>
+    apiFetch<RoomEventListResponse>(`/admin/rooms/${encodeURIComponent(id)}/events${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`),
+  roomMembers: (id: string) =>
+    apiFetch<AdminRoomMembersResponse>(`/admin/rooms/${encodeURIComponent(id)}/members`),
+  setMemberRole: (id: string, userId: string, role: 'admin' | 'member') =>
+    apiFetch<void>(`/admin/rooms/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}/role`, {
+      method: 'POST',
+      body: { role },
+    }),
+  removeMember: (id: string, userId: string) =>
+    apiFetch<void>(`/admin/rooms/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
     }),
 };

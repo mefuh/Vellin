@@ -6,6 +6,7 @@ import { Button, Icon } from '../../shared';
 import { useAuthStore } from '../../stores/authStore';
 import { useIsNarrow } from '../../hooks/useMediaQuery';
 import { AdminPage, AdminSurface, AdminEmpty } from './components/AdminPage';
+import { describeAudit, type AuditSeverity } from './auditFormat';
 
 // Наиболее частые действия — для быстрого фильтра. Строка свободная, поэтому
 // список лишь подсказка, не ограничение.
@@ -18,12 +19,26 @@ const ACTIONS = [
 
 const TARGET_TYPES = ['', 'user', 'room', 'role', 'broadcast', 'push_template', 'push_broadcast', 'conversation'];
 
-function actionTone(action: string): { bg: string; fg: string } {
-  if (action.includes('delete') || action === 'user.block') return { bg: 'var(--accent-soft)', fg: 'var(--accent-hi)' };
-  if (action.startsWith('role') || action.startsWith('staff')) return { bg: 'rgba(250,204,21,0.12)', fg: 'var(--warn)' };
-  if (action === 'dm.view') return { bg: 'rgba(250,204,21,0.12)', fg: 'var(--warn)' };
-  return { bg: 'var(--bg-3)', fg: 'var(--text-1)' };
-}
+// Человеческие подписи для выпадающих фильтров (значение остаётся техническим).
+const ACTION_LABEL: Record<string, string> = {
+  '': 'все действия',
+  'user.block': 'Блокировка пользователя', 'user.unblock': 'Разблокировка', 'user.delete': 'Удаление пользователя',
+  'room.update': 'Изменение комнаты', 'room.delete': 'Удаление комнаты', 'room.close': 'Закрытие комнаты',
+  'room.access_ticket': 'Вход в комнату', 'broadcast.send': 'Системное сообщение', 'push.broadcast': 'Push-рассылка',
+  'push.template_update': 'Изменение push-шаблона', 'role.create': 'Создание роли', 'role.update': 'Изменение роли',
+  'role.delete': 'Удаление роли', 'staff.assign_role': 'Назначение роли', 'dm.view': 'Просмотр переписки',
+  'report.resolve': 'Решение по жалобе',
+};
+const TARGET_TYPE_LABEL: Record<string, string> = {
+  '': 'все объекты', user: 'Пользователь', room: 'Комната', role: 'Роль', broadcast: 'Рассылка',
+  push_template: 'Push-шаблон', push_broadcast: 'Push-рассылка', conversation: 'Переписка',
+};
+
+const SEVERITY_COLOR: Record<AuditSeverity, string> = {
+  neutral: 'var(--text-3)',
+  warn: 'var(--warn)',
+  danger: 'var(--accent-hi)',
+};
 
 export function AdminAudit() {
   const isNarrow = useIsNarrow();
@@ -132,12 +147,12 @@ export function AdminAudit() {
         </div>
         <select value={action} onChange={(e) => setAction(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
           {ACTIONS.map((a) => (
-            <option key={a} value={a}>{a || 'все действия'}</option>
+            <option key={a} value={a}>{ACTION_LABEL[a] ?? a}</option>
           ))}
         </select>
         <select value={targetType} onChange={(e) => setTargetType(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
           {TARGET_TYPES.map((t) => (
-            <option key={t} value={t}>{t || 'все объекты'}</option>
+            <option key={t} value={t}>{TARGET_TYPE_LABEL[t] ?? t}</option>
           ))}
         </select>
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }} title="С даты" />
@@ -175,8 +190,13 @@ export function AdminAudit() {
 
 function AuditRow({ entry, narrow }: { entry: AuditLogEntryDTO; narrow: boolean }) {
   const [open, setOpen] = useState(false);
-  const tone = actionTone(entry.action);
-  const hasDetail = entry.before != null || entry.after != null || Object.keys(entry.meta).length > 0;
+  const [showRaw, setShowRaw] = useState(false);
+  const desc = describeAudit(entry);
+  const hasRaw = entry.before != null || entry.after != null || Object.keys(entry.meta).length > 0;
+  // Раскрывать можно, если есть что показать человеку (изменения/пояснения/IP) или техданные.
+  const hasDetail = desc.changes.length > 0 || desc.notes.length > 0 || !!entry.ip || hasRaw;
+  const dot = SEVERITY_COLOR[desc.severity];
+
   return (
     <div style={{ borderBottom: '1px solid var(--line-1)' }}>
       <button
@@ -184,7 +204,7 @@ function AuditRow({ entry, narrow }: { entry: AuditLogEntryDTO; narrow: boolean 
         style={{
           width: '100%',
           display: 'grid',
-          gridTemplateColumns: narrow ? '1fr auto' : '150px 1fr 200px auto',
+          gridTemplateColumns: narrow ? '1fr auto' : '132px 1fr 210px auto',
           alignItems: 'center',
           gap: 12,
           padding: '11px 16px',
@@ -195,28 +215,14 @@ function AuditRow({ entry, narrow }: { entry: AuditLogEntryDTO; narrow: boolean 
           color: 'var(--text-0)',
         }}
       >
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-2)' }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-3)' }}>
           {new Date(entry.createdAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flexWrap: 'wrap' }}>
-          <span
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 11,
-              padding: '2px 8px',
-              borderRadius: 999,
-              background: tone.bg,
-              color: tone.fg,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {entry.action}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0, boxShadow: desc.severity !== 'neutral' ? `0 0 7px ${dot}` : 'none' }} />
+          <span style={{ fontSize: 13.5, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {desc.title}
           </span>
-          {!narrow && entry.targetLabel && (
-            <span style={{ fontSize: 13, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              → {entry.targetLabel}
-            </span>
-          )}
         </span>
         {!narrow && (
           <span style={{ fontSize: 12.5, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -229,19 +235,51 @@ function AuditRow({ entry, narrow }: { entry: AuditLogEntryDTO; narrow: boolean 
           <span />
         )}
       </button>
+
       {open && hasDetail && (
-        <div style={{ padding: '0 16px 14px', display: 'grid', gridTemplateColumns: narrow ? '1fr' : '1fr 1fr', gap: 12 }}>
-          {narrow && (
-            <div style={{ fontSize: 12, color: 'var(--text-2)' }}>{entry.actorEmail}</div>
-          )}
-          {entry.ip && (
-            <div style={{ gridColumn: '1 / -1', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)' }}>
-              IP {entry.ip}
+        <div style={{ padding: '0 16px 14px 34px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {narrow && <div style={{ fontSize: 12, color: 'var(--text-2)' }}>{entry.actorEmail}</div>}
+
+          {desc.changes.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {desc.changes.map((c, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13, flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--text-2)', minWidth: 150 }}>{c.label}</span>
+                  {c.value !== undefined ? (
+                    <span style={{ color: 'var(--text-0)' }}>{c.value}</span>
+                  ) : (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: 'var(--text-3)', textDecoration: 'line-through' }}>{c.from}</span>
+                      <Icon name="arrow" size={12} style={{ color: 'var(--text-3)' }} />
+                      <span style={{ color: 'var(--text-0)', fontWeight: 500 }}>{c.to}</span>
+                    </span>
+                  )}
+                </div>
+              ))}
             </div>
           )}
-          {entry.before != null && <JsonBlock label="До" value={entry.before} />}
-          {entry.after != null && <JsonBlock label="После" value={entry.after} />}
-          {Object.keys(entry.meta).length > 0 && <JsonBlock label="Контекст" value={entry.meta} />}
+
+          {desc.notes.map((n, i) => (
+            <div key={i} style={{ fontSize: 13, color: 'var(--text-1)' }}>{n}</div>
+          ))}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 2 }}>
+            {entry.ip && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)' }}>IP {entry.ip}</span>}
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)' }}>{entry.action}</span>
+            {hasRaw && (
+              <button onClick={() => setShowRaw((v) => !v)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 11.5, textDecoration: 'underline', padding: 0 }}>
+                {showRaw ? 'Скрыть JSON' : 'Технические данные'}
+              </button>
+            )}
+          </div>
+
+          {showRaw && (
+            <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : '1fr 1fr', gap: 12 }}>
+              {entry.before != null && <JsonBlock label="До" value={entry.before} />}
+              {entry.after != null && <JsonBlock label="После" value={entry.after} />}
+              {Object.keys(entry.meta).length > 0 && <JsonBlock label="Контекст" value={entry.meta} />}
+            </div>
+          )}
         </div>
       )}
     </div>

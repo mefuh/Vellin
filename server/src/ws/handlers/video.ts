@@ -10,6 +10,7 @@ import { sendError } from '../connection.js';
 import { resolveWithCache } from '../../media/resolveWithCache.js';
 import { ResolveError } from '../../media/Resolver.js';
 import { logger } from '../../utils/logger.js';
+import { logRoomEvent } from '../../rooms/events.js';
 
 const URL_PATTERN = /^(https?:\/\/|magnet:).+/i;
 
@@ -36,6 +37,11 @@ export async function handleVideoEvent(
   } else {
     runtime.applySeek(userId, positionSec, Boolean(msg.playing));
   }
+  logRoomEvent(runtime.roomId, msg.t === 'video_play' ? 'play' : msg.t === 'video_pause' ? 'pause' : 'seek', {
+    actorId: ctx.principal.kind === 'user' ? ctx.principal.userId : null,
+    actorName: ctx.principal.username,
+    data: { positionSec: Math.round(positionSec) },
+  });
 }
 
 export async function handleSetVideoUrl(
@@ -56,6 +62,11 @@ export async function handleSetVideoUrl(
   try {
     const resolved = await resolveWithCache(msg.url);
     await runtime.setVideoUrl(msg.url, ctx.principal.userId, true, null, resolved);
+    logRoomEvent(runtime.roomId, 'media_change', {
+      actorId: ctx.principal.kind === 'user' ? ctx.principal.userId : null,
+      actorName: ctx.principal.username,
+      data: { url: msg.url, title: resolved?.title ?? null },
+    });
   } catch (err) {
     runtime.signalVideoLoading(ctx.principal.userId, false);
     const userMessage =

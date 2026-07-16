@@ -23,6 +23,7 @@ import { adminPlatformRoutes } from './admin/platform/routes.js';
 import { runtimeRoutes } from './admin/platform/runtime.js';
 import { adminSystemRoutes } from './admin/system/routes.js';
 import { adminMediaRoutes } from './admin/media/routes.js';
+import { adminRoomsExtraRoutes } from './admin/rooms/routes.js';
 import { adminInsightsRoutes } from './admin/insights/routes.js';
 import { recordError, recordRequest, startMetricsSampler } from './admin/system/metrics.js';
 import { seedRolesAndBootstrapAdmin } from './admin/rbac/roles.js';
@@ -153,6 +154,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(adminPlatformRoutes);
       await api.register(adminSystemRoutes);
       await api.register(adminMediaRoutes);
+      await api.register(adminRoomsExtraRoutes);
       await api.register(adminInsightsRoutes);
       await api.register(reportPublicRoutes);
       await api.register(runtimeRoutes);

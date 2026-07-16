@@ -46,6 +46,13 @@ import { generateInviteToken } from '../utils/ids.js';
 import { resolveWithCache } from '../media/resolveWithCache.js';
 import { ResolveError } from '../media/Resolver.js';
 import { assertRoomCreationEnabled } from '../admin/platform/gate.js';
+import { logRoomEvent } from './events.js';
+
+/** Имя пользователя для журнала событий (best-effort, не блокирует ответ). */
+async function nameFor(userId: string): Promise<string | null> {
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
+  return u?.username ?? null;
+}
 
 const URL_PATTERN = /^https?:\/\/.+/i;
 const RESOLVE_URL_PATTERN = /^(https?:\/\/|magnet:).+/i;
@@ -276,6 +283,11 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       }
       const runtime = await ensureRoomRuntime(room);
       const result = await runtime.updateMembership(req.params.userId, { role: body.role });
+      logRoomEvent(room.id, 'role_change', {
+        actorId: principal.userId,
+        actorName: principal.username,
+        data: { targetUserId: req.params.userId, targetName: await nameFor(req.params.userId), role: body.role },
+      });
       reply.send({
         userId: req.params.userId,
         role: result.role,
@@ -325,6 +337,11 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
     }
     const result = await runtime.updateMembership(req.params.userId, {
       permissions: body.permissions,
+    });
+    logRoomEvent(room.id, 'permissions_change', {
+      actorId: principal.userId,
+      actorName: principal.username,
+      data: { targetUserId: req.params.userId, targetName: await nameFor(req.params.userId) },
     });
     reply.send({
       userId: req.params.userId,
@@ -378,6 +395,11 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
           .send({ error: 'NotFound', message: 'Participant is not connected', statusCode: 404 });
         return;
       }
+      logRoomEvent(room.id, 'kick', {
+        actorId: principal.userId,
+        actorName: principal.username,
+        data: { targetUserId: req.params.userId, targetName: await nameFor(req.params.userId) },
+      });
       reply.send({ userId: req.params.userId } satisfies KickMemberResponse);
     },
   );

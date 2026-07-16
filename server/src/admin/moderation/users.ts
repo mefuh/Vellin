@@ -3,6 +3,7 @@ import type {
   AdminSharedWatchPeer,
   AdminUserFullResponse,
   AdminUserProfile,
+  AdminUserProfilePatch,
   AdminUserSession,
 } from '@vellin/shared';
 import { prisma } from '../../db/prisma.js';
@@ -214,6 +215,66 @@ export async function disableUserPush(userId: string): Promise<void> {
     create: { userId, pushEnabled: false },
     update: { pushEnabled: false },
   });
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const GENDERS = new Set(['male', 'female', 'other']);
+
+export type UpdateProfileResult =
+  | { ok: true; user: AdminUserProfile }
+  | { ok: false; reason: 'not_found' | 'email_invalid' | 'email_taken' | 'birthDate_invalid' };
+
+/**
+ * Редактирование администратором полей профиля: email, город, пол, дата
+ * рождения. Отправляются только изменяемые ключи; `null` очищает поле. Email
+ * проверяется на формат и уникальность. Возвращает обновлённый профиль или
+ * причину отказа (для аккуратного ответа роутом).
+ */
+export async function updateUserProfile(userId: string, patch: AdminUserProfilePatch): Promise<UpdateProfileResult> {
+  const existing = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+  if (!existing) return { ok: false, reason: 'not_found' };
+
+  const data: {
+    email?: string; city?: string | null; gender?: string | null; birthDate?: Date | null;
+  } = {};
+
+  if (patch.email !== undefined) {
+    // Регистрация хранит email как есть (без нижнего регистра) — сохраняем ту же
+    // семантику, иначе проверка уникальности и вход пользователя рассинхронятся.
+    const email = String(patch.email).trim();
+    if (!EMAIL_RE.test(email) || email.length > 254) return { ok: false, reason: 'email_invalid' };
+    const taken = await prisma.user.findFirst({ where: { email, NOT: { id: userId } }, select: { id: true } });
+    if (taken) return { ok: false, reason: 'email_taken' };
+    data.email = email;
+  }
+  if (patch.city !== undefined) {
+    const city = patch.city === null ? null : String(patch.city).trim().slice(0, 80);
+    data.city = city ? city : null;
+  }
+  if (patch.gender !== undefined) {
+    data.gender = patch.gender && GENDERS.has(patch.gender) ? patch.gender : null;
+  }
+  if (patch.birthDate !== undefined) {
+    if (patch.birthDate === null || patch.birthDate === '') {
+      data.birthDate = null;
+    } else {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(patch.birthDate));
+      if (!m) return { ok: false, reason: 'birthDate_invalid' };
+      const d = new Date(`${patch.birthDate}T00:00:00.000Z`);
+      const year = Number(m[1]);
+      if (Number.isNaN(d.getTime()) || year < 1900 || d.getTime() > Date.now()) {
+        return { ok: false, reason: 'birthDate_invalid' };
+      }
+      data.birthDate = d;
+    }
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data,
+    include: { adminRole: { select: { name: true } } },
+  });
+  return { ok: true, user: toProfile(updated) };
 }
 
 /** Сброс аватара (возврат к градиенту по seed). */

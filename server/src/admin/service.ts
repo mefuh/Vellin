@@ -10,7 +10,8 @@ import type {
 import { prisma } from '../db/prisma.js';
 import { roomStore } from '../rooms/store.js';
 import { userHub } from '../realtime/UserHub.js';
-import { toRoomSummary } from '../rooms/service.js';
+import { toRoomSummary, videoCardInfo } from '../rooms/service.js';
+import { endCallSession } from '../rooms/events.js';
 import { roomMutex } from '../utils/async-mutex.js';
 import { hashPassword } from '../auth/password.js';
 import { ensureRoomRuntime } from '../rooms/RoomRuntime.js';
@@ -60,6 +61,7 @@ export function toAdminRoomSummary(
     liveParticipants: live?.participants.size ?? 0,
     isActive: !!live,
     videoUrl: room.videoUrl,
+    ...videoCardInfo(room),
   };
 }
 
@@ -266,7 +268,9 @@ export async function deleteRoomById(roomId: string, byAdminUserId: string): Pro
 export async function endRoomCall(roomId: string): Promise<number> {
   const runtime = roomStore.get(roomId);
   if (!runtime) return 0;
-  return roomMutex.run(`call:${roomId}`, () => runtime.endCall());
+  const ended = await roomMutex.run(`call:${roomId}`, () => runtime.endCall());
+  if (ended > 0) endCallSession(roomId);
+  return ended;
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────
