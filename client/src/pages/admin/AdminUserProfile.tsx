@@ -12,6 +12,7 @@ import { adminApi } from '../../api/admin';
 import { ApiHttpError } from '../../api/client';
 import { Avatar, Button, Chip, Icon } from '../../shared';
 import type { IconName } from '../../shared/Icon';
+import { useIsNarrow } from '../../hooks/useMediaQuery';
 import { AdminPage, AdminSurface, AdminEmpty } from './components/AdminPage';
 import { useAdminAccess } from './AdminAccessContext';
 import { ConfirmShell, DialogActions } from './AdminUsers';
@@ -32,6 +33,7 @@ const GENDER: Record<string, string> = { male: 'муж.', female: 'жен.', oth
 export function AdminUserProfile() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
+  const isNarrow = useIsNarrow();
   const { can, isSuperAdmin } = useAdminAccess();
   const [data, setData] = useState<AdminUserFullResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -180,9 +182,9 @@ export function AdminUserProfile() {
       }
     >
       {/* Hero */}
-      <AdminSurface style={{ padding: 24 }}>
-        <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative' }}>
+      <AdminSurface style={{ padding: isNarrow ? 16 : 24 }}>
+        <div style={{ display: 'flex', flexDirection: isNarrow ? 'column' : 'row', gap: isNarrow ? 14 : 20, alignItems: isNarrow ? 'stretch' : 'flex-start' }}>
+          <div style={{ position: 'relative', alignSelf: isNarrow ? 'flex-start' : 'auto' }}>
             <div
               aria-hidden
               style={{
@@ -225,29 +227,36 @@ export function AdminUserProfile() {
               </div>
             )}
 
-            {/* Действия */}
-            <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <Link to={`/u/${u.publicId}`} style={{ textDecoration: 'none' }}>
-                <Button variant="secondary" size="sm" icon="eye">Публичный профиль</Button>
+            {/* Действия. На узких экранах — сетка 2×N с растянутыми кнопками
+                (крупные тап-таргеты вместо рваного переноса пилюль). */}
+            <div
+              style={
+                isNarrow
+                  ? { marginTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }
+                  : { marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }
+              }
+            >
+              <Link to={`/u/${u.publicId}`} style={{ textDecoration: 'none', display: isNarrow ? 'block' : undefined }}>
+                <Button variant="secondary" size="sm" icon="eye" style={isNarrow ? { width: '100%' } : undefined}>Публичный профиль</Button>
               </Link>
               {canModerate && (
-                <Button variant="secondary" size="sm" icon="edit" onClick={() => setEditProfileOpen(true)}>Изменить данные</Button>
+                <Button variant="secondary" size="sm" icon="edit" onClick={() => setEditProfileOpen(true)} style={isNarrow ? { width: '100%' } : undefined}>Изменить данные</Button>
               )}
               {canModerate && (
                 u.isBlocked ? (
-                  <Button variant="secondary" size="sm" icon="check" onClick={() => void doAction(() => adminApi.unblockUser(u.id), 'Разблокирован')}>
+                  <Button variant="secondary" size="sm" icon="check" onClick={() => void doAction(() => adminApi.unblockUser(u.id), 'Разблокирован')} style={isNarrow ? { width: '100%' } : undefined}>
                     Разблокировать
                   </Button>
                 ) : u.roleName && !isSuperAdmin ? (
-                  <Button variant="secondary" size="sm" icon="lock" disabled title="Заблокировать администратора может только Super Admin">
+                  <Button variant="secondary" size="sm" icon="lock" disabled title="Заблокировать администратора может только Super Admin" style={isNarrow ? { width: '100%' } : undefined}>
                     Блокировать
                   </Button>
                 ) : (
-                  <Button variant="secondary" size="sm" icon="lock" onClick={() => setDialog('block')}>Блокировать</Button>
+                  <Button variant="secondary" size="sm" icon="lock" onClick={() => setDialog('block')} style={isNarrow ? { width: '100%' } : undefined}>Блокировать</Button>
                 )
               )}
               {canDelete && (
-                <Button variant="danger" size="sm" icon="trash" onClick={() => setDialog('delete')}>Удалить</Button>
+                <Button variant="danger" size="sm" icon="trash" onClick={() => setDialog('delete')} style={isNarrow ? { width: '100%' } : undefined}>Удалить</Button>
               )}
             </div>
           </div>
@@ -526,17 +535,17 @@ function CopyId({ label, value, hint, accent }: { label: string; value: string; 
       onClick={() => { void navigator.clipboard?.writeText(value); setCopied(true); window.setTimeout(() => setCopied(false), 1200); }}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '6px 10px',
-        borderRadius: 999, background: 'var(--bg-2)',
+        borderRadius: 16, background: 'var(--bg-2)', maxWidth: '100%',
         border: '1px solid ' + (accent ? 'var(--accent-line, var(--line-2))' : 'var(--line-1)'),
         color: 'var(--text-1)', textAlign: 'left',
       }}
       title={hint ? `${label} · ${hint} — нажмите, чтобы скопировать` : `Скопировать ${label}`}
     >
-      <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+      <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25, minWidth: 0 }}>
         <span style={{ fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: accent ? 'var(--accent-hi)' : 'var(--text-3)' }}>
           {label}{hint && <span style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--text-3)', fontWeight: 400 }}> · {hint}</span>}
         </span>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-1)' }}>{value}</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-1)', overflowWrap: 'anywhere' }}>{value}</span>
       </span>
       <Icon name={copied ? 'check' : 'copy'} size={13} style={{ color: copied ? 'var(--ok)' : 'var(--text-3)', flexShrink: 0 }} />
     </button>

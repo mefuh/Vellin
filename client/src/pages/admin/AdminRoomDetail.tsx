@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { AdminRoomMemberDTO, AdminRoomSummary, RoomEventDTO } from '@vellin/shared';
 import { adminApi } from '../../api/admin';
 import { ApiHttpError } from '../../api/client';
 import { Avatar, Button, Chip, Icon, MountainPoster } from '../../shared';
 import { useIsNarrow } from '../../hooks/useMediaQuery';
+import { AdminSurface } from './components/AdminPage';
 import { describeRoomEvent, EVENT_SEVERITY_COLOR } from './roomEventFormat';
 
 function hashSeed(s: string): number {
@@ -56,42 +58,13 @@ export function AdminRoomDetail({ room, onClose, onChanged }: { room: AdminRoomS
 
   const liveCount = members.filter((m) => m.isLive).length;
 
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1100, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: isNarrow ? 10 : '5vh 20px', overflowY: 'auto' }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{
-        width: 'min(760px, 100%)', background: 'var(--bg-1)', borderRadius: 'var(--r-2xl)', boxShadow: 'inset 0 0 0 1px var(--line-2), var(--shadow-3)', overflow: 'hidden', display: 'flex', flexDirection: 'column',
-      }}>
-        {/* Превью-шапка */}
-        <div style={{ position: 'relative', height: 180, background: 'var(--bg-3)' }}>
-          {room.videoPoster ? (
-            <img src={room.videoPoster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          ) : (
-            <MountainPoster seed={hashSeed(room.slug)} label={room.videoTitle ?? undefined} />
-          )}
-          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.1), rgba(10,8,7,0.92))' }} />
-          <button onClick={onClose} style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(0,0,0,0.4)', border: 'none', borderRadius: '50%', width: 32, height: 32, cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="close" size={18} />
-          </button>
-          <div style={{ position: 'absolute', left: 20, right: 20, bottom: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-              {room.isPrivate ? <Chip tone="neutral" icon="lock">приватная</Chip> : <Chip tone="success" icon="globe">публичная</Chip>}
-              {room.isActive && <Chip tone="live">LIVE · {room.liveParticipants}</Chip>}
-              {room.videoTitle && <Chip tone="accent" icon="play">{room.videoTitle}</Chip>}
-            </div>
-            <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 'clamp(22px,3vw,28px)', fontWeight: 700, letterSpacing: '-0.02em', color: '#fff' }}>{room.name}</h2>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 4, fontSize: 12.5, color: 'rgba(255,255,255,0.7)', fontFamily: 'var(--font-mono)' }}>
-              <span># {room.slug}</span>
-              <span>· владелец {room.ownerUsername}</span>
-              <span>· создана {new Date(room.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-            </div>
-          </div>
-        </div>
+  // Тело (участники + журнал) одинаково для десктопа и мобилки — рендерим один раз.
+  const body = (
+    <>
+      {error && <div style={{ background: 'var(--accent-soft)', color: 'var(--accent-hi)', padding: '9px 12px', borderRadius: 'var(--r-md)', fontSize: 13 }}>{error}</div>}
 
-        <div style={{ padding: isNarrow ? 16 : 20, display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {error && <div style={{ background: 'var(--accent-soft)', color: 'var(--accent-hi)', padding: '9px 12px', borderRadius: 'var(--r-md)', fontSize: 13 }}>{error}</div>}
-
-          {/* Участники */}
-          <section>
+      {/* Участники */}
+      <section>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
               <h3 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 700 }}>Участники</h3>
               <span style={{ fontSize: 12.5, color: 'var(--text-3)' }}>{members.length} всего · {liveCount} в сети</span>
@@ -159,11 +132,13 @@ export function AdminRoomDetail({ room, onClose, onChanged }: { room: AdminRoomS
               </div>
             )}
           </section>
-        </div>
-      </div>
+    </>
+  );
 
-      {removeTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setRemoveTarget(null)}>
+  // Подтверждение удаления участника — всегда портал в body (центрированный).
+  const removeDialog = removeTarget
+    ? createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setRemoveTarget(null)}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg-1)', borderRadius: 'var(--r-lg)', boxShadow: 'inset 0 0 0 1px var(--line-2)', padding: 20, width: 'min(420px, 100%)', display: 'flex', flexDirection: 'column', gap: 14 }}>
             <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>Удалить участника</h3>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--text-1)' }}>
@@ -174,8 +149,105 @@ export function AdminRoomDetail({ room, onClose, onChanged }: { room: AdminRoomS
               <Button variant="danger" disabled={busyUser === removeTarget.userId} onClick={() => void remove(removeTarget)}>Удалить</Button>
             </div>
           </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  // ── Мобилка: встроенный под-экран (не оверлей) — шапка и навигация сайта
+  // остаются доступны. Постер — баннером, заголовок и мета НА ПЛОТНОМ фоне под
+  // ним (без наезда текста на постер). ──────────────────────────────────────
+  if (isNarrow) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <button
+          onClick={onClose}
+          style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 14px', borderRadius: 999, border: '1px solid var(--line-2)', background: 'var(--bg-2)', color: 'var(--text-1)', fontSize: 13.5, fontWeight: 500, cursor: 'pointer' }}
+        >
+          <Icon name="arrow" size={15} style={{ transform: 'scaleX(-1)' }} /> Назад к комнатам
+        </button>
+
+        <AdminSurface style={{ overflow: 'hidden' }}>
+          {/* Постер-баннер */}
+          <div style={{ position: 'relative', height: 150, background: 'var(--bg-3)' }}>
+            {room.videoPoster ? (
+              <img src={room.videoPoster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <MountainPoster seed={hashSeed(room.slug)} label={room.videoTitle ?? undefined} />
+            )}
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.15) 30%, rgba(10,8,7,0.9))' }} />
+            <div style={{ position: 'absolute', left: 12, right: 12, bottom: 10, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {room.isPrivate ? <Chip tone="neutral" icon="lock">приватная</Chip> : <Chip tone="success" icon="globe">публичная</Chip>}
+              {room.isActive && <Chip tone="live">LIVE · {room.liveParticipants}</Chip>}
+            </div>
+          </div>
+          {/* Заголовок и мета — на плотном фоне */}
+          <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', wordBreak: 'break-word' }}>{room.name}</h2>
+            {room.videoTitle && (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--accent-hi)', minWidth: 0 }}>
+                <Icon name="play" size={13} style={{ flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{room.videoTitle}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+              <span># {room.slug}</span>
+              <span>· {room.ownerUsername}</span>
+              <span>· {new Date(room.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+            </div>
+          </div>
+        </AdminSurface>
+
+        {body}
+        {removeDialog}
+      </div>
+    );
+  }
+
+  // ── Десктоп: оверлей-модалка через портал (постер-hero с текстом поверх). ──
+  return createPortal(
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1100, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '5vh 20px', overflowY: 'auto' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: 'min(760px, 100%)', background: 'var(--bg-1)', borderRadius: 'var(--r-2xl)',
+        boxShadow: 'inset 0 0 0 1px var(--line-2), var(--shadow-3)', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{ position: 'relative', minHeight: 180, background: 'var(--bg-3)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+          <div style={{ position: 'absolute', inset: 0 }}>
+            {room.videoPoster ? (
+              <img src={room.videoPoster} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <MountainPoster seed={hashSeed(room.slug)} label={room.videoTitle ?? undefined} />
+            )}
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.1), rgba(10,8,7,0.92))' }} />
+          </div>
+          <button onClick={onClose} style={{ position: 'absolute', top: 12, right: 12, background: 'rgba(0,0,0,0.4)', border: 'none', borderRadius: '50%', width: 32, height: 32, cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+            <Icon name="close" size={18} />
+          </button>
+          <div style={{ position: 'relative', padding: '56px 20px 14px', minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+              {room.isPrivate ? <Chip tone="neutral" icon="lock">приватная</Chip> : <Chip tone="success" icon="globe">публичная</Chip>}
+              {room.isActive && <Chip tone="live">LIVE · {room.liveParticipants}</Chip>}
+              {room.videoTitle && (
+                <Chip tone="accent" icon="play">
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{room.videoTitle}</span>
+                </Chip>
+              )}
+            </div>
+            <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 'clamp(22px,3vw,28px)', fontWeight: 700, letterSpacing: '-0.02em', color: '#fff', wordBreak: 'break-word' }}>{room.name}</h2>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 4, fontSize: 12.5, color: 'rgba(255,255,255,0.7)', fontFamily: 'var(--font-mono)' }}>
+              <span># {room.slug}</span>
+              <span>· владелец {room.ownerUsername}</span>
+              <span>· создана {new Date(room.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+            </div>
+          </div>
         </div>
-      )}
-    </div>
+
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {body}
+        </div>
+      </div>
+      {removeDialog}
+    </div>,
+    document.body,
   );
 }

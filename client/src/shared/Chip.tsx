@@ -33,6 +33,8 @@ export function Chip({ children, tone = 'neutral', icon, hideDot, style }: ChipP
         fontSize: 11,
         fontWeight: 500,
         letterSpacing: '0.01em',
+        maxWidth: '100%',
+        minWidth: 0,
         background: t.bg,
         color: t.fg,
         boxShadow: `inset 0 0 0 1px ${t.bd}`,

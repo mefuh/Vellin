@@ -845,13 +845,34 @@ input[type='date']::-webkit-datetime-edit {
 
 /* Горизонтальные вкладки на мобилке */
 .admin-nav-item--compact {
-  padding: 8px 12px;
+  padding: 8px 13px;
   flex: 0 0 auto;
   white-space: nowrap;
   font-size: 13px;
+  scroll-snap-align: center;
 }
 .admin-nav-item--compact[aria-current='page']::after { display: none; }
+.admin-nav-item--compact[aria-current='page'] {
+  box-shadow: inset 0 0 0 1px var(--accent-glow);
+}
+
+/* Скроллер вкладок: снап, скрытый скроллбар, «затухание» у краёв как намёк на
+   продолжение списка за пределами экрана. */
+.admin-nav-scroller {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 2px 14px;
+  margin: 0 -14px;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+}
+.admin-nav-scroller::-webkit-scrollbar { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .admin-nav-item, .admin-nav-icon { transition: none; }
+  .admin-nav-scroller { scroll-behavior: auto; }
 }

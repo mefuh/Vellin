@@ -1,4 +1,5 @@
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { FEATURE_FLAG_REPORTS, type AdminPermission } from '@vellin/shared';
 import { useAuthStore, useFeatureEnabled } from '../../stores/authStore';
 import { Avatar, Button, Icon, VellinLogo, type IconName } from '../../shared';
@@ -95,8 +96,17 @@ function AdminShellInner() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isMobile = useIsMobile();
+  const { pathname } = useLocation();
+  const navScrollerRef = useRef<HTMLElement>(null);
   const { me, loading, can } = useAdminAccess();
   const reportsEnabled = useFeatureEnabled(FEATURE_FLAG_REPORTS);
+
+  // Мобильные вкладки: активную подводим в поле зрения при смене раздела —
+  // иначе выбранный пункт может оказаться за пределами прокрутки.
+  useEffect(() => {
+    const el = navScrollerRef.current?.querySelector<HTMLElement>('[aria-current="page"]');
+    el?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  }, [pathname, isMobile]);
 
   // Пункты, доступные текущему сотруднику по его правам. Пока /admin/me грузится,
   // показываем всё — реальный барьер на сервере (403), это лишь UX. Пункты,
@@ -137,7 +147,7 @@ function AdminShellInner() {
             <RolePill name={roleName} />
             <Button variant="ghost" size="sm" icon="arrow" onClick={() => navigate('/library')} title="К библиотеке" />
           </div>
-          <nav style={{ display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 2 }}>
+          <nav ref={navScrollerRef} className="admin-nav-scroller">
             {flatItems.map((item) => (
               <NavLink key={item.to} to={item.to} className="admin-nav-item admin-nav-item--compact">
                 <Icon name={item.icon} size={15} className="admin-nav-icon" />

@@ -47,14 +47,18 @@ export function AdminPage({
   return (
     <div style={{ position: 'relative', minWidth: 0 }}>
       <AdminKeyframes />
-      {/* Glow-пятно под контентом */}
+      {/* Glow-пятно под контентом. Ширину ограничиваем контейнером (min с 100%) и
+          прижимаем к правому краю (right: 0) — так пятно НЕ выходит за пределы по
+          горизонтали и не создаёт скролл на мобилке. Клиппер/overflow здесь нельзя:
+          overflow на предке ломает position:fixed модалок (и режет мягкий градиент
+          в прямоугольник). */}
       <div
         aria-hidden
         style={{
           position: 'absolute',
           top: -120,
-          right: -80,
-          width: 420,
+          right: 0,
+          width: 'min(420px, 100%)',
           height: 420,
           borderRadius: '50%',
           background: `radial-gradient(circle, ${glow}, transparent 68%)`,

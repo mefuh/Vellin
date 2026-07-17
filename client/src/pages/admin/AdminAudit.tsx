@@ -199,42 +199,68 @@ function AuditRow({ entry, narrow }: { entry: AuditLogEntryDTO; narrow: boolean 
 
   return (
     <div style={{ borderBottom: '1px solid var(--line-1)' }}>
-      <button
-        onClick={() => hasDetail && setOpen((v) => !v)}
-        style={{
-          width: '100%',
-          display: 'grid',
-          gridTemplateColumns: narrow ? '1fr auto' : '132px 1fr 210px auto',
-          alignItems: 'center',
-          gap: 12,
-          padding: '11px 16px',
-          border: 'none',
-          background: 'transparent',
-          cursor: hasDetail ? 'pointer' : 'default',
-          textAlign: 'left',
-          color: 'var(--text-0)',
-        }}
-      >
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-3)' }}>
-          {new Date(entry.createdAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0, boxShadow: desc.severity !== 'neutral' ? `0 0 7px ${dot}` : 'none' }} />
-          <span style={{ fontSize: 13.5, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {desc.title}
+      {narrow ? (
+        // Мобайл: две строки — крупный заголовок с точкой-статусом и шевроном,
+        // ниже мелким моно время и почта автора (не режем заголовок в узкую
+        // колонку, как было со сломанной сеткой 1fr/auto).
+        <button
+          onClick={() => hasDetail && setOpen((v) => !v)}
+          style={{
+            width: '100%', display: 'flex', flexDirection: 'column', gap: 4,
+            padding: '12px 16px', border: 'none', background: 'transparent',
+            cursor: hasDetail ? 'pointer' : 'default', textAlign: 'left', color: 'var(--text-0)',
+          }}
+        >
+          <span style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0, width: '100%' }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0, boxShadow: desc.severity !== 'neutral' ? `0 0 7px ${dot}` : 'none' }} />
+            <span style={{ flex: 1, minWidth: 0, fontSize: 14, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {desc.title}
+            </span>
+            {hasDetail && (
+              <Icon name="chevronD" size={15} style={{ color: 'var(--text-3)', flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
+            )}
           </span>
-        </span>
-        {!narrow && (
+          <span style={{ display: 'flex', gap: 8, paddingLeft: 16, minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-3)' }}>
+            <span style={{ flexShrink: 0 }}>{new Date(entry.createdAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {entry.actorEmail}</span>
+          </span>
+        </button>
+      ) : (
+        <button
+          onClick={() => hasDetail && setOpen((v) => !v)}
+          style={{
+            width: '100%',
+            display: 'grid',
+            gridTemplateColumns: '132px 1fr 210px auto',
+            alignItems: 'center',
+            gap: 12,
+            padding: '11px 16px',
+            border: 'none',
+            background: 'transparent',
+            cursor: hasDetail ? 'pointer' : 'default',
+            textAlign: 'left',
+            color: 'var(--text-0)',
+          }}
+        >
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-3)' }}>
+            {new Date(entry.createdAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0, boxShadow: desc.severity !== 'neutral' ? `0 0 7px ${dot}` : 'none' }} />
+            <span style={{ fontSize: 13.5, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {desc.title}
+            </span>
+          </span>
           <span style={{ fontSize: 12.5, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {entry.actorEmail}
           </span>
-        )}
-        {hasDetail ? (
-          <Icon name="chevronD" size={15} style={{ color: 'var(--text-3)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
-        ) : (
-          <span />
-        )}
-      </button>
+          {hasDetail ? (
+            <Icon name="chevronD" size={15} style={{ color: 'var(--text-3)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
+          ) : (
+            <span />
+          )}
+        </button>
+      )}
 
       {open && hasDetail && (
         <div style={{ padding: '0 16px 14px 34px', display: 'flex', flexDirection: 'column', gap: 10 }}>

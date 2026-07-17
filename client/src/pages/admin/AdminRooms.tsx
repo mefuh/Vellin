@@ -4,6 +4,7 @@ import type { AdminAccessMode, AdminRoomSummary } from '@vellin/shared';
 import { adminApi } from '../../api/admin';
 import { ApiHttpError } from '../../api/client';
 import { Button, Chip, Icon, MountainPoster } from '../../shared';
+import { useIsNarrow } from '../../hooks/useMediaQuery';
 import { AdminRoomEdit } from './AdminRoomEdit';
 import { AdminRoomDetail } from './AdminRoomDetail';
 import { ConfirmShell, DialogActions } from './AdminUsers';
@@ -21,6 +22,7 @@ export const ADMIN_TICKET_STORAGE_PREFIX = 'vellin.admin.ticket.';
 
 export function AdminRooms() {
   const navigate = useNavigate();
+  const isNarrow = useIsNarrow();
   const [rooms, setRooms] = useState<AdminRoomSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -117,6 +119,10 @@ export function AdminRooms() {
         </div>
       )}
 
+      {/* На мобилке при открытой подробной карточке список прячем — карточка
+          рендерится ниже отдельным под-экраном (не оверлеем). */}
+      {!(isNarrow && detailTarget) && (
+        <>
       {rooms.length === 0 && !loading ? (
         <AdminSurface><AdminEmpty>Ничего не найдено</AdminEmpty></AdminSurface>
       ) : (
@@ -184,6 +190,8 @@ export function AdminRooms() {
             {loading ? 'Загрузка…' : 'Показать ещё'}
           </Button>
         </div>
+      )}
+        </>
       )}
 
       {detailTarget && (
