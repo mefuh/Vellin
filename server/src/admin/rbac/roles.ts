@@ -36,6 +36,13 @@ export function isSuperAdminRole(role: Pick<AdminRole, 'key'> | null | undefined
   return role?.key === 'super_admin';
 }
 
+/** Является ли пользователь сотрудником (есть админ-роль). Используется, чтобы
+ * запретить рядовым админам блокировать других администраторов. */
+export async function userHasAdminRole(userId: string): Promise<boolean> {
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { adminRoleId: true } });
+  return !!u?.adminRoleId;
+}
+
 export function toRoleDTO(role: AdminRole, memberCount: number): AdminRoleDTO {
   return {
     id: role.id,

@@ -7,6 +7,7 @@ import type {
 } from '@vellin/shared';
 import type { Principal } from '../auth/jwt.js';
 import { requireAuth } from '../auth/middleware.js';
+import { assertPushEnabled } from '../admin/platform/gate.js';
 import { getVapidPublicKey } from './vapid.js';
 import { registerDevice, removeByEndpoint, listDevices } from './deviceRegistry.js';
 import { getPreferences, updatePreferences } from './preferences.js';
@@ -62,6 +63,7 @@ export async function pushRoutes(app: FastifyInstance): Promise<void> {
   app.post('/push/subscribe', async (req, reply) => {
     const p = requireUser(req, reply);
     if (!p) return;
+    await assertPushEnabled();
     const parsed = subscribeSchema.parse(req.body);
     const deviceId = await registerDevice(
       p.userId,
@@ -108,6 +110,7 @@ export async function pushRoutes(app: FastifyInstance): Promise<void> {
   app.post('/push/test', async (req, reply) => {
     const p = requireUser(req, reply);
     if (!p) return;
+    await assertPushEnabled();
     const sent = await sendTestPush(p.userId);
     reply.send({ ok: true, sent });
   });

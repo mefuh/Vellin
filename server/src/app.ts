@@ -27,6 +27,7 @@ import { adminRoomsExtraRoutes } from './admin/rooms/routes.js';
 import { adminInsightsRoutes } from './admin/insights/routes.js';
 import { recordError, recordRequest, startMetricsSampler } from './admin/system/metrics.js';
 import { seedRolesAndBootstrapAdmin } from './admin/rbac/roles.js';
+import { seedDefaultFlags } from './admin/platform/flags.js';
 import { friendRoutes } from './friends/routes.js';
 import { dmRoutes } from './dm/routes.js';
 import { geoRoutes } from './geo/routes.js';
@@ -193,6 +194,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   void seedRolesAndBootstrapAdmin().catch((err) =>
     logger.error({ err }, 'rbac: seed/bootstrap failed'),
   );
+
+  // Well-known feature-флаги (напр. приём жалоб) — засеиваем идемпотентно, чтобы
+  // они были видны/управляемы в админке и по умолчанию включены.
+  void seedDefaultFlags().catch((err) => logger.error({ err }, 'flags: seed failed'));
 
   // Аналитика: периодический суточный снапшот метрик (DAU/online/активность),
   // которые нельзя восстановить из createdAt задним числом.

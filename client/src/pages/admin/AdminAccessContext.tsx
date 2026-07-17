@@ -8,6 +8,8 @@ interface AdminAccessValue {
   error: string | null;
   /** Есть ли у текущего сотрудника указанное право. */
   can: (perm: AdminPermission) => boolean;
+  /** Является ли текущий сотрудник Super Admin. */
+  isSuperAdmin: boolean;
   reload: () => void;
 }
 
@@ -40,7 +42,10 @@ export function AdminAccessProvider({ children }: { children: ReactNode }) {
   const permSet = useMemo(() => new Set(me?.permissions ?? []), [me]);
   const can = useCallback((perm: AdminPermission) => permSet.has(perm), [permSet]);
 
-  const value = useMemo<AdminAccessValue>(() => ({ me, loading, error, can, reload }), [me, loading, error, can, reload]);
+  const value = useMemo<AdminAccessValue>(
+    () => ({ me, loading, error, can, isSuperAdmin: me?.isSuperAdmin ?? false, reload }),
+    [me, loading, error, can, reload],
+  );
 
   return <AdminAccessContext.Provider value={value}>{children}</AdminAccessContext.Provider>;
 }

@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import type { RuntimeAnnouncement, RuntimeConfig } from '@vellin/shared';
 import { runtimeApi } from '../api/adminPlatform';
 import { useAuthStore } from '../stores/authStore';
 import { Button, Icon, VellinLogo } from '../shared';
+
+/** Страницы, которые остаются доступны в режиме обслуживания — чтобы админ мог
+ * войти обратно (сервер пускает администраторов при тех.работах). */
+const MAINTENANCE_EXEMPT = new Set(['/login', '/register']);
 
 const DISMISS_KEY = 'vellin.ann.dismissed';
 
@@ -28,14 +33,33 @@ const STYLE_TONE: Record<string, { bg: string; fg: string; bd: string }> = {
 export function RuntimeLayer() {
   const user = useAuthStore((s) => s.user);
   const token = useAuthStore((s) => s.token);
+  const setMaintenance = useAuthStore((s) => s.setMaintenance);
+  const setFeatureFlags = useAuthStore((s) => s.setFeatureFlags);
+  // Экран обслуживания ведём от live-значений стора: их обновляет и REST-снимок,
+  // и WS-пуш «runtime», поэтому тех.работы применяются без перезагрузки.
+  const maintenanceActive = useAuthStore((s) => s.maintenanceActive);
+  const maintenanceMessage = useAuthStore((s) => s.maintenanceMessage);
+  const { pathname } = useLocation();
   const [config, setConfig] = useState<RuntimeConfig | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(() => readDismissed());
 
   useEffect(() => {
     let alive = true;
-    runtimeApi.get().then((c) => { if (alive) setConfig(c); }).catch(() => { /* ignore */ });
+    runtimeApi.get().then((c) => {
+      if (!alive) return;
+      setConfig(c);
+      setMaintenance(c.maintenance.enabled, c.maintenance.message);
+      setFeatureFlags(c.flags);
+    }).catch(() => { /* ignore */ });
     return () => { alive = false; };
-  }, [token]);
+  }, [token, setMaintenance, setFeatureFlags]);
+
+  // Экран обслуживания — для всех, кроме администраторов. Страницы входа/
+  // регистрации не перекрываем: сервер пускает админов при тех.работах, и это
+  // единственный способ вернуться, если админ всё же оказался разлогинен.
+  if (maintenanceActive && !user?.isAdmin && !MAINTENANCE_EXEMPT.has(pathname)) {
+    return <MaintenanceScreen message={maintenanceMessage} />;
+  }
 
   if (!config) return null;
 
@@ -45,11 +69,6 @@ export function RuntimeLayer() {
     setDismissed(next);
     persistDismissed(next);
   };
-
-  // Экран обслуживания — для всех, кроме администраторов.
-  if (config.maintenance.enabled && !user?.isAdmin) {
-    return <MaintenanceScreen message={config.maintenance.message} />;
-  }
 
   const visible = config.announcements.filter((a) => !dismissed.has(a.id));
   const banners = visible.filter((a) => a.kind === 'banner');

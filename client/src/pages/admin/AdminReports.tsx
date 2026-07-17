@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import {
+  FEATURE_FLAG_REPORTS,
   REPORT_REASON_LABELS,
   type ReportDTO,
   type ReportStatus,
@@ -11,6 +12,7 @@ import { ApiHttpError } from '../../api/client';
 import { Button, Chip, Icon } from '../../shared';
 import { AdminPage, AdminSurface, AdminEmpty } from './components/AdminPage';
 import { useAdminAccess } from './AdminAccessContext';
+import { useFeatureEnabled } from '../../stores/authStore';
 import { ConfirmShell, DialogActions } from './AdminUsers';
 
 const TARGET_LABEL: Record<ReportTargetType, string> = {
@@ -28,6 +30,7 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 export function AdminReports() {
   const { can } = useAdminAccess();
+  const reportsEnabled = useFeatureEnabled(FEATURE_FLAG_REPORTS);
   const [filter, setFilter] = useState<Filter>('open');
   const [reports, setReports] = useState<ReportDTO[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -54,6 +57,9 @@ export function AdminReports() {
   useEffect(() => { void load(); }, [load]);
 
   const canHandle = can('reports.handle');
+
+  // Жалобы выключены feature-флагом — раздела нет вовсе (в т.ч. по прямой ссылке).
+  if (!reportsEnabled) return <Navigate to="/admin" replace />;
 
   return (
     <AdminPage

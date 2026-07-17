@@ -18,6 +18,7 @@ import type {
 } from '@vellin/shared';
 import type { Principal } from '../auth/jwt.js';
 import { requireAuth } from '../auth/middleware.js';
+import { assertFriendsEnabled } from '../admin/platform/gate.js';
 import {
   blockUser,
   getNotificationsSnapshot,
@@ -82,6 +83,7 @@ export async function friendRoutes(app: FastifyInstance): Promise<void> {
   app.post('/friends/requests', async (req, reply) => {
     const p = requireUser(req, reply);
     if (!p) return;
+    await assertFriendsEnabled();
     const body = sendRequestSchema.parse(req.body ?? {});
     const result = await sendRequest(p.userId, body);
     reply.code(201).send(result satisfies SendFriendRequestResponse);
@@ -90,6 +92,7 @@ export async function friendRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string } }>('/friends/requests/:id/accept', async (req, reply) => {
     const p = requireUser(req, reply);
     if (!p) return;
+    await assertFriendsEnabled();
     const status = await respondRequest(p.userId, req.params.id, true);
     reply.send({ status } satisfies RespondFriendRequestResponse);
   });

@@ -296,6 +296,37 @@ input[type='date']::-webkit-datetime-edit {
   from { opacity: 1; }
   to { opacity: 0; }
 }
+/* ── Модалка жалобы: подложка + панель, симметричные вход/выход ────────────── */
+@keyframes reportPanelIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.96); filter: blur(8px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes reportPanelOut {
+  from { opacity: 1; transform: none; filter: blur(0); }
+  to { opacity: 0; transform: translateY(10px) scale(0.97); filter: blur(6px); }
+}
+.report-overlay {
+  animation: filmOverlayIn 0.24s ease both;
+}
+.report-overlay[data-closing='true'] {
+  animation: filmOverlayOut 0.2s ease both;
+}
+.report-panel {
+  animation: reportPanelIn 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.report-overlay[data-closing='true'] .report-panel {
+  animation: reportPanelOut 0.2s cubic-bezier(0.4, 0, 1, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .report-panel,
+  .report-overlay[data-closing='true'] .report-panel {
+    animation: filmOverlayIn 0.2s ease both;
+  }
+  .report-overlay[data-closing='true'] .report-panel {
+    animation: filmOverlayOut 0.16s ease both;
+  }
+}
+
 /* Ховер-подъём карточки результата поиска. */
 .film-result {
   transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
@@ -752,4 +783,75 @@ input[type='date']::-webkit-datetime-edit {
   .friend-card[data-exiting='true'] {
     animation: heroFadeOut 0.2s ease both !important;
   }
+}
+
+/* ── Боковая навигация админ-панели ──────────────────────────────────────── */
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 -6px;
+  padding: 0 6px;
+}
+.admin-nav-group {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  padding: 0 12px;
+  margin: 18px 0 6px;
+}
+.admin-nav-group:first-child { margin-top: 2px; }
+
+.admin-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  position: relative;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.admin-nav-item:hover { background: var(--bg-2); color: var(--text-1); }
+.admin-nav-item:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: 1px; }
+.admin-nav-icon { color: var(--text-3); flex-shrink: 0; transition: color 0.16s ease; }
+.admin-nav-item:hover .admin-nav-icon { color: var(--text-1); }
+
+.admin-nav-item[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--text-0);
+  font-weight: 600;
+}
+.admin-nav-item[aria-current='page'] .admin-nav-icon { color: var(--accent-hi); }
+.admin-nav-item[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-hi);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+/* Горизонтальные вкладки на мобилке */
+.admin-nav-item--compact {
+  padding: 8px 12px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.admin-nav-item--compact[aria-current='page']::after { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-nav-item, .admin-nav-icon { transition: none; }
 }

@@ -491,10 +491,23 @@ export interface SystemJobsResponse {
 
 /** Тумблеры функциональности (enforce на сервере при соответствующих действиях). */
 export interface PlatformToggles {
+  // Доступ
   registration: boolean;
   guests: boolean;
+  // Комнаты и просмотр
   roomCreation: boolean;
+  roomChat: boolean;
+  reactions: boolean;
+  calls: boolean;
+  playlists: boolean;
+  // Общение
+  directMessages: boolean;
+  friends: boolean;
+  invites: boolean;
+  // Контент и уведомления
   uploads: boolean;
+  favorites: boolean;
+  push: boolean;
 }
 
 export interface PlatformMaintenance {
@@ -528,6 +541,14 @@ export interface UpdatePlatformSettingsRequest {
 }
 
 // ── Feature flags ────────────────────────────────────────────────────────────
+
+/**
+ * Well-known ключ feature-флага приёма жалоб. По умолчанию включён; когда
+ * выключен в разделе «Feature flags» — весь функционал жалоб скрывается
+ * полностью (кнопка в профиле, модалка, админ-раздел «Жалобы»), а сервер
+ * отклоняет создание новых жалоб.
+ */
+export const FEATURE_FLAG_REPORTS = 'reports';
 
 export interface FeatureFlagDTO {
   key: string;

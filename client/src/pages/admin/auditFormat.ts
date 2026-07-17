@@ -61,7 +61,16 @@ const TOGGLE_LABELS: Record<string, string> = {
   registration: 'Регистрация',
   guests: 'Гостевой вход',
   roomCreation: 'Создание комнат',
+  roomChat: 'Чат в комнатах',
+  reactions: 'Реакции',
+  calls: 'Звонки',
+  playlists: 'Плейлисты',
+  directMessages: 'Личные сообщения',
+  friends: 'Друзья',
+  invites: 'Приглашения в комнаты',
   uploads: 'Загрузка файлов',
+  favorites: 'Избранные фильмы',
+  push: 'Push-уведомления',
 };
 const LIMIT_LABELS: Record<string, string> = {
   maxRoomParticipants: 'Макс. участников комнаты',

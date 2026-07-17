@@ -10,7 +10,7 @@ import type {
 } from '@vellin/shared';
 import type { Principal } from '../auth/jwt.js';
 import { requireAuth } from '../auth/middleware.js';
-import { assertUploadsEnabled } from '../admin/platform/gate.js';
+import { assertUploadsEnabled, assertDirectMessagesEnabled } from '../admin/platform/gate.js';
 import { getRoomInviteInfo, getThreadByPublicId, listConversations, respondRoomInvite } from './service.js';
 import { broadcastRoomInviteUpdate } from './realtime.js';
 import { ALLOWED_DM_IMAGE_MIME, MAX_DM_IMAGE_BYTES, processAndSaveDmImage } from './image.js';
@@ -57,6 +57,7 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
   // Загрузка изображения для ЛС (multipart). Сама отправка идёт по WS с
   // полученным здесь url.
   app.post('/dm/image', async (req, reply) => {
+    await assertDirectMessagesEnabled();
     await assertUploadsEnabled();
     const p = requireUser(req, reply);
     if (!p) return;
@@ -91,6 +92,7 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
   // Загрузка голосового сообщения (multipart). Аудио не перекодируем — кладём
   // исходный blob; длительность/волну считает клиент и шлёт в dm_send.
   app.post('/dm/voice', async (req, reply) => {
+    await assertDirectMessagesEnabled();
     await assertUploadsEnabled();
     const p = requireUser(req, reply);
     if (!p) return;
@@ -127,6 +129,7 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
   // Видеосообщение («кружок»). Сырое видео СТРИМИТСЯ на диск (без буфера в RAM),
   // потолок 128 МБ. Возвращает uploadId; транскод в mp4 идёт в фоне после dm_send.
   app.post('/dm/video-note', async (req, reply) => {
+    await assertDirectMessagesEnabled();
     await assertUploadsEnabled();
     const p = requireUser(req, reply);
     if (!p) return;

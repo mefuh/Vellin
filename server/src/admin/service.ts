@@ -25,7 +25,7 @@ export function toAdminUserSummary(
   u: Pick<
     User,
     'id' | 'publicId' | 'email' | 'username' | 'avatarSeed' | 'avatarUrl' | 'createdAt' | 'isBlocked' | 'blockedAt' | 'blockReason'
-  > & { _count?: { rooms?: number } },
+  > & { _count?: { rooms?: number }; adminRole?: { name: string } | null },
 ): AdminUserSummary {
   return {
     id: u.id,
@@ -39,6 +39,7 @@ export function toAdminUserSummary(
     blockedAt: u.blockedAt ? u.blockedAt.toISOString() : null,
     blockReason: u.blockReason,
     roomsOwned: u._count?.rooms ?? 0,
+    roleName: u.adminRole?.name ?? null,
   };
 }
 
@@ -96,7 +97,7 @@ export async function listUsers(
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    include: { _count: { select: { rooms: true } } },
+    include: { _count: { select: { rooms: true } }, adminRole: { select: { name: true } } },
   });
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
@@ -112,7 +113,7 @@ export async function getUserDetail(userId: string): Promise<{
 } | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { _count: { select: { rooms: true } } },
+    include: { _count: { select: { rooms: true } }, adminRole: { select: { name: true } } },
   });
   if (!user) return null;
   const rooms = await prisma.room.findMany({
@@ -147,7 +148,7 @@ export async function blockUser(userId: string, reason?: string): Promise<AdminU
       blockedAt: new Date(),
       blockReason: reason?.trim().slice(0, 500) || null,
     },
-    include: { _count: { select: { rooms: true } } },
+    include: { _count: { select: { rooms: true } }, adminRole: { select: { name: true } } },
   });
   roomStore.closeUserSessionsEverywhere(userId, 'blocked');
   return toAdminUserSummary(user);
@@ -157,7 +158,7 @@ export async function unblockUser(userId: string): Promise<AdminUserSummary> {
   const user = await prisma.user.update({
     where: { id: userId },
     data: { isBlocked: false, blockedAt: null, blockReason: null },
-    include: { _count: { select: { rooms: true } } },
+    include: { _count: { select: { rooms: true } }, adminRole: { select: { name: true } } },
   });
   return toAdminUserSummary(user);
 }

@@ -12,8 +12,11 @@ import type {
 import { prisma } from '../../db/prisma.js';
 import { requireAuth } from '../../auth/middleware.js';
 import { requirePermission } from '../rbac/middleware.js';
+import { userHasAdminRole } from '../rbac/roles.js';
 import { writeAudit } from '../audit/audit.js';
 import { blockUser } from '../service.js';
+import { isFeatureEnabled } from '../platform/flags.js';
+import { FEATURE_FLAG_REPORTS } from '@vellin/shared';
 import { broadcastNotify } from '../../push/notificationService.js';
 import { logger } from '../../utils/logger.js';
 
@@ -111,6 +114,12 @@ function toReportDTO(r: Report): ReportDTO {
 /** Пользовательский роут: подать жалобу. Доступен любому авторизованному. */
 export async function reportPublicRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: CreateReportRequest }>('/reports', { preHandler: requireAuth }, async (req, reply) => {
+    // Приём жалоб управляется feature-флагом. Когда выключен — жалобы недоступны
+    // (клиент их и не показывает, но защищаемся и на сервере).
+    if (!(await isFeatureEnabled(FEATURE_FLAG_REPORTS, true))) {
+      reply.code(403).send({ error: 'Forbidden', message: 'Приём жалоб отключён', statusCode: 403 });
+      return;
+    }
     const body = createSchema.parse(req.body);
     const principal = req.principal!;
     const target = await resolveTarget(body.targetType, body.targetId);
@@ -194,6 +203,14 @@ export async function adminReportRoutes(app: FastifyInstance): Promise<void> {
         return;
       }
       const adminId = req.principal!.userId;
+      // Заблокировать администратора (через жалобу) может только Super Admin.
+      if (
+        body.decision === 'accept' && body.block && report.targetUserId && report.targetUserId !== adminId
+        && !req.adminIdentity?.isSuperAdmin && (await userHasAdminRole(report.targetUserId))
+      ) {
+        reply.code(403).send({ error: 'Forbidden', message: 'Заблокировать администратора может только Super Admin', statusCode: 403 });
+        return;
+      }
       const adminEmail = (await prisma.user.findUnique({ where: { id: adminId }, select: { email: true } }))?.email ?? null;
       const status = body.decision === 'accept' ? 'accepted' : 'rejected';
 

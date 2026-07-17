@@ -1,6 +1,20 @@
-import type { FeatureFlagDTO } from '@vellin/shared';
+import { FEATURE_FLAG_REPORTS, type FeatureFlagDTO } from '@vellin/shared';
 import { prisma } from '../../db/prisma.js';
 import { loadEnv } from '../../env.js';
+
+/**
+ * Well-known флаги с осмысленным дефолтом. Засеиваются при старте (идемпотентно,
+ * без перезаписи выбора админа), а также подмешиваются в {@link enabledFlagKeys}
+ * как включённые, если строки ещё нет — чтобы функционал по умолчанию не пропадал
+ * из-за отсутствующей записи.
+ */
+const DEFAULT_FLAGS: Array<{ key: string; enabled: boolean; description: string }> = [
+  {
+    key: FEATURE_FLAG_REPORTS,
+    enabled: true,
+    description: 'Приём жалоб от пользователей. Выключение полностью скрывает жалобы: кнопку в профиле, форму и админ-раздел «Жалобы».',
+  },
+];
 
 // Кэш флагов в памяти: key → enabled. Инвалидируется при любой записи.
 let cache: Map<string, boolean> | null = null;
@@ -25,7 +39,26 @@ export async function isFeatureEnabled(key: string, fallback = false): Promise<b
 /** Ключи включённых флагов — для публичного runtime. */
 export async function enabledFlagKeys(): Promise<string[]> {
   const c = await ensureCache();
-  return [...c.entries()].filter(([, v]) => v).map(([k]) => k);
+  const keys = new Set([...c.entries()].filter(([, v]) => v).map(([k]) => k));
+  // Well-known флаги с дефолтом «включён» считаем включёнными, пока явной строки
+  // нет — это защищает от исчезновения функционала до сидирования/при пустой БД.
+  for (const d of DEFAULT_FLAGS) if (d.enabled && !c.has(d.key)) keys.add(d.key);
+  return [...keys];
+}
+
+/**
+ * Идемпотентно засеять well-known флаги при старте: создаёт недостающие строки,
+ * но НЕ трогает enabled уже существующих (уважает выбор администратора).
+ */
+export async function seedDefaultFlags(): Promise<void> {
+  for (const d of DEFAULT_FLAGS) {
+    await prisma.featureFlag.upsert({
+      where: { key: d.key },
+      create: { key: d.key, enabled: d.enabled, description: d.description, updatedBy: 'system' },
+      update: {},
+    });
+  }
+  invalidateFlags();
 }
 
 /**

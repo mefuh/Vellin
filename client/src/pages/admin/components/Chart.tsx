@@ -109,6 +109,51 @@ export function AreaTrend({
   );
 }
 
+/**
+ * Компактный live-график для реального времени (CPU/память): область-тренд по
+ * накопленным на клиенте отсчётам. Без оси X (точки идут во времени слева
+ * направо), с минимальной осью Y и тултипом значения.
+ */
+export function LiveArea({
+  points,
+  color = 'accent',
+  unit,
+  yMax,
+  height = 130,
+}: {
+  points: { value: number }[];
+  color?: 'accent' | 'ok';
+  unit?: string;
+  yMax?: number;
+  height?: number;
+}) {
+  const c = useChartColors();
+  const stroke = color === 'ok' ? c.ok : c.accentHi;
+  const gradId = `live-${color}`;
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart data={points} margin={{ top: 6, right: 6, bottom: 0, left: -22 }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={stroke} stopOpacity={0.32} />
+            <stop offset="100%" stopColor={stroke} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <YAxis domain={[0, yMax ?? 'auto']} tick={{ fill: c.text3, fontSize: 10 }} axisLine={false} tickLine={false} width={38} allowDecimals={false} />
+        <Tooltip
+          cursor={{ stroke: c.line }}
+          content={({ active, payload }) =>
+            active && payload && payload.length ? (
+              <TooltipBox colors={c} label="" value={Number(payload[0]?.value ?? 0)} unit={unit} />
+            ) : null
+          }
+        />
+        <Area type="monotone" dataKey="value" stroke={stroke} strokeWidth={2} fill={`url(#${gradId})`} isAnimationActive={false} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
 /** Столбчатая диаграмма (например активность по часам). */
 export function BarSeries({
   data,

@@ -41,6 +41,17 @@ export function AdminPlatform() {
   );
 }
 
+function GroupCaption({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      padding: '10px 16px 6px', fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.14em',
+      textTransform: 'uppercase', color: 'var(--text-3)', borderBottom: '1px solid var(--line-1)', background: 'var(--bg-2)',
+    }}>
+      {children}
+    </div>
+  );
+}
+
 function ToggleRow({ label, hint, checked, onChange, danger }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void; danger?: boolean }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 16px', borderBottom: '1px solid var(--line-1)' }}>
@@ -98,11 +109,30 @@ function SettingsTab() {
 
       <div>
         <SectionH>Доступность функций</SectionH>
+        <p style={{ margin: '-4px 0 10px', fontSize: 12.5, color: 'var(--text-2)' }}>
+          Выключенная функция мгновенно перестаёт работать у всех пользователей (без перезапуска). Уже открытые комнаты продолжают синхронизацию видео.
+        </p>
         <AdminSurface>
+          <GroupCaption>Доступ</GroupCaption>
           <ToggleRow label="Регистрация" hint="Новые пользователи могут создавать аккаунты" checked={T.registration} onChange={(v) => setT('registration', v)} />
           <ToggleRow label="Гостевой вход" hint="Вход без регистрации" checked={T.guests} onChange={(v) => setT('guests', v)} />
-          <ToggleRow label="Создание комнат" checked={T.roomCreation} onChange={(v) => setT('roomCreation', v)} />
+
+          <GroupCaption>Комнаты и просмотр</GroupCaption>
+          <ToggleRow label="Создание комнат" hint="Пользователи могут создавать новые комнаты" checked={T.roomCreation} onChange={(v) => setT('roomCreation', v)} />
+          <ToggleRow label="Чат в комнатах" hint="Сообщения в чате комнаты" checked={T.roomChat} onChange={(v) => setT('roomChat', v)} />
+          <ToggleRow label="Реакции" hint="Эмодзи-реакции во время просмотра" checked={T.reactions} onChange={(v) => setT('reactions', v)} />
+          <ToggleRow label="Звонки" hint="Голосовые и видеозвонки в комнатах" checked={T.calls} onChange={(v) => setT('calls', v)} />
+          <ToggleRow label="Плейлисты" hint="Очередь видео в комнате" checked={T.playlists} onChange={(v) => setT('playlists', v)} />
+
+          <GroupCaption>Общение</GroupCaption>
+          <ToggleRow label="Личные сообщения" hint="Переписка в личных диалогах" checked={T.directMessages} onChange={(v) => setT('directMessages', v)} />
+          <ToggleRow label="Друзья" hint="Отправка и приём заявок в друзья" checked={T.friends} onChange={(v) => setT('friends', v)} />
+          <ToggleRow label="Приглашения в комнаты" hint="Ссылки-приглашения и зов друзей в комнату" checked={T.invites} onChange={(v) => setT('invites', v)} />
+
+          <GroupCaption>Контент и уведомления</GroupCaption>
           <ToggleRow label="Загрузка файлов" hint="Аватары, изображения/голос/видео в ЛС" checked={T.uploads} onChange={(v) => setT('uploads', v)} />
+          <ToggleRow label="Избранные фильмы" hint="Поиск и добавление любимых фильмов в профиль" checked={T.favorites} onChange={(v) => setT('favorites', v)} />
+          <ToggleRow label="Push-уведомления" hint="Подписка на пуши и тестовая отправка" checked={T.push} onChange={(v) => setT('push', v)} />
         </AdminSurface>
       </div>
 

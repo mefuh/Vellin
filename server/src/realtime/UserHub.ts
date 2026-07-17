@@ -282,6 +282,18 @@ class UserHub {
     }
   }
 
+  /**
+   * Разослать сообщение ВСЕМ онлайн-соединениям (все пользователи, все вкладки).
+   * Используется для мгновенного применения рантайм-эффектов вроде тех.работ.
+   */
+  broadcastAll(msg: UserS2C): void {
+    for (const set of this.conns.values()) {
+      for (const c of set) {
+        if (c.isOpen()) c.send(msg);
+      }
+    }
+  }
+
   /** Принудительно переразослать презенс (после смены настроек приватности). */
   republishPresence(userId: string): void {
     void this.broadcastPresence(userId);

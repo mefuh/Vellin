@@ -1,6 +1,7 @@
 import type { PublicUser } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 import { userHub } from '../realtime/UserHub.js';
+import { isToggleEnabled } from '../admin/platform/gate.js';
 import { removeNotifications } from '../realtime/notify.js';
 import { toAppNotification, PUBLIC_USER_SELECT, toPublicUser } from '../friends/mappers.js';
 import { logger } from '../utils/logger.js';
@@ -133,6 +134,10 @@ export async function handleDmSend(
   voice?: SendVoice,
   video?: SendVideoNote,
 ): Promise<void> {
+  if (!(await isToggleEnabled('directMessages'))) {
+    userHub.pushTo(senderId, { t: 'dm_error', nonce, reason: 'ok', message: 'Личные сообщения временно отключены администратором' });
+    return;
+  }
   try {
     const res = await sendMessage(senderId, toUserId, body, image, voice, video);
     // Видео: привязать сырой файл к сообщению и поставить в очередь транскода.

@@ -7,6 +7,12 @@ import { Avatar, Button, Chip, Icon } from '../../shared';
 import { useAuthStore } from '../../stores/authStore';
 import { useIsNarrow } from '../../hooks/useMediaQuery';
 import { AdminPage, AdminSurface, AdminEmpty } from './components/AdminPage';
+import { useAdminAccess } from './AdminAccessContext';
+
+/** Заблокировать администратора может только Super Admin. */
+function blockLock(user: AdminUserSummary, isSuperAdmin: boolean): string | null {
+  return user.roleName && !isSuperAdmin ? 'Заблокировать администратора может только Super Admin' : null;
+}
 
 const PAGE_LIMIT = 20;
 
@@ -17,6 +23,7 @@ const USER_GRID_COLUMNS = 'minmax(200px, 2fr) minmax(160px, 2fr) 120px 110px 230
 
 export function AdminUsers() {
   const me = useAuthStore((s) => s.user);
+  const { isSuperAdmin } = useAdminAccess();
   const isNarrow = useIsNarrow();
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -129,6 +136,7 @@ export function AdminUsers() {
               key={u.id}
               user={u}
               isMe={u.id === me?.id}
+              blockLocked={blockLock(u, isSuperAdmin)}
               onBlock={() => setBlockTarget(u)}
               onUnblock={async () => {
                 try {
@@ -209,7 +217,8 @@ export function AdminUsers() {
                   <Button
                     variant="secondary"
                     size="sm"
-                    disabled={u.id === me?.id}
+                    disabled={u.id === me?.id || !!blockLock(u, isSuperAdmin)}
+                    title={blockLock(u, isSuperAdmin) ?? undefined}
                     onClick={() => setBlockTarget(u)}
                   >
                     Блокировать
@@ -448,12 +457,14 @@ export function DialogActions({ children }: { children: React.ReactNode }) {
 function UserCard({
   user: u,
   isMe,
+  blockLocked,
   onBlock,
   onUnblock,
   onDelete,
 }: {
   user: AdminUserSummary;
   isMe: boolean;
+  blockLocked: string | null;
   onBlock: () => void;
   onUnblock: () => void | Promise<void>;
   onDelete: () => void;
@@ -533,7 +544,7 @@ function UserCard({
             Разблокировать
           </Button>
         ) : (
-          <Button variant="secondary" size="sm" disabled={isMe} onClick={onBlock}>
+          <Button variant="secondary" size="sm" disabled={isMe || !!blockLocked} title={blockLocked ?? undefined} onClick={onBlock}>
             Блокировать
           </Button>
         )}

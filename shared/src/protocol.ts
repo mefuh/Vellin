@@ -351,7 +351,8 @@ export interface S2CError {
     | 'blocked'
     | 'shadow_mode'
     | 'room_closed'
-    | 'resolve_failed';
+    | 'resolve_failed'
+    | 'feature_disabled';
   message: string;
 }
 
@@ -417,6 +418,7 @@ export type UserS2C =
   | UserS2CDmTyping
   | UserS2CDmVoicePlayed
   | UserS2CDmError
+  | UserS2CRuntime
   | UserS2CPing;
 
 /** Снапшот при подключении: непрочитанные уведомления + presence друзей. */
@@ -536,6 +538,15 @@ export interface UserS2CDmError {
   nonce?: string;
   reason: string;
   message: string;
+}
+/**
+ * Живое обновление рантайм-конфига (сейчас — режим обслуживания). Рассылается
+ * всем онлайн-пользователям при смене настроек, чтобы эффект тех.работ (экран-
+ * заглушка, запрет выхода админа) применялся мгновенно, без перезагрузки.
+ */
+export interface UserS2CRuntime {
+  t: 'runtime';
+  maintenance: { enabled: boolean; message: string };
 }
 export interface UserS2CPing {
   t: 'ping';

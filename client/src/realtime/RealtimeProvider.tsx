@@ -114,6 +114,11 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
         case 'dm_error':
           useDmStore.getState().applyError(msg.nonce);
           break;
+        case 'runtime':
+          // Живое применение тех.работ: экран-заглушка/запрет выхода админа
+          // включаются и снимаются мгновенно, без перезагрузки страницы.
+          useAuthStore.getState().setMaintenance(msg.maintenance.enabled, msg.maintenance.message);
+          break;
         default:
           break;
       }

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { incWsEvent } from '../admin/system/metrics.js';
 import { logRoomEvent } from '../rooms/events.js';
+import { isToggleEnabled } from '../admin/platform/gate.js';
 import {
   isC2S,
   ALL_PERMISSIONS,
@@ -457,6 +458,26 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
 }
 
 async function dispatch(msg: C2S, ctx: ConnectionContext, runtime: Awaited<ReturnType<typeof ensureRoomRuntime>>): Promise<void> {
+  // Тумблеры «Доступность функций» (управление платформой). Гейтим только
+  // интерактивные действия — базовый просмотр видео не трогаем, чтобы уже
+  // открытые комнаты продолжали синхронизироваться.
+  const denyDisabled = (message: string): void => ctx.send({ t: 'error', code: 'feature_disabled', message });
+  if (msg.t === 'chat_message' && !(await isToggleEnabled('roomChat'))) {
+    denyDisabled('Чат в комнатах временно отключён администратором');
+    return;
+  }
+  if (msg.t === 'reaction' && !(await isToggleEnabled('reactions'))) {
+    return; // реакции — fire-and-forget, тихо игнорируем
+  }
+  if (msg.t === 'call_join' && !(await isToggleEnabled('calls'))) {
+    denyDisabled('Звонки временно отключены администратором');
+    return;
+  }
+  if (msg.t.startsWith('playlist_') && !(await isToggleEnabled('playlists'))) {
+    denyDisabled('Плейлисты временно отключены администратором');
+    return;
+  }
+
   switch (msg.t) {
     case 'hello':
       // No-op: welcome already sent on connect. Could re-emit on demand.

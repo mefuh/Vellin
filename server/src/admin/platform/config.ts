@@ -12,7 +12,16 @@ const DEFAULT_TOGGLES: PlatformToggles = {
   registration: true,
   guests: true,
   roomCreation: true,
+  roomChat: true,
+  reactions: true,
+  calls: true,
+  playlists: true,
+  directMessages: true,
+  friends: true,
+  invites: true,
   uploads: true,
+  favorites: true,
+  push: true,
 };
 const DEFAULT_MAINTENANCE: PlatformMaintenance = { enabled: false, message: '' };
 const DEFAULT_LIMITS: PlatformLimits = {

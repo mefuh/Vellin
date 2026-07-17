@@ -8,6 +8,9 @@ import type {
 } from '@vellin/shared';
 import { requirePermission } from '../rbac/middleware.js';
 import { writeAudit } from '../audit/audit.js';
+import { userHub } from '../../realtime/UserHub.js';
+import { roomStore } from '../../rooms/store.js';
+import { logger } from '../../utils/logger.js';
 import { getSettings, updateSettings } from './config.js';
 import { deleteFlag, listFlags, upsertFlag } from './flags.js';
 import {
@@ -22,7 +25,16 @@ const settingsSchema = z.object({
     registration: z.boolean().optional(),
     guests: z.boolean().optional(),
     roomCreation: z.boolean().optional(),
+    roomChat: z.boolean().optional(),
+    reactions: z.boolean().optional(),
+    calls: z.boolean().optional(),
+    playlists: z.boolean().optional(),
+    directMessages: z.boolean().optional(),
+    friends: z.boolean().optional(),
+    invites: z.boolean().optional(),
     uploads: z.boolean().optional(),
+    favorites: z.boolean().optional(),
+    push: z.boolean().optional(),
   }).optional(),
   maintenance: z.object({
     enabled: z.boolean().optional(),
@@ -71,6 +83,19 @@ export async function adminPlatformRoutes(app: FastifyInstance): Promise<void> {
     const before = await getSettings();
     const settings = await updateSettings(patch, req.principal!.userId);
     await writeAudit(req, 'platform.update', { type: 'config', label: 'platform.settings' }, { before, after: settings });
+
+    // Режим обслуживания применяем в реальном времени: рассылаем всем онлайн-
+    // пользователям обновление рантайма (экран-заглушка/запрет выхода админа
+    // появляются/снимаются мгновенно), а при включении — закрываем все комнаты
+    // и звонки.
+    if (before.maintenance.enabled !== settings.maintenance.enabled) {
+      userHub.broadcastAll({ t: 'runtime', maintenance: settings.maintenance });
+      if (settings.maintenance.enabled) {
+        const disconnected = roomStore.closeAllRooms(req.principal!.userId);
+        logger.info({ disconnected }, 'maintenance: closed all rooms');
+      }
+    }
+
     reply.send({ settings } satisfies PlatformSettingsResponse);
   });
 

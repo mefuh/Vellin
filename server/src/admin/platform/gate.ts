@@ -26,6 +26,25 @@ export const assertRoomCreationEnabled = (): Promise<void> =>
   assertToggle('roomCreation', 'Создание комнат временно отключено');
 export const assertUploadsEnabled = (): Promise<void> =>
   assertToggle('uploads', 'Загрузка файлов временно отключена');
+export const assertFriendsEnabled = (): Promise<void> =>
+  assertToggle('friends', 'Функция «Друзья» временно отключена');
+export const assertInvitesEnabled = (): Promise<void> =>
+  assertToggle('invites', 'Приглашения временно отключены');
+export const assertFavoritesEnabled = (): Promise<void> =>
+  assertToggle('favorites', 'Избранные фильмы временно отключены');
+export const assertPushEnabled = (): Promise<void> =>
+  assertToggle('push', 'Push-уведомления временно отключены');
+export const assertDirectMessagesEnabled = (): Promise<void> =>
+  assertToggle('directMessages', 'Личные сообщения временно отключены');
+
+/**
+ * Мягкая проверка тумблера для WS-обработчиков (без throw): вернёт false, если
+ * функция отключена. Вызывающий сам решает, что отправить клиенту.
+ */
+export async function isToggleEnabled(name: keyof PlatformToggles): Promise<boolean> {
+  const toggles = await getToggles();
+  return toggles[name];
+}
 
 /** Режим обслуживания блокирует вход/регистрацию для не-администраторов. */
 export async function assertNotMaintenance(isAdmin: boolean): Promise<void> {

@@ -17,7 +17,9 @@ export function AppHeader({ active }: { active?: DockPage }) {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const maintenanceActive = useAuthStore((s) => s.maintenanceActive);
   const dmUnread = useDmStore((s) => s.unreadTotal);
+  const logoutLocked = !!user?.isAdmin && maintenanceActive;
   const isMobile = useIsMobile();
 
   const activeStyle = {
@@ -154,10 +156,12 @@ export function AppHeader({ active }: { active?: DockPage }) {
             size="sm"
             icon="logout"
             aria-label="Выйти"
-            title="Выйти"
+            disabled={logoutLocked}
+            title={logoutLocked
+              ? 'Выход отключён во время технических работ — чтобы вы не потеряли доступ к админке и смогли их выключить'
+              : 'Выйти'}
             onClick={() => {
-              logout();
-              navigate('/');
+              if (logout()) navigate('/');
             }}
             style={compact ?? undefined}
           >

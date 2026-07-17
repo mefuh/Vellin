@@ -32,7 +32,7 @@ const GENDER: Record<string, string> = { male: 'муж.', female: 'жен.', oth
 export function AdminUserProfile() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
-  const { can } = useAdminAccess();
+  const { can, isSuperAdmin } = useAdminAccess();
   const [data, setData] = useState<AdminUserFullResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -237,6 +237,10 @@ export function AdminUserProfile() {
                 u.isBlocked ? (
                   <Button variant="secondary" size="sm" icon="check" onClick={() => void doAction(() => adminApi.unblockUser(u.id), 'Разблокирован')}>
                     Разблокировать
+                  </Button>
+                ) : u.roleName && !isSuperAdmin ? (
+                  <Button variant="secondary" size="sm" icon="lock" disabled title="Заблокировать администратора может только Super Admin">
+                    Блокировать
                   </Button>
                 ) : (
                   <Button variant="secondary" size="sm" icon="lock" onClick={() => setDialog('block')}>Блокировать</Button>

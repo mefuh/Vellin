@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { REPORT_REASON_LABELS, type ReportReason, type ReportTargetType } from '@vellin/shared';
 import { reportsApi } from '../api/adminModerationExtra';
 import { ApiHttpError } from '../api/client';
@@ -26,6 +26,27 @@ export function ReportModal({
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Проигрываем анимацию исчезновения перед реальным размонтированием (родитель
+  // держит модалку в DOM через флаг open) — задержка равна длительности выхода.
+  const [closing, setClosing] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  const requestClose = () => {
+    if (closing) return;
+    setClosing(true);
+    clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(onClose, 210);
+  };
+
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+
+  // Закрытие по Esc — с той же анимацией выхода.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && requestClose();
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submit = async () => {
     setBusy(true);
@@ -33,7 +54,7 @@ export function ReportModal({
     try {
       await reportsApi.create({ targetType, targetId, reason, comment: comment.trim() || undefined });
       setDone(true);
-      window.setTimeout(onClose, 1400);
+      closeTimer.current = setTimeout(requestClose, 1400);
     } catch (e) {
       setError(e instanceof ApiHttpError ? e.payload.message : 'Не удалось отправить жалобу');
     } finally {
@@ -43,10 +64,13 @@ export function ReportModal({
 
   return (
     <div
+      className="report-overlay"
+      data-closing={closing || undefined}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 1200 }}
-      onClick={onClose}
+      onClick={requestClose}
     >
       <div
+        className="report-panel"
         onClick={(e) => e.stopPropagation()}
         style={{
           background: 'var(--glass-bg)', backdropFilter: 'blur(var(--glass-blur))', WebkitBackdropFilter: 'blur(var(--glass-blur))',
@@ -66,7 +90,7 @@ export function ReportModal({
           <>
             <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, fontFamily: 'var(--font-display)' }}>Пожаловаться</h2>
-              <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 4 }}>
+              <button onClick={requestClose} style={{ background: 'transparent', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 4 }}>
                 <Icon name="close" size={18} />
               </button>
             </header>
@@ -106,7 +130,7 @@ export function ReportModal({
             />
             {error && <span style={{ color: 'var(--accent-hi)', fontSize: 13 }}>{error}</span>}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <Button variant="ghost" onClick={onClose}>Отмена</Button>
+              <Button variant="ghost" onClick={requestClose}>Отмена</Button>
               <Button variant="primary" disabled={busy} onClick={() => void submit()}>Отправить</Button>
             </div>
           </>

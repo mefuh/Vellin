@@ -18,6 +18,7 @@ import type {
   UpdateRoomResponse,
 } from '@vellin/shared';
 import { requirePermission } from './rbac/middleware.js';
+import { userHasAdminRole } from './rbac/roles.js';
 import { writeAudit } from './audit/audit.js';
 import { signWsTicket } from '../auth/jwt.js';
 import { loadEnv } from '../env.js';
@@ -146,6 +147,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         reply
           .code(400)
           .send({ error: 'BadRequest', message: 'Нельзя заблокировать себя', statusCode: 400 });
+        return;
+      }
+      // Заблокировать другого администратора может только Super Admin.
+      if (!req.adminIdentity?.isSuperAdmin && (await userHasAdminRole(req.params.id))) {
+        reply
+          .code(403)
+          .send({ error: 'Forbidden', message: 'Заблокировать администратора может только Super Admin', statusCode: 403 });
         return;
       }
       try {
