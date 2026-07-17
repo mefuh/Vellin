@@ -155,7 +155,8 @@ export function Room() {
     if (!kicked) return;
     const blocked = wsError?.toLowerCase().includes('заблок') ?? false;
     if (blocked) {
-      useAuthStore.getState().logout();
+      // Принудительный выход (аккаунт заблокирован) — обходит запрет тех.работ.
+      useAuthStore.getState().logout({ force: true });
       const id = window.setTimeout(() => {
         navigate('/login?blocked=1', { replace: true });
       }, 600);

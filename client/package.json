@@ -1,6 +1,6 @@
 {
   "name": "@vellin/client",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,6 +16,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",
+    "recharts": "^3.9.2",
     "shaka-player": "^4.16.31",
     "webtorrent": "^2.8.5",
     "zustand": "^5.0.1"

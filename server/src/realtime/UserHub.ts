@@ -139,6 +139,19 @@ class UserHub {
     return n;
   }
 
+  /** Снапшот состояния пользовательского realtime-канала (для админ-мониторинга). */
+  stats(): { connections: number; distinctUsers: number; online: number; watchers: number; librarySubs: number } {
+    let connections = 0;
+    for (const set of this.conns.values()) connections += set.size;
+    return {
+      connections,
+      distinctUsers: this.conns.size,
+      online: this.countOnline(),
+      watchers: this.watchersOf.size,
+      librarySubs: this.librarySubs.size,
+    };
+  }
+
   /** Клиент сообщил о смене реальной активности в конкретной вкладке. */
   setActivity(conn: UserConnection, active: boolean): void {
     if (this.activeByConn.get(conn) === active) return;
@@ -266,6 +279,18 @@ class UserHub {
     if (!set) return;
     for (const c of set) {
       if (c.isOpen()) c.send(msg);
+    }
+  }
+
+  /**
+   * Разослать сообщение ВСЕМ онлайн-соединениям (все пользователи, все вкладки).
+   * Используется для мгновенного применения рантайм-эффектов вроде тех.работ.
+   */
+  broadcastAll(msg: UserS2C): void {
+    for (const set of this.conns.values()) {
+      for (const c of set) {
+        if (c.isOpen()) c.send(msg);
+      }
     }
   }
 

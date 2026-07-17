@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import type { PublicProfile as PublicProfileDTO } from '@vellin/shared';
-import { Button, Icon } from '../shared';
-import { useAuthStore } from '../stores/authStore';
+import { FEATURE_FLAG_REPORTS, type PublicProfile as PublicProfileDTO } from '@vellin/shared';
+import { Button, Icon, type IconName } from '../shared';
+import { useAuthStore, useFeatureEnabled } from '../stores/authStore';
 import { useFriendsStore } from '../stores/friendsStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useSharedTimeStore } from '../stores/sharedTimeStore';
@@ -25,6 +25,7 @@ import { friendsApi } from '../api/friends';
 import { titlesApi } from '../api/titles';
 import { ApiHttpError } from '../api/client';
 import { AppHeader } from '../components/AppHeader';
+import { ReportModal } from '../components/ReportModal';
 
 const GENDER_LABEL: Record<string, string> = { male: 'Мужской', female: 'Женский', other: 'Другой' };
 const MONTHS_GEN = [
@@ -56,12 +57,14 @@ export function PublicProfile() {
   const user = useAuthStore((s) => s.user);
   const isMobile = useIsMobile();
   const refreshFriends = useFriendsStore((s) => s.refresh);
+  const reportsEnabled = useFeatureEnabled(FEATURE_FLAG_REPORTS);
   const isSelf = user?.kind === 'user' && user.publicId === publicId;
 
   const [profile, setProfile] = useState<PublicProfileDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   // Избранное самого зрителя — чтобы подсветить «общие любимые».
   const [myFavIds, setMyFavIds] = useState<Set<number>>(new Set());
 
@@ -170,6 +173,11 @@ export function PublicProfile() {
         className="hero-anim"
         style={{
           position: 'relative',
+          // Анимация hero завершается на filter: blur(0), а карточка ниже задаёт
+          // transform — оба создают stacking-контексты одного уровня, из-за чего
+          // выпадающее меню «···» (z-index внутри hero) пряталось под карточкой.
+          // Поднимаем весь hero над последующими секциями, чтобы меню было сверху.
+          zIndex: 2,
           display: 'flex',
           flexDirection: isMobile ? 'column' : 'row',
           alignItems: 'center',
@@ -268,7 +276,14 @@ export function PublicProfile() {
                 Настройки профиля
               </Button>
             ) : (
-              <ProfileActions profile={profile} busy={busy} act={act} navigate={navigate} isMobile={isMobile} />
+              <ProfileActions
+                profile={profile}
+                busy={busy}
+                act={act}
+                navigate={navigate}
+                isMobile={isMobile}
+                onReport={reportsEnabled ? () => setReportOpen(true) : undefined}
+              />
             )}
           </div>
         </div>
@@ -360,6 +375,9 @@ export function PublicProfile() {
     >
       {header}
       {isMobile ? <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>{body}</div> : body}
+      {reportOpen && profile && reportsEnabled && (
+        <ReportModal targetType="user" targetId={profile.id} targetLabel={profile.username} onClose={() => setReportOpen(false)} />
+      )}
     </div>
   );
 }
@@ -462,58 +480,29 @@ function ProfileActions({
   act,
   navigate,
   isMobile,
+  onReport,
 }: {
   profile: PublicProfileDTO;
   busy: boolean;
   act: (fn: () => Promise<unknown>) => Promise<void>;
   navigate: (to: string) => void;
   isMobile: boolean;
+  /** undefined — жалобы выключены feature-флагом: пункт «Пожаловаться» скрыт. */
+  onReport?: () => void;
 }) {
-  // open — в DOM (вход/выход); closing — проигрывается анимация исчезновения,
-  // после которой элемент размонтируется (задержка = длительности выхода).
-  const [open, setOpen] = useState(false);
-  const [closing, setClosing] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
-
-  const closeMenu = () => {
-    setClosing(true);
-    clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => {
-      setOpen(false);
-      setClosing(false);
-    }, 240);
-  };
-  const openMenu = () => {
-    clearTimeout(closeTimer.current);
-    setClosing(false);
-    setOpen(true);
-  };
-  const toggleMenu = () => (open && !closing ? closeMenu() : openMenu());
-
-  useEffect(() => () => clearTimeout(closeTimer.current), []);
-
-  // Закрытие меню по клику вне и по Esc (десктоп; с анимацией выхода).
-  useEffect(() => {
-    if (!open || closing) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) closeMenu();
-    };
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeMenu();
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open, closing]);
-
-  // Разблокировка — единственное действие, без основной пары и меню.
+  // Разблокировка + жалоба в «···». Основной пары «Присоединиться/Написать» нет.
   if (profile.relationship === 'blocked') {
     return (
-      <button className="hero-press" style={writeBtnStyle} disabled={busy} onClick={() => void act(() => friendsApi.unblock(profile.id))}>
-        Разблокировать
-      </button>
+      <>
+        <button className="hero-press" style={writeBtnStyle} disabled={busy} onClick={() => void act(() => friendsApi.unblock(profile.id))}>
+          Разблокировать
+        </button>
+        <OverflowMenu
+          isMobile={isMobile}
+          busy={busy}
+          items={onReport ? [{ label: 'Пожаловаться', icon: 'flame', onClick: onReport }] : []}
+        />
+      </>
     );
   }
 
@@ -530,7 +519,7 @@ function ProfileActions({
 
   // Основное действие сверх пары «Присоединиться/Написать» + пункты меню «···».
   let extra: ReactNode = null;
-  const menuItems: { label: string; onClick: () => void; danger?: boolean }[] = [];
+  const menuItems: MenuItem[] = [];
   switch (profile.relationship) {
     case 'none':
       extra = (
@@ -556,112 +545,173 @@ function ProfileActions({
       menuItems.push({ label: 'Заблокировать', danger: true, onClick: () => void act(() => friendsApi.block(profile.id)) });
       break;
   }
+  // Жалоба — последним пунктом «···», рядом с прочими второстепенными действиями
+  // (а не громкой таблеткой в главном ряду). Скрыта, если жалобы выключены флагом.
+  if (onReport) menuItems.push({ label: 'Пожаловаться', icon: 'flame', onClick: onReport });
 
   return (
     <>
       {join}
       {write}
       {extra}
-      {menuItems.length > 0 &&
-        (isMobile ? (
-          // Мобайл: пункты раскрываются инлайн (полноширинные таблетки,
-          // раздвигают контент вниз) — без наезжающего оверлея.
-          <>
-            <button
-              className="more-btn"
-              aria-label="Ещё действия"
-              aria-haspopup="menu"
-              aria-expanded={open}
-              style={moreBtnStyle}
-              onClick={toggleMenu}
-            >
-              ⋯
-            </button>
-            {open && (
-              <div role="menu" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8, marginTop: 2 }}>
-                {menuItems.map((it, i) => (
-                  <button
-                    key={it.label}
-                    role="menuitem"
-                    className="hero-press hero-anim"
-                    disabled={busy}
-                    style={{
-                      width: '100%',
-                      padding: '13px 20px',
-                      borderRadius: 999,
-                      border: `1px solid ${it.danger ? 'var(--accent-glow)' : 'var(--line-2)'}`,
-                      background: it.danger ? 'var(--accent-soft)' : 'var(--bg-2)',
-                      color: it.danger ? 'var(--accent-hi)' : 'var(--text-1)',
-                      fontFamily: 'inherit',
-                      fontWeight: 600,
-                      fontSize: 15,
-                      cursor: 'pointer',
-                      // Каскад: появление снизу вверх, исчезновение — вниз с блюром.
-                      animation: closing
-                        ? 'heroFadeOut 0.18s ease both'
-                        : 'heroFadeUp 0.32s cubic-bezier(0.22, 1, 0.36, 1) both',
-                      animationDelay: `${(closing ? menuItems.length - 1 - i : i) * 0.045}s`,
-                    }}
-                    onClick={() => {
-                      closeMenu();
-                      it.onClick();
-                    }}
-                  >
-                    {it.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          // Десктоп: выпадающее меню-поповер.
-          <div ref={menuRef} style={{ position: 'relative', display: 'inline-flex' }}>
-            <button
-              className="more-btn"
-              aria-label="Ещё действия"
-              aria-haspopup="menu"
-              aria-expanded={open}
-              style={moreBtnStyle}
-              onClick={toggleMenu}
-            >
-              ⋯
-            </button>
-            {open && (
-              <div
-                role="menu"
-                className="hero-anim"
+      <OverflowMenu isMobile={isMobile} busy={busy} items={menuItems} />
+    </>
+  );
+}
+
+type MenuItem = { label: string; onClick: () => void; danger?: boolean; icon?: IconName };
+
+/**
+ * Меню «···» второстепенных действий профиля. Десктоп — выпадающий поповер,
+ * мобайл — инлайн-таблетки. Оба варианта проигрывают каскадный вход и
+ * зеркальный выход (задержка размонтирования = длительности выхода).
+ */
+function OverflowMenu({ items, busy, isMobile }: { items: MenuItem[]; busy: boolean; isMobile: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  const closeMenu = () => {
+    setClosing(true);
+    clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => {
+      setOpen(false);
+      setClosing(false);
+    }, 240);
+  };
+  const openMenu = () => {
+    clearTimeout(closeTimer.current);
+    setClosing(false);
+    setOpen(true);
+  };
+  const toggleMenu = () => (open && !closing ? closeMenu() : openMenu());
+
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+
+  // Закрытие по клику вне и по Esc (с анимацией выхода).
+  useEffect(() => {
+    if (!open || closing) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) closeMenu();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeMenu();
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open, closing]);
+
+  if (items.length === 0) return null;
+
+  const trigger = (
+    <button
+      className="more-btn"
+      aria-label="Ещё действия"
+      aria-haspopup="menu"
+      aria-expanded={open}
+      style={moreBtnStyle}
+      onClick={toggleMenu}
+    >
+      ⋯
+    </button>
+  );
+
+  const label = (it: MenuItem) =>
+    it.icon ? (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9 }}>
+        <Icon name={it.icon} size={15} />
+        {it.label}
+      </span>
+    ) : (
+      it.label
+    );
+
+  if (isMobile) {
+    // Мобайл: пункты раскрываются инлайн (полноширинные таблетки, раздвигают
+    // контент вниз) — без наезжающего оверлея.
+    return (
+      <>
+        {trigger}
+        {open && (
+          <div role="menu" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8, marginTop: 2 }}>
+            {items.map((it, i) => (
+              <button
+                key={it.label}
+                role="menuitem"
+                className="hero-press hero-anim"
+                disabled={busy}
                 style={{
-                  ...menuPopStyle,
+                  width: '100%',
+                  padding: '13px 20px',
+                  borderRadius: 999,
+                  border: `1px solid ${it.danger ? 'var(--accent-glow)' : 'var(--line-2)'}`,
+                  background: it.danger ? 'var(--accent-soft)' : 'var(--bg-2)',
+                  color: it.danger ? 'var(--accent-hi)' : 'var(--text-1)',
+                  fontFamily: 'inherit',
+                  fontWeight: 600,
+                  fontSize: 15,
+                  cursor: 'pointer',
+                  // Каскад: появление снизу вверх, исчезновение — вниз с блюром.
                   animation: closing
-                    ? 'heroPopOut 0.16s ease both'
-                    : 'heroPopIn 0.26s cubic-bezier(0.22, 1, 0.36, 1) both',
+                    ? 'heroFadeOut 0.18s ease both'
+                    : 'heroFadeUp 0.32s cubic-bezier(0.22, 1, 0.36, 1) both',
+                  animationDelay: `${(closing ? items.length - 1 - i : i) * 0.045}s`,
+                }}
+                onClick={() => {
+                  closeMenu();
+                  it.onClick();
                 }}
               >
-                {menuItems.map((it, i) => (
-                  <button
-                    key={it.label}
-                    role="menuitem"
-                    className="pf-menu-item hero-anim"
-                    disabled={busy}
-                    style={{
-                      ...menuItemStyle,
-                      color: it.danger ? 'var(--accent-hi)' : 'var(--text-1)',
-                      // Вход — каскад пунктов; выход целиком проигрывает контейнер.
-                      animation: closing ? 'none' : 'heroFadeUp 0.3s cubic-bezier(0.22, 1, 0.36, 1) both',
-                      animationDelay: closing ? '0s' : `${0.04 + i * 0.045}s`,
-                    }}
-                    onClick={() => {
-                      closeMenu();
-                      it.onClick();
-                    }}
-                  >
-                    {it.label}
-                  </button>
-                ))}
-              </div>
-            )}
+                {label(it)}
+              </button>
+            ))}
           </div>
-        ))}
-    </>
+        )}
+      </>
+    );
+  }
+
+  // Десктоп: выпадающее меню-поповер.
+  return (
+    <div ref={menuRef} style={{ position: 'relative', display: 'inline-flex' }}>
+      {trigger}
+      {open && (
+        <div
+          role="menu"
+          className="hero-anim"
+          style={{
+            ...menuPopStyle,
+            animation: closing
+              ? 'heroPopOut 0.16s ease both'
+              : 'heroPopIn 0.26s cubic-bezier(0.22, 1, 0.36, 1) both',
+          }}
+        >
+          {items.map((it, i) => (
+            <button
+              key={it.label}
+              role="menuitem"
+              className="pf-menu-item hero-anim"
+              disabled={busy}
+              style={{
+                ...menuItemStyle,
+                color: it.danger ? 'var(--accent-hi)' : 'var(--text-1)',
+                // Вход — каскад пунктов; выход целиком проигрывает контейнер.
+                animation: closing ? 'none' : 'heroFadeUp 0.3s cubic-bezier(0.22, 1, 0.36, 1) both',
+                animationDelay: closing ? '0s' : `${0.04 + i * 0.045}s`,
+              }}
+              onClick={() => {
+                closeMenu();
+                it.onClick();
+              }}
+            >
+              {label(it)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

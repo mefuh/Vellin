@@ -23,6 +23,8 @@ function formatDate(iso: string): string {
 export function DevicesSection() {
   const navigate = useNavigate();
   const logout = useAuthStore((s) => s.logout);
+  const user = useAuthStore((s) => s.user);
+  const maintenanceActive = useAuthStore((s) => s.maintenanceActive);
   const [sessions, setSessions] = useState<DeviceSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -44,6 +46,12 @@ export function DevicesSection() {
 
   const revoke = async (s: DeviceSession) => {
     setError(null);
+    // Завершение своей текущей сессии = выход. Админу при тех.работах это
+    // запрещено, иначе он не вернётся и не выключит режим обслуживания.
+    if (s.current && maintenanceActive && user?.isAdmin) {
+      setError('Во время технических работ нельзя завершить текущую сессию администратора — иначе вы потеряете доступ к админке.');
+      return;
+    }
     setBusyId(s.id);
     try {
       await profileApi.revokeSession(s.id);

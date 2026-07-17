@@ -10,13 +10,31 @@ interface AuthState {
   user: AuthUser | null;
   loading: boolean;
   error: string | null;
+  /** Активны ли технические работы (из /api/runtime + live-пуш по WS). */
+  maintenanceActive: boolean;
+  /** Сообщение экрана обслуживания. */
+  maintenanceMessage: string;
+  setMaintenance: (enabled: boolean, message: string) => void;
+  /**
+   * Ключи включённых feature-флагов (из /api/runtime). `null` — ещё не
+   * загружено: до ответа считаем функции включёнными, чтобы не мигать скрытием.
+   */
+  featureFlags: string[] | null;
+  setFeatureFlags: (flags: string[]) => void;
   restoreSession: () => void;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string) => Promise<void>;
   loginAsGuest: (username: string) => Promise<void>;
   /** Применить свежие token+user после мутаций профиля (тот же sid). */
   applyAuthUpdate: (update: { token: string; user: AuthUser }) => void;
-  logout: () => void;
+  /**
+   * Выход из аккаунта. Во время технических работ добровольный выход
+   * администратора запрещён — иначе он не сможет вернуться (страница входа под
+   * maintenance-экраном) и не выключит тех.работы. Принудительные выходы
+   * (блокировка аккаунта и т.п.) проходят с `force: true`. Возвращает true,
+   * если выход состоялся.
+   */
+  logout: (opts?: { force?: boolean }) => boolean;
 }
 
 function persist(token: string | null, user: AuthUser | null): void {
@@ -49,6 +67,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   loading: false,
   error: null,
+  maintenanceActive: false,
+  maintenanceMessage: '',
+  featureFlags: null,
+
+  setMaintenance: (enabled, message) => {
+    const s = get();
+    if (s.maintenanceActive !== enabled || s.maintenanceMessage !== message) {
+      set({ maintenanceActive: enabled, maintenanceMessage: message });
+    }
+  },
+
+  setFeatureFlags: (flags) => set({ featureFlags: flags }),
 
   restoreSession: () => {
     const { token, user } = readStorage();
@@ -114,8 +144,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     persist(token, user);
   },
 
-  logout: () => {
+  logout: (opts) => {
+    const { user, maintenanceActive } = get();
+    if (!opts?.force && maintenanceActive && user?.isAdmin) {
+      set({ error: 'Во время технических работ выход из аккаунта администратора отключён — иначе вы не сможете вернуться и выключить режим обслуживания.' });
+      return false;
+    }
     set({ token: null, user: null });
     persist(null, null);
+    return true;
   },
 }));
+
+/**
+ * Включён ли feature-флаг. `null` (рантайм ещё не загружен) трактуем как
+ * «включено», чтобы не мигать скрытием функции до ответа /runtime.
+ */
+export function featureEnabled(flags: string[] | null, key: string): boolean {
+  return flags === null || flags.includes(key);
+}
+
+/** Реактивный хук: включён ли feature-флаг (см. {@link featureEnabled}). */
+export function useFeatureEnabled(key: string): boolean {
+  return useAuthStore((s) => featureEnabled(s.featureFlags, key));
+}

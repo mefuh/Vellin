@@ -10,7 +10,8 @@ import type {
 import { prisma } from '../db/prisma.js';
 import { roomStore } from '../rooms/store.js';
 import { userHub } from '../realtime/UserHub.js';
-import { toRoomSummary } from '../rooms/service.js';
+import { toRoomSummary, videoCardInfo } from '../rooms/service.js';
+import { endCallSession } from '../rooms/events.js';
 import { roomMutex } from '../utils/async-mutex.js';
 import { hashPassword } from '../auth/password.js';
 import { ensureRoomRuntime } from '../rooms/RoomRuntime.js';
@@ -24,7 +25,7 @@ export function toAdminUserSummary(
   u: Pick<
     User,
     'id' | 'publicId' | 'email' | 'username' | 'avatarSeed' | 'avatarUrl' | 'createdAt' | 'isBlocked' | 'blockedAt' | 'blockReason'
-  > & { _count?: { rooms?: number } },
+  > & { _count?: { rooms?: number }; adminRole?: { name: string } | null },
 ): AdminUserSummary {
   return {
     id: u.id,
@@ -38,6 +39,7 @@ export function toAdminUserSummary(
     blockedAt: u.blockedAt ? u.blockedAt.toISOString() : null,
     blockReason: u.blockReason,
     roomsOwned: u._count?.rooms ?? 0,
+    roleName: u.adminRole?.name ?? null,
   };
 }
 
@@ -60,6 +62,7 @@ export function toAdminRoomSummary(
     liveParticipants: live?.participants.size ?? 0,
     isActive: !!live,
     videoUrl: room.videoUrl,
+    ...videoCardInfo(room),
   };
 }
 
@@ -94,7 +97,7 @@ export async function listUsers(
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    include: { _count: { select: { rooms: true } } },
+    include: { _count: { select: { rooms: true } }, adminRole: { select: { name: true } } },
   });
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
@@ -110,7 +113,7 @@ export async function getUserDetail(userId: string): Promise<{
 } | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { _count: { select: { rooms: true } } },
+    include: { _count: { select: { rooms: true } }, adminRole: { select: { name: true } } },
   });
   if (!user) return null;
   const rooms = await prisma.room.findMany({
@@ -145,7 +148,7 @@ export async function blockUser(userId: string, reason?: string): Promise<AdminU
       blockedAt: new Date(),
       blockReason: reason?.trim().slice(0, 500) || null,
     },
-    include: { _count: { select: { rooms: true } } },
+    include: { _count: { select: { rooms: true } }, adminRole: { select: { name: true } } },
   });
   roomStore.closeUserSessionsEverywhere(userId, 'blocked');
   return toAdminUserSummary(user);
@@ -155,7 +158,7 @@ export async function unblockUser(userId: string): Promise<AdminUserSummary> {
   const user = await prisma.user.update({
     where: { id: userId },
     data: { isBlocked: false, blockedAt: null, blockReason: null },
-    include: { _count: { select: { rooms: true } } },
+    include: { _count: { select: { rooms: true } }, adminRole: { select: { name: true } } },
   });
   return toAdminUserSummary(user);
 }
@@ -266,7 +269,9 @@ export async function deleteRoomById(roomId: string, byAdminUserId: string): Pro
 export async function endRoomCall(roomId: string): Promise<number> {
   const runtime = roomStore.get(roomId);
   if (!runtime) return 0;
-  return roomMutex.run(`call:${roomId}`, () => runtime.endCall());
+  const ended = await roomMutex.run(`call:${roomId}`, () => runtime.endCall());
+  if (ended > 0) endCallSession(roomId);
+  return ended;
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────

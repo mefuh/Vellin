@@ -6,6 +6,13 @@ import { ApiHttpError } from '../../api/client';
 import { Avatar, Button, Chip, Icon } from '../../shared';
 import { useAuthStore } from '../../stores/authStore';
 import { useIsNarrow } from '../../hooks/useMediaQuery';
+import { AdminPage, AdminSurface, AdminEmpty } from './components/AdminPage';
+import { useAdminAccess } from './AdminAccessContext';
+
+/** Заблокировать администратора может только Super Admin. */
+function blockLock(user: AdminUserSummary, isSuperAdmin: boolean): string | null {
+  return user.roleName && !isSuperAdmin ? 'Заблокировать администратора может только Super Admin' : null;
+}
 
 const PAGE_LIMIT = 20;
 
@@ -16,6 +23,7 @@ const USER_GRID_COLUMNS = 'minmax(200px, 2fr) minmax(160px, 2fr) 120px 110px 230
 
 export function AdminUsers() {
   const me = useAuthStore((s) => s.user);
+  const { isSuperAdmin } = useAdminAccess();
   const isNarrow = useIsNarrow();
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -67,17 +75,12 @@ export function AdminUsers() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
-        <div>
-          <h1 style={{ fontSize: isNarrow ? 22 : 28, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>
-            Пользователи
-          </h1>
-          <p style={{ marginTop: 6, color: 'var(--text-1)', fontSize: 13 }}>
-            Зарегистрированные пользователи. Гостевые сессии не сохраняются.
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 280px', maxWidth: isNarrow ? '100%' : 360, width: isNarrow ? '100%' : undefined }}>
+    <AdminPage
+      eyebrow="Модерация"
+      title="Пользователи"
+      subtitle="Зарегистрированные пользователи. Гостевые сессии не сохраняются."
+      actions={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 260px', maxWidth: isNarrow ? '100%' : 340, width: isNarrow ? '100%' : undefined }}>
           <Icon name="search" size={16} style={{ color: 'var(--text-2)' }} />
           <input
             value={query}
@@ -87,7 +90,7 @@ export function AdminUsers() {
               flex: 1,
               height: 36,
               padding: '0 12px',
-              borderRadius: 'var(--r-md)',
+              borderRadius: 999,
               border: '1px solid var(--line-2)',
               background: 'var(--bg-2)',
               color: 'var(--text-0)',
@@ -95,22 +98,15 @@ export function AdminUsers() {
             }}
           />
         </div>
-      </header>
-
+      }
+    >
       {error && (
-        <div style={{ background: 'rgba(209,39,27,0.12)', color: 'var(--accent-hi)', padding: '10px 14px', borderRadius: 'var(--r-md)', fontSize: 13 }}>
+        <div style={{ background: 'var(--accent-soft)', color: 'var(--accent-hi)', padding: '10px 14px', borderRadius: 'var(--r-md)', fontSize: 13 }}>
           {error}
         </div>
       )}
 
-      <div
-        style={{
-          background: 'var(--bg-1)',
-          border: '1px solid var(--line-2)',
-          borderRadius: 'var(--r-lg)',
-          overflow: 'hidden',
-        }}
-      >
+      <AdminSurface>
         {!isNarrow && (
           <div
             style={{
@@ -133,17 +129,14 @@ export function AdminUsers() {
             <span style={{ textAlign: 'right' }}>Действия</span>
           </div>
         )}
-        {users.length === 0 && !loading && (
-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
-            Ничего не найдено
-          </div>
-        )}
+        {users.length === 0 && !loading && <AdminEmpty>Ничего не найдено</AdminEmpty>}
         {users.map((u) =>
           isNarrow ? (
             <UserCard
               key={u.id}
               user={u}
               isMe={u.id === me?.id}
+              blockLocked={blockLock(u, isSuperAdmin)}
               onBlock={() => setBlockTarget(u)}
               onUnblock={async () => {
                 try {
@@ -168,8 +161,8 @@ export function AdminUsers() {
               }}
             >
               <Link
-                to={`/u/${u.publicId}`}
-                title="Открыть профиль"
+                to={`/admin/users/${u.id}`}
+                title="Открыть профиль-360"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -224,7 +217,8 @@ export function AdminUsers() {
                   <Button
                     variant="secondary"
                     size="sm"
-                    disabled={u.id === me?.id}
+                    disabled={u.id === me?.id || !!blockLock(u, isSuperAdmin)}
+                    title={blockLock(u, isSuperAdmin) ?? undefined}
                     onClick={() => setBlockTarget(u)}
                   >
                     Блокировать
@@ -242,7 +236,7 @@ export function AdminUsers() {
             </div>
           ),
         )}
-      </div>
+      </AdminSurface>
 
       {nextCursor && (
         <div style={{ display: 'flex', justifyContent: 'center' }}>
@@ -281,7 +275,7 @@ export function AdminUsers() {
           }}
         />
       )}
-    </div>
+    </AdminPage>
   );
 }
 
@@ -463,12 +457,14 @@ export function DialogActions({ children }: { children: React.ReactNode }) {
 function UserCard({
   user: u,
   isMe,
+  blockLocked,
   onBlock,
   onUnblock,
   onDelete,
 }: {
   user: AdminUserSummary;
   isMe: boolean;
+  blockLocked: string | null;
   onBlock: () => void;
   onUnblock: () => void | Promise<void>;
   onDelete: () => void;
@@ -485,8 +481,8 @@ function UserCard({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
         <Link
-          to={`/u/${u.publicId}`}
-          title="Открыть профиль"
+          to={`/admin/users/${u.id}`}
+          title="Открыть профиль-360"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -548,7 +544,7 @@ function UserCard({
             Разблокировать
           </Button>
         ) : (
-          <Button variant="secondary" size="sm" disabled={isMe} onClick={onBlock}>
+          <Button variant="secondary" size="sm" disabled={isMe || !!blockLocked} title={blockLocked ?? undefined} onClick={onBlock}>
             Блокировать
           </Button>
         )}

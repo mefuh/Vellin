@@ -29,6 +29,12 @@ import { signSession, signUserTicket, type Principal } from './jwt.js';
 import { generateAvatarSeed, generateGuestId, generatePublicId } from '../utils/ids.js';
 import { requireAuth } from './middleware.js';
 import { isAdminEmail } from '../env.js';
+import {
+  assertGuestsEnabled,
+  assertNotMaintenance,
+  assertRegistrationEnabled,
+  assertUploadsEnabled,
+} from '../admin/platform/gate.js';
 import { createSession, forgetTouch, toDeviceSession, type DbSession } from './sessions.js';
 import { isKnownCity } from '../geo/cities.js';
 import {
@@ -128,6 +134,8 @@ interface DbUserCore {
   birthDate: Date | null;
   city: string | null;
   createdAt: Date;
+  /** RBAC-роль админки. Непустая → пользователь имеет доступ к /admin. */
+  adminRoleId?: string | null;
 }
 
 function toAuthUser(u: DbUserCore): AuthUser {
@@ -144,7 +152,9 @@ function toAuthUser(u: DbUserCore): AuthUser {
     city: u.city ?? null,
     kind: 'user',
     createdAt: u.createdAt.toISOString(),
-    isAdmin: isAdminEmail(u.email),
+    // Доступ к админке даёт любая RBAC-роль; ADMIN_EMAIL остаётся break-glass
+    // (работает и до бутстрапа роли на старте / до перезапуска).
+    isAdmin: !!u.adminRoleId || isAdminEmail(u.email),
   };
 }
 
@@ -186,6 +196,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post('/auth/register', {
     config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
     handler: async (req, reply) => {
+      await assertNotMaintenance(false);
+      await assertRegistrationEnabled();
       const body = registerSchema.parse(req.body);
       const existing = await prisma.user.findFirst({
         where: { OR: [{ email: body.email }, { username: body.username }] },
@@ -233,6 +245,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         });
         return;
       }
+      // В режиме обслуживания вход разрешён только администраторам.
+      await assertNotMaintenance(!!user.adminRoleId || isAdminEmail(user.email));
       const session = await createSession(user.id, req);
       const token = signSession(app, buildPrincipal(user, session.id));
       const response: AuthResponse = { token, user: toAuthUser(user) };
@@ -243,6 +257,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post('/auth/guest', {
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     handler: async (req, reply) => {
+      await assertNotMaintenance(false);
+      await assertGuestsEnabled();
       const body = guestSchema.parse(req.body);
       const guestId = generateGuestId();
       const avatarSeed = generateAvatarSeed();
@@ -456,6 +472,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post('/auth/avatar', { preHandler: requireAuth }, async (req, reply) => {
     const principal = requireUser(req, reply);
     if (!principal) return;
+    await assertUploadsEnabled();
 
     const file = await req.file({ limits: { fileSize: MAX_AVATAR_BYTES, files: 1 } });
     if (!file) {

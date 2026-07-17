@@ -46,6 +46,19 @@ class RoomStore {
     }
     return closed;
   }
+
+  /**
+   * Закрыть все активные комнаты (режим обслуживания): отключает всех участников
+   * и, как следствие рвущихся сокетов, завершает идущие звонки. Возвращает число
+   * отключённых участников.
+   */
+  closeAllRooms(byAdminUserId: string): number {
+    let disconnected = 0;
+    for (const rt of this.rooms.values()) {
+      disconnected += rt.forceClose(byAdminUserId);
+    }
+    return disconnected;
+  }
 }
 
 export const roomStore = new RoomStore();

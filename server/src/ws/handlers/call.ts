@@ -9,6 +9,7 @@ import type { ConnectionContext } from '../connection.js';
 import type { RoomRuntime } from '../../rooms/RoomRuntime.js';
 import { CallError } from '../../rooms/RoomRuntime.js';
 import { logger } from '../../utils/logger.js';
+import { noteCallJoin, noteCallLeave } from '../../rooms/events.js';
 
 function sendCallError(ctx: ConnectionContext, err: unknown): void {
   if (err instanceof CallError) {
@@ -27,6 +28,11 @@ export function handleCallJoin(
 ): void {
   try {
     const member = runtime.joinCall(ctx.principal.userId, !!msg.wantVideo);
+    noteCallJoin(
+      runtime.roomId,
+      { id: ctx.principal.kind === 'user' ? ctx.principal.userId : null, name: ctx.principal.username },
+      runtime.snapshotCall().members.length,
+    );
     // 1) ack the joiner with the full snapshot (includes themselves)
     ctx.send({ t: 'call_state', snapshot: runtime.snapshotCall(), serverTs: Date.now() });
     // 2) tell everyone else about the new member
@@ -46,6 +52,11 @@ export function handleCallLeave(
   _msg: C2SCallLeave,
 ): void {
   if (runtime.leaveCall(ctx.principal.userId)) {
+    noteCallLeave(
+      runtime.roomId,
+      { id: ctx.principal.kind === 'user' ? ctx.principal.userId : null, name: ctx.principal.username },
+      runtime.snapshotCall().members.length,
+    );
     runtime.broadcast({
       t: 'call_peer_left',
       userId: ctx.principal.userId,

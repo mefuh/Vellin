@@ -38,6 +38,11 @@ model User {
   blockedAt    DateTime?
   blockReason  String?
 
+  /// Административная роль (RBAC админ-панели). Null — обычный пользователь без
+  /// доступа к /admin. Заменяет прежнюю проверку по единственному ADMIN_EMAIL.
+  adminRoleId  String?
+  adminRole    AdminRole? @relation(fields: [adminRoleId], references: [id], onDelete: SetNull)
+
   rooms        Room[]       @relation("RoomOwner")
   messages     Message[]
   memberships  Membership[]
@@ -58,6 +63,136 @@ model User {
   sharedWatchB           SharedWatchStat[] @relation("SharedWatchB")
 
   @@index([isBlocked])
+  @@index([adminRoleId])
+}
+
+/// Роль администратора (RBAC). permissionsJson — JSON-массив ключей пермишенов
+/// из каталога shared (ADMIN_PERMISSIONS). isSystem — предустановленная роль;
+/// super_admin неудаляем и всегда имеет все права (вычисляется на сервере, не по
+/// хранимому набору). Пользователи ссылаются на роль через User.adminRoleId.
+model AdminRole {
+  id              String   @id @default(cuid())
+  key             String   @unique // super_admin | administrator | moderator | support | analyst | custom-*
+  name            String
+  description     String?
+  permissionsJson String   @default("[]")
+  isSystem        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users User[]
+}
+
+/// Жалоба пользователя на контент/пользователя/комнату. Снапшоты имён и контента
+/// (targetLabel, snapshotJson) замораживаются на момент подачи — жалоба остаётся
+/// читаемой даже после удаления цели. reporterId/handledById хранятся как plain
+/// id без FK (лог модерации переживает удаление участников).
+model Report {
+  id             String    @id @default(cuid())
+  reporterId     String?
+  reporterName   String?
+  /// message | user | room | image | video | dm
+  targetType     String
+  targetId       String
+  /// Владелец контента-нарушитель — для группировки жалоб по пользователю.
+  targetUserId   String?
+  targetLabel    String?
+  reason         String
+  comment        String?
+  snapshotJson   String    @default("{}")
+  /// open | reviewing | accepted | rejected
+  status         String    @default("open")
+  handledById    String?
+  handledByEmail String?
+  handledAt      DateTime?
+  resolutionNote String?
+  createdAt      DateTime  @default(now())
+
+  @@index([status, createdAt])
+  @@index([targetUserId])
+  @@index([targetType, targetId])
+}
+
+/// Суточный снапшот метрик — источник исторических рядов, которые нельзя
+/// восстановить из createdAt (DAU, число гостей, мгновенные значения online/
+/// активных комнат). Пишется фоновым rollup-джобом раз в сутки (и по требованию).
+/// Одна строка на дату (UTC, YYYY-MM-DD); json — карта метрик. Ряды, выводимые
+/// из createdAt (регистрации/комнаты/сообщения), считаются напрямую и не зависят
+/// от этой таблицы.
+model DailyStat {
+  day       String   @id // YYYY-MM-DD (UTC)
+  json      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Конфиг платформы (key-value). Значение — JSON-строка. Категории задаются
+/// префиксом ключа: toggles.* (тумблеры регистрации/гостей/комнат/загрузок),
+/// maintenance.* (режим обслуживания), limits.* (лимиты), webrtc.*, heartbeat.*.
+/// Читается через кэш в памяти с инвалидацией при PUT (см. platform/config.ts).
+model PlatformSetting {
+  key       String   @id
+  valueJson String
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+/// Feature flag: включение/отключение функциональности без деплоя. rolloutJson —
+/// стратегия выката {kind:'all'|'role'|'percent'|'users', ...} (в v2 используется
+/// как булев выключатель; расширяемо).
+model FeatureFlag {
+  key         String   @id
+  enabled     Boolean  @default(false)
+  description String?
+  rolloutJson String   @default("{\"kind\":\"all\"}")
+  updatedAt   DateTime @updatedAt
+  updatedBy   String?
+}
+
+/// Внутриплатформенное объявление (баннер/модалка/новость) с таргетингом по
+/// аудитории (audienceJson: all|role|new-users) и временным окном. Активные
+/// отдаются клиенту через публичный /api/runtime; закрытие хранится на клиенте.
+model Announcement {
+  id           String    @id @default(cuid())
+  kind         String // banner | modal | news
+  title        String
+  body         String
+  ctaLabel     String?
+  ctaUrl       String?
+  style        String    @default("info") // info | accent | warn
+  audienceJson String    @default("{\"kind\":\"all\"}")
+  active       Boolean   @default(false)
+  startsAt     DateTime?
+  endsAt       DateTime?
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([active, startsAt])
+}
+
+/// Журнал административных действий. before/after — снапшоты JSON состояния
+/// объекта до/после. Все мутирующие admin-роуты пишут сюда. Хранит actorEmail
+/// снапшотом, чтобы запись пережила удаление/смену email актора.
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorId     String? // null — системное действие (сид/бутстрап)
+  actorEmail  String
+  action      String // 'user.block' | 'room.delete' | 'dm.view' | ...
+  targetType  String // user | room | message | conversation | role | flag | config | ...
+  targetId    String?
+  targetLabel String? // человекочитаемое (username/slug) на момент действия
+  beforeJson  String?
+  afterJson   String?
+  metaJson    String   @default("{}")
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([targetType, targetId])
+  @@index([action, createdAt])
+  @@index([createdAt])
 }
 
 /// «Совместное время» — накопительная попарная статистика совместного
@@ -393,11 +528,31 @@ model Room {
   messages    Message[]
   inviteLinks InviteLink[]
   memberships Membership[]
+  events      RoomEvent[]
 
   createdAt DateTime @default(now())
 
   @@index([ownerId])
   @@index([isPrivate])
+}
+
+/// Журнал событий комнаты для админ-панели: входы/выходы участников, смена медиа,
+/// управление плеером, звонки (join/leave + сессии start/end с длительностью),
+/// изменение ролей/прав, кики. actorName — снапшот имени на момент события (чтобы
+/// запись читалась после удаления пользователя/гостя). dataJson — детали события.
+model RoomEvent {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  /// join | leave | media_change | play | pause | seek | ended | call_join |
+  /// call_leave | call_start | call_end | role_change | permissions_change | kick
+  type      String
+  actorId   String? // кто вызвал (null — система)
+  actorName String?
+  dataJson  String   @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([roomId, createdAt])
 }
 
 model Membership {

@@ -20,6 +20,7 @@ interface IconProps {
   size?: number;
   stroke?: number;
   style?: CSSProperties;
+  className?: string;
 }
 
 const PATHS: Record<IconName, ReactNode> = {
@@ -322,7 +323,7 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
 };
 
-export function Icon({ name, size = 16, stroke = 1.6, style }: IconProps) {
+export function Icon({ name, size = 16, stroke = 1.6, style, className }: IconProps) {
   return (
     <svg
       width={size}
@@ -334,6 +335,7 @@ export function Icon({ name, size = 16, stroke = 1.6, style }: IconProps) {
       strokeLinecap="round"
       strokeLinejoin="round"
       style={{ flexShrink: 0, ...style }}
+      className={className}
       aria-hidden="true"
     >
       {PATHS[name]}

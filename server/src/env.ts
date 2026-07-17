@@ -51,6 +51,15 @@ const schema = z.object({
    * Принимает пустую строку — docker compose `${VAR:-}` всегда пробрасывает
    * значение, даже когда переменная не задана.
    */
+  /**
+   * Глобальный выключатель раздела модерации ЛС (просмотр личной переписки).
+   * '0'/'false' полностью выключает эндпоинты (403), даже для роли с правом
+   * moderation.dm.view. По умолчанию включён. В Этапе 5 мигрирует в FeatureFlag.
+   */
+  DM_MODERATION_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v !== '0' && v.toLowerCase() !== 'false'),
   ADMIN_EMAIL: z
     .string()
     .trim()

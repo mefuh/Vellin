@@ -11,7 +11,8 @@ import type {
   PushBroadcastsResponse,
   SendBroadcastResponse,
 } from '@vellin/shared';
-import { requireAdmin } from '../auth/middleware.js';
+import { requirePermission } from '../admin/rbac/middleware.js';
+import { writeAudit } from '../admin/audit/audit.js';
 import { prisma } from '../db/prisma.js';
 import { loadEnv } from '../env.js';
 import { logger } from '../utils/logger.js';
@@ -77,6 +78,45 @@ async function buildStats(windowDays = 30): Promise<PushStatsDTO> {
     clicked: clickedRows,
     ctr: sent > 0 ? Math.round((clickedRows / sent) * 1000) / 10 : 0,
     byBrowser: browsers.map((b) => ({ browser: b.browser || 'неизвестно', sent: b._count._all })),
+  };
+}
+
+// ── Расширенная аналитика ──────────────────────────────────────────────────
+
+async function buildPushAnalytics(windowDays: number): Promise<import('@vellin/shared').PushAnalyticsResponse> {
+  const since = new Date(Date.now() - windowDays * 24 * 3600_000);
+  const [hourRows, browsers, sentByType, clickedByType, totalSent, totalClicked] = await Promise.all([
+    prisma.$queryRaw<{ hour: number; count: bigint }[]>`
+      SELECT EXTRACT(HOUR FROM "sentAt")::int AS hour, COUNT(*)::int AS count
+      FROM "PushDelivery" WHERE status = 'sent' AND "sentAt" >= ${since}
+      GROUP BY hour ORDER BY hour`,
+    prisma.pushDelivery.groupBy({ by: ['browser'], where: { status: 'sent', sentAt: { gte: since } }, _count: { _all: true }, orderBy: { _count: { browser: 'desc' } }, take: 8 }),
+    prisma.pushDelivery.groupBy({ by: ['type'], where: { status: 'sent', sentAt: { gte: since } }, _count: { _all: true } }),
+    prisma.pushDelivery.groupBy({ by: ['type'], where: { clickedAt: { not: null }, sentAt: { gte: since } }, _count: { _all: true } }),
+    prisma.pushDelivery.count({ where: { status: 'sent', sentAt: { gte: since } } }),
+    prisma.pushDelivery.count({ where: { clickedAt: { not: null }, sentAt: { gte: since } } }),
+  ]);
+
+  const hourMap = new Map(hourRows.map((r) => [Number(r.hour), Number(r.count)]));
+  const byHour = Array.from({ length: 24 }, (_, hour) => ({ hour, count: hourMap.get(hour) ?? 0 }));
+
+  const clickedMap = new Map(clickedByType.map((r) => [r.type, r._count._all]));
+  const byType = sentByType
+    .map((r) => {
+      const sent = r._count._all;
+      const clicked = clickedMap.get(r.type) ?? 0;
+      return { type: r.type, sent, clicked, ctr: sent > 0 ? Math.round((clicked / sent) * 1000) / 10 : 0 };
+    })
+    .sort((a, b) => b.sent - a.sent);
+
+  return {
+    windowDays,
+    totalSent,
+    totalClicked,
+    ctr: totalSent > 0 ? Math.round((totalClicked / totalSent) * 1000) / 10 : 0,
+    byHour,
+    byBrowser: browsers.map((b) => ({ browser: b.browser || 'неизвестно', sent: b._count._all })),
+    byType,
   };
 }
 
@@ -150,33 +190,42 @@ const updateTemplateSchema = z.object({
  * их история. Отдельный плагин с собственным requireAdmin-хуком (как adminRoutes).
  */
 export async function adminPushRoutes(app: FastifyInstance): Promise<void> {
-  app.addHook('preHandler', requireAdmin);
-
-  app.get('/admin/push/dashboard', async (_req, reply) => {
+  app.get('/admin/push/dashboard', { preHandler: requirePermission('push.view') }, async (_req, reply) => {
     const [dashboard, stats] = await Promise.all([buildDashboard(), buildStats()]);
     reply.send({ dashboard, stats } satisfies PushDashboardResponse);
   });
 
-  app.get('/admin/push/templates', async (_req, reply) => {
+  app.get('/admin/push/templates', { preHandler: requirePermission('push.view') }, async (_req, reply) => {
     const rows = await prisma.notificationTemplate.findMany({ orderBy: { type: 'asc' } });
     reply.send({ templates: rows.map(rowToTemplateDTO) } satisfies PushTemplatesResponse);
   });
 
-  app.put<{ Params: { type: string } }>('/admin/push/templates/:type', async (req, reply) => {
-    const patch = updateTemplateSchema.parse(req.body);
-    try {
-      const updated = await prisma.notificationTemplate.update({
-        where: { type: req.params.type },
-        data: { ...patch, updatedBy: req.principal!.userId },
-      });
-      invalidateTemplateCache();
-      reply.send({ template: rowToTemplateDTO(updated) });
-    } catch {
-      reply.code(404).send({ error: 'NotFound', message: 'Шаблон не найден', statusCode: 404 });
-    }
+  app.put<{ Params: { type: string } }>(
+    '/admin/push/templates/:type',
+    { preHandler: requirePermission('push.templates') },
+    async (req, reply) => {
+      const patch = updateTemplateSchema.parse(req.body);
+      try {
+        const updated = await prisma.notificationTemplate.update({
+          where: { type: req.params.type },
+          data: { ...patch, updatedBy: req.principal!.userId },
+        });
+        invalidateTemplateCache();
+        await writeAudit(req, 'push.template_update', { type: 'push_template', id: req.params.type, label: req.params.type }, {
+          after: patch,
+        });
+        reply.send({ template: rowToTemplateDTO(updated) });
+      } catch {
+        reply.code(404).send({ error: 'NotFound', message: 'Шаблон не найден', statusCode: 404 });
+      }
+    },
+  );
+
+  app.get('/admin/push/analytics', { preHandler: requirePermission('push.view') }, async (_req, reply) => {
+    reply.send(await buildPushAnalytics(30));
   });
 
-  app.get('/admin/push/broadcasts', async (_req, reply) => {
+  app.get('/admin/push/broadcasts', { preHandler: requirePermission('push.view') }, async (_req, reply) => {
     const rows = await prisma.pushBroadcast.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
     const broadcasts: PushBroadcastDTO[] = rows.map((r) => ({
       id: r.id,
@@ -193,7 +242,7 @@ export async function adminPushRoutes(app: FastifyInstance): Promise<void> {
     reply.send({ broadcasts } satisfies PushBroadcastsResponse);
   });
 
-  app.post('/admin/push/broadcast', async (req, reply) => {
+  app.post('/admin/push/broadcast', { preHandler: requirePermission('push.send') }, async (req, reply) => {
     const body = broadcastSchema.parse(req.body);
     const adminId = req.principal!.userId;
     const targets = await resolveAudience(body.audience);
@@ -211,6 +260,9 @@ export async function adminPushRoutes(app: FastifyInstance): Promise<void> {
     // Постановка в очередь — в фоне (аудитория может быть большой); итоги
     // sent/failed дописываем в запись истории по завершении.
     void runBroadcast(record.id, body.type, body.title, body.body, body.url, targets);
+    await writeAudit(req, 'push.broadcast', { type: 'push_broadcast', id: record.id, label: body.title }, {
+      meta: { audience: body.audience, totalTargets: targets.length, type: body.type },
+    });
     reply.send({ ok: true, totalTargets: targets.length, queued: targets.length } satisfies SendBroadcastResponse);
   });
 }

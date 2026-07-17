@@ -8,6 +8,7 @@ import type {
 } from '@vellin/shared';
 import type { Principal } from '../auth/jwt.js';
 import { requireAuth } from '../auth/middleware.js';
+import { assertFavoritesEnabled } from '../admin/platform/gate.js';
 import { searchTitles } from './kinopoisk.js';
 import { getFavorites, setFavorites } from './service.js';
 
@@ -51,6 +52,7 @@ export async function titleRoutes(app: FastifyInstance): Promise<void> {
   // Подсказки для выбора в избранное.
   app.get<{ Querystring: { q?: string } }>('/titles/search', async (req, reply) => {
     if (!requireUser(req, reply)) return;
+    await assertFavoritesEnabled();
     const q = (req.query.q ?? '').slice(0, 120);
     const titles = q ? await searchTitles(q) : [];
     reply.send({ titles } satisfies SearchTitlesResponse);
@@ -65,6 +67,7 @@ export async function titleRoutes(app: FastifyInstance): Promise<void> {
   app.put('/titles/favorites', async (req, reply) => {
     const p = requireUser(req, reply);
     if (!p) return;
+    await assertFavoritesEnabled();
     const body = updateSchema.parse(req.body ?? {});
     const titles = await setFavorites(p.userId, body.titles as FavoriteTitle[]);
     reply.send({ titles } satisfies FavoriteTitlesResponse);

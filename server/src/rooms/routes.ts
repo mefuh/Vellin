@@ -45,6 +45,14 @@ import { loadEnv } from '../env.js';
 import { generateInviteToken } from '../utils/ids.js';
 import { resolveWithCache } from '../media/resolveWithCache.js';
 import { ResolveError } from '../media/Resolver.js';
+import { assertRoomCreationEnabled, assertInvitesEnabled } from '../admin/platform/gate.js';
+import { logRoomEvent } from './events.js';
+
+/** Имя пользователя для журнала событий (best-effort, не блокирует ответ). */
+async function nameFor(userId: string): Promise<string | null> {
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
+  return u?.username ?? null;
+}
 
 const URL_PATTERN = /^https?:\/\/.+/i;
 const RESOLVE_URL_PATTERN = /^(https?:\/\/|magnet:).+/i;
@@ -101,6 +109,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireAuth);
 
   app.post('/rooms', async (req, reply) => {
+    await assertRoomCreationEnabled();
     const body = createRoomSchema.parse(req.body);
     const principal = req.principal!;
     if (principal.kind === 'guest') {
@@ -274,6 +283,11 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       }
       const runtime = await ensureRoomRuntime(room);
       const result = await runtime.updateMembership(req.params.userId, { role: body.role });
+      logRoomEvent(room.id, 'role_change', {
+        actorId: principal.userId,
+        actorName: principal.username,
+        data: { targetUserId: req.params.userId, targetName: await nameFor(req.params.userId), role: body.role },
+      });
       reply.send({
         userId: req.params.userId,
         role: result.role,
@@ -323,6 +337,11 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
     }
     const result = await runtime.updateMembership(req.params.userId, {
       permissions: body.permissions,
+    });
+    logRoomEvent(room.id, 'permissions_change', {
+      actorId: principal.userId,
+      actorName: principal.username,
+      data: { targetUserId: req.params.userId, targetName: await nameFor(req.params.userId) },
     });
     reply.send({
       userId: req.params.userId,
@@ -376,6 +395,11 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
           .send({ error: 'NotFound', message: 'Participant is not connected', statusCode: 404 });
         return;
       }
+      logRoomEvent(room.id, 'kick', {
+        actorId: principal.userId,
+        actorName: principal.username,
+        data: { targetUserId: req.params.userId, targetName: await nameFor(req.params.userId) },
+      });
       reply.send({ userId: req.params.userId } satisfies KickMemberResponse);
     },
   );
@@ -383,6 +407,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: CreateInviteRequest }>(
     '/rooms/:id/invites',
     async (req, reply) => {
+      await assertInvitesEnabled();
       const body = createInviteSchema.parse(req.body ?? {});
       const principal = req.principal!;
       const room = await getRoomById(req.params.id);
@@ -421,6 +446,7 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: InviteFriendRequest }>(
     '/rooms/:id/invite-friend',
     async (req, reply) => {
+      await assertInvitesEnabled();
       const body = inviteFriendSchema.parse(req.body ?? {});
       const principal = req.principal!;
       if (body.friendId === principal.userId) {

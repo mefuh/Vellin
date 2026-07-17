@@ -1,25 +1,28 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { AdminStatsResponse } from '@vellin/shared';
+import { Link } from 'react-router-dom';
+import type { AnalyticsOverview } from '@vellin/shared';
+import { adminAnalyticsApi } from '../../api/adminAnalytics';
 import { adminApi } from '../../api/admin';
 import { ApiHttpError } from '../../api/client';
 import { Button, Chip, Icon, type IconName } from '../../shared';
-import { useIsNarrow } from '../../hooks/useMediaQuery';
+import { AdminPage, AdminSurface, StatTile } from './components/AdminPage';
+import { AreaTrend } from './components/Chart';
+import { useAdminAccess } from './AdminAccessContext';
 
-const REFRESH_MS = 10_000;
+const REFRESH_MS = 15_000;
 
 export function AdminDashboard() {
-  const isNarrow = useIsNarrow();
-  const [stats, setStats] = useState<AdminStatsResponse | null>(null);
+  const { can } = useAdminAccess();
+  const [data, setData] = useState<AnalyticsOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showBroadcast, setShowBroadcast] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const data = await adminApi.stats();
-      setStats(data);
+      setData(await adminAnalyticsApi.overview());
       setError(null);
     } catch (e) {
-      setError(e instanceof ApiHttpError ? e.payload.message : 'Не удалось загрузить статистику');
+      setError(e instanceof ApiHttpError ? e.payload.message : 'Не удалось загрузить обзор');
     }
   }, []);
 
@@ -30,126 +33,84 @@ export function AdminDashboard() {
   }, [refresh]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-        <div>
-          <h1 style={{ fontSize: isNarrow ? 22 : 28, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>
-            Обзор
-          </h1>
-          <p style={{ marginTop: 6, color: 'var(--text-1)', fontSize: 13 }}>
-            Состояние сервиса в реальном времени. Обновляется каждые 10 секунд.
-          </p>
+    <AdminPage
+      eyebrow="Центр управления"
+      title="Обзор"
+      subtitle="Состояние платформы в реальном времени. Обновляется автоматически."
+      actions={
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button variant="secondary" size="sm" icon="refresh" onClick={() => void refresh()}>Обновить</Button>
+          {can('broadcast.send') && (
+            <Button variant="primary" size="sm" icon="bell" onClick={() => setShowBroadcast(true)}>Объявление</Button>
+          )}
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Button variant="secondary" icon="refresh" size={isNarrow ? 'sm' : undefined} onClick={() => void refresh()}>
-            Обновить
-          </Button>
-          <Button variant="primary" icon="bell" size={isNarrow ? 'sm' : undefined} onClick={() => setShowBroadcast(true)}>
-            Объявление
-          </Button>
-        </div>
-      </header>
-
+      }
+    >
       {error && (
-        <div
-          style={{
-            background: 'rgba(209,39,27,0.12)',
-            color: 'var(--accent-hi)',
-            padding: '12px 16px',
-            borderRadius: 'var(--r-md)',
-            fontSize: 13,
-          }}
-        >
+        <div style={{ background: 'var(--accent-soft)', color: 'var(--accent-hi)', padding: '12px 16px', borderRadius: 'var(--r-md)', fontSize: 13 }}>
           {error}
         </div>
       )}
 
-      <section
-        style={{
-          display: 'grid',
-          // На узком экране минимум 140px — две карточки умещаются в ряд
-          // даже на 320px viewport.
-          gridTemplateColumns: `repeat(auto-fill, minmax(${isNarrow ? 140 : 220}px, 1fr))`,
-          gap: isNarrow ? 10 : 14,
-        }}
-      >
-        <StatCard
-          icon="users"
-          label="Всего пользователей"
-          value={stats ? stats.users.total : '—'}
-          hint={stats ? `${stats.users.blocked} заблокировано` : ''}
-        />
-        <StatCard
-          icon="waveform"
-          label="Сейчас онлайн"
-          value={stats ? stats.users.online : '—'}
-          hint="пользователей на сайте"
-          tone="ok"
-        />
-        <StatCard
-          icon="film"
-          label="Всего комнат"
-          value={stats ? stats.rooms.total : '—'}
-          hint={stats ? `${stats.rooms.private} приватных` : ''}
-        />
-        <StatCard
-          icon="flame"
-          label="Активные комнаты"
-          value={stats ? stats.rooms.active : '—'}
-          hint="есть участники сейчас"
-          tone="accent"
-        />
-      </section>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+        <StatTile label="Пользователи" value={data ? data.users.total : '—'} hint={data ? `+${data.users.newToday} сегодня` : ''} />
+        <StatTile label="Онлайн" value={data ? data.users.online : '—'} accent hint="сейчас на сайте" />
+        <StatTile label="Активные комнаты" value={data ? data.rooms.active : '—'} hint={data ? `из ${data.rooms.total} всего` : ''} />
+        <StatTile label="Часов вместе" value={data ? data.sharedWatch.totalHours : '—'} hint="совместный просмотр" />
+        <StatTile label="Заблокировано" value={data ? data.users.blocked : '—'} />
+        <StatTile label="Сообщений" value={data ? data.social.messages : '—'} hint="в комнатах" />
+        <StatTile label="Дружбы" value={data ? data.social.friendships : '—'} />
+        <StatTile label="Приватных комнат" value={data ? data.rooms.private : '—'} />
+      </div>
 
-      <footer style={{ color: 'var(--text-3)', fontSize: 11 }}>
-        {stats && (
-          <>Время сервера: {new Date(stats.serverTime).toLocaleString('ru-RU')}</>
-        )}
-      </footer>
+      {data && (
+        <AdminSurface style={{ padding: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
+              Регистрации · 7 дней · {data.registrations7d.total}
+            </div>
+            {can('analytics.view') && (
+              <Link to="/admin/analytics" style={{ textDecoration: 'none' }}>
+                <Button variant="ghost" size="sm" iconRight="arrow">Вся аналитика</Button>
+              </Link>
+            )}
+          </div>
+          <AreaTrend points={data.registrations7d.points} height={180} />
+        </AdminSurface>
+      )}
+
+      {/* Быстрые переходы */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <QuickLink to="/admin/analytics" icon="grid" label="Аналитика" show={can('analytics.view')} />
+        <QuickLink to="/admin/users" icon="users" label="Пользователи" show={can('users.view')} />
+        <QuickLink to="/admin/rooms" icon="film" label="Комнаты" show={can('rooms.view')} />
+        <QuickLink to="/admin/audit" icon="list" label="Журнал аудита" show={can('audit.view')} />
+      </div>
+
+      <div style={{ color: 'var(--text-3)', fontSize: 11 }}>
+        {data && <>Обновлено: {new Date(data.generatedAt).toLocaleString('ru-RU')}</>}
+      </div>
 
       {showBroadcast && <BroadcastModal onClose={() => setShowBroadcast(false)} />}
-    </div>
+    </AdminPage>
   );
 }
 
-function StatCard({
-  icon,
-  label,
-  value,
-  hint,
-  tone = 'neutral',
-}: {
-  icon: IconName;
-  label: string;
-  value: number | string;
-  hint?: string;
-  tone?: 'neutral' | 'accent' | 'ok';
-}) {
-  const accent =
-    tone === 'accent' ? 'var(--accent-hi)' : tone === 'ok' ? 'var(--ok)' : 'var(--text-1)';
+function QuickLink({ to, icon, label, show }: { to: string; icon: IconName; label: string; show: boolean }) {
+  if (!show) return null;
   return (
-    <article
+    <Link
+      to={to}
       style={{
-        background: 'var(--bg-1)',
-        border: '1px solid var(--line-2)',
-        borderRadius: 'var(--r-lg)',
-        padding: '16px 18px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
+        display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', textDecoration: 'none',
+        background: 'var(--bg-1)', borderRadius: 'var(--r-lg)', boxShadow: 'inset 0 0 0 1px var(--line-1)',
+        color: 'var(--text-0)', fontWeight: 500, fontSize: 14,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ color: 'var(--text-2)', fontSize: 12, letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-          {label}
-        </span>
-        <Icon name={icon} size={16} style={{ color: accent }} />
-      </div>
-      <div style={{ fontSize: 32, fontWeight: 600, letterSpacing: '-0.02em', color: accent }}>
-        {value}
-      </div>
-      {hint && <div style={{ color: 'var(--text-3)', fontSize: 11 }}>{hint}</div>}
-    </article>
+      <Icon name={icon} size={17} style={{ color: 'var(--text-2)' }} />
+      {label}
+      <Icon name="arrow" size={15} style={{ color: 'var(--text-3)', marginLeft: 'auto' }} />
+    </Link>
   );
 }
 
@@ -178,43 +139,16 @@ function BroadcastModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.6)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 20,
-        zIndex: 1000,
-      }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 1000 }}
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--bg-1)',
-          border: '1px solid var(--line-2)',
-          borderRadius: 'var(--r-lg)',
-          padding: 24,
-          width: 'min(520px, 100%)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-        }}
+        style={{ background: 'var(--bg-1)', boxShadow: 'inset 0 0 0 1px var(--line-2)', borderRadius: 'var(--r-xl)', padding: 24, width: 'min(520px, 100%)', display: 'flex', flexDirection: 'column', gap: 16 }}
       >
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Системное объявление</h2>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-2)',
-              cursor: 'pointer',
-              padding: 4,
-            }}
-          >
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 4 }}>
             <Icon name="close" size={18} />
           </button>
         </header>
@@ -227,34 +161,14 @@ function BroadcastModal({ onClose }: { onClose: () => void }) {
           maxLength={1000}
           rows={4}
           placeholder="Например: техобслуживание начнётся в 22:00 МСК"
-          style={{
-            background: 'var(--bg-2)',
-            border: '1px solid var(--line-2)',
-            borderRadius: 'var(--r-md)',
-            padding: 12,
-            color: 'var(--text-0)',
-            fontFamily: 'inherit',
-            fontSize: 14,
-            resize: 'vertical',
-          }}
+          style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 'var(--r-md)', padding: 12, color: 'var(--text-0)', fontFamily: 'inherit', fontSize: 14, resize: 'vertical' }}
         />
-        <div style={{ color: 'var(--text-3)', fontSize: 11, textAlign: 'right' }}>
-          {body.length}/1000
-        </div>
+        <div style={{ color: 'var(--text-3)', fontSize: 11, textAlign: 'right' }}>{body.length}/1000</div>
         {result && <Chip tone="success">{result}</Chip>}
         {error && <span style={{ color: 'var(--accent-hi)', fontSize: 13 }}>{error}</span>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <Button variant="ghost" onClick={onClose}>
-            Отмена
-          </Button>
-          <Button
-            variant="primary"
-            icon="send"
-            disabled={sending || !body.trim()}
-            onClick={() => void send()}
-          >
-            Отправить
-          </Button>
+          <Button variant="ghost" onClick={onClose}>Отмена</Button>
+          <Button variant="primary" icon="send" disabled={sending || !body.trim()} onClick={() => void send()}>Отправить</Button>
         </div>
       </div>
     </div>

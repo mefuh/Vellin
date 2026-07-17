@@ -12,6 +12,22 @@ import { loadEnv } from './env.js';
 import { authRoutes } from './auth/routes.js';
 import { roomRoutes } from './rooms/routes.js';
 import { adminRoutes } from './admin/routes.js';
+import { adminRbacRoutes } from './admin/rbac/routes.js';
+import { adminAuditRoutes } from './admin/audit/routes.js';
+import { adminModerationRoutes } from './admin/moderation/routes.js';
+import { adminAnalyticsRoutes } from './admin/analytics/routes.js';
+import { startRollupJob } from './admin/analytics/rollup.js';
+import { reportPublicRoutes, adminReportRoutes } from './admin/moderation/reports.js';
+import { adminDmModerationRoutes } from './admin/moderation/dm.js';
+import { adminPlatformRoutes } from './admin/platform/routes.js';
+import { runtimeRoutes } from './admin/platform/runtime.js';
+import { adminSystemRoutes } from './admin/system/routes.js';
+import { adminMediaRoutes } from './admin/media/routes.js';
+import { adminRoomsExtraRoutes } from './admin/rooms/routes.js';
+import { adminInsightsRoutes } from './admin/insights/routes.js';
+import { recordError, recordRequest, startMetricsSampler } from './admin/system/metrics.js';
+import { seedRolesAndBootstrapAdmin } from './admin/rbac/roles.js';
+import { seedDefaultFlags } from './admin/platform/flags.js';
 import { friendRoutes } from './friends/routes.js';
 import { dmRoutes } from './dm/routes.js';
 import { geoRoutes } from './geo/routes.js';
@@ -105,9 +121,20 @@ export async function buildApp(): Promise<FastifyInstance> {
       });
       return;
     }
+    recordError(`${_req.method} ${_req.url}`, (err as Error).message);
     app.log.error({ err }, 'Unhandled error');
     reply.code(500).send({ error: 'InternalServerError', message: 'Internal error', statusCode: 500 });
   });
+
+  // Телеметрия латентности: пишем каждый ответ в кольцевой буфер (для раздела
+  // «Производительность» админ-панели). Маршрут берём паттерном (…/:id), а не
+  // сырым URL, чтобы агрегация по эндпоинтам была осмысленной.
+  app.addHook('onResponse', (req, reply, done) => {
+    const route = (req.routeOptions?.url as string | undefined) ?? req.url;
+    recordRequest(req.method, route, reply.statusCode, reply.elapsedTime);
+    done();
+  });
+  startMetricsSampler();
 
   app.get('/health', async () => ({ ok: true, version: '0.25.0' }));
 
@@ -119,6 +146,19 @@ export async function buildApp(): Promise<FastifyInstance> {
       await api.register(authRoutes);
       await api.register(roomRoutes);
       await api.register(adminRoutes);
+      await api.register(adminRbacRoutes);
+      await api.register(adminAuditRoutes);
+      await api.register(adminModerationRoutes);
+      await api.register(adminAnalyticsRoutes);
+      await api.register(adminReportRoutes);
+      await api.register(adminDmModerationRoutes);
+      await api.register(adminPlatformRoutes);
+      await api.register(adminSystemRoutes);
+      await api.register(adminMediaRoutes);
+      await api.register(adminRoomsExtraRoutes);
+      await api.register(adminInsightsRoutes);
+      await api.register(reportPublicRoutes);
+      await api.register(runtimeRoutes);
       await api.register(friendRoutes);
       await api.register(dmRoutes);
       await api.register(geoRoutes);
@@ -148,6 +188,20 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await registerWebSocket(app);
+
+  // RBAC админ-панели: сидируем системные роли и бутстрапим ADMIN_EMAIL в
+  // super_admin (идемпотентно). Не блокирует старт — ошибка лишь логируется.
+  void seedRolesAndBootstrapAdmin().catch((err) =>
+    logger.error({ err }, 'rbac: seed/bootstrap failed'),
+  );
+
+  // Well-known feature-флаги (напр. приём жалоб) — засеиваем идемпотентно, чтобы
+  // они были видны/управляемы в админке и по умолчанию включены.
+  void seedDefaultFlags().catch((err) => logger.error({ err }, 'flags: seed failed'));
+
+  // Аналитика: периодический суточный снапшот метрик (DAU/online/активность),
+  // которые нельзя восстановить из createdAt задним числом.
+  startRollupJob();
 
   // Засеять дефолтные шаблоны push (идемпотентно) и запустить фоновый воркер
   // очереди отправки (no-op, если push выключен — нет VAPID-ключей).

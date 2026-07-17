@@ -62,6 +62,54 @@ function sanitize(input: FavoriteTitle): FavoriteTitle | null {
   };
 }
 
+/** Перезаписывает позиции набора строк одной транзакцией (delete+create,
+ * сохраняя снимок данных). Порядок задаётся входным массивом. */
+async function repackFavorites(userId: string, rows: DbFavorite[]): Promise<FavoriteTitle[]> {
+  await prisma.$transaction([
+    prisma.favoriteTitle.deleteMany({ where: { userId } }),
+    ...rows.map((t, i) =>
+      prisma.favoriteTitle.create({
+        data: {
+          userId,
+          position: i,
+          kpId: t.kpId,
+          type: t.type,
+          title: t.title,
+          originalTitle: t.originalTitle,
+          year: t.year,
+          posterUrl: t.posterUrl,
+          ratingKp: t.ratingKp,
+          ratingImdb: t.ratingImdb,
+        },
+      }),
+    ),
+  ]);
+  return rows.map(toFavorite);
+}
+
+/** Точечно убирает один фильм из избранного и переупаковывает позиции. */
+export async function removeFavorite(userId: string, kpId: number): Promise<FavoriteTitle[]> {
+  const rows = await prisma.favoriteTitle.findMany({ where: { userId }, orderBy: { position: 'asc' } });
+  const kept = rows.filter((r) => r.kpId !== kpId);
+  if (kept.length === rows.length) return rows.map(toFavorite); // нечего удалять
+  return repackFavorites(userId, kept);
+}
+
+/** Переупорядочивает избранное по массиву kpId. Незнакомые id игнорируются,
+ * пропущенные существующие дописываются в конец в прежнем порядке. */
+export async function reorderFavorites(userId: string, order: number[]): Promise<FavoriteTitle[]> {
+  const rows = await prisma.favoriteTitle.findMany({ where: { userId }, orderBy: { position: 'asc' } });
+  const byId = new Map(rows.map((r) => [r.kpId, r]));
+  const seen = new Set<number>();
+  const next: DbFavorite[] = [];
+  for (const kpId of order) {
+    const row = byId.get(kpId);
+    if (row && !seen.has(kpId)) { seen.add(kpId); next.push(row); }
+  }
+  for (const row of rows) if (!seen.has(row.kpId)) next.push(row); // хвост без изменений
+  return repackFavorites(userId, next);
+}
+
 /** Полная замена избранного пользователя (≤5, дубли по kpId отсекаются). */
 export async function setFavorites(userId: string, items: FavoriteTitle[]): Promise<FavoriteTitle[]> {
   const clean: FavoriteTitle[] = [];

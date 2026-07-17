@@ -366,6 +366,8 @@ export interface AdminUserSummary {
   blockReason: string | null;
   /** Сколько комнат пользователь владеет. */
   roomsOwned: number;
+  /** Название админ-роли, если пользователь — сотрудник (иначе null). */
+  roleName: string | null;
 }
 
 export interface AdminUserListResponse {
