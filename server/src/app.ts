@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -49,6 +50,16 @@ import { getAcceptedFriendIds } from './friends/service.js';
 import { parsePrivacy } from './privacy/privacy.js';
 import { logger } from './utils/logger.js';
 import { prisma } from './db/prisma.js';
+
+/**
+ * Версия приложения — читается из package.json в рантайме (а не хардкодится),
+ * чтобы /health всегда совпадал с реальным релизом. Путь '../package.json'
+ * одинаково валиден и в dev (src/app.ts), и в прод-сборке (dist/app.js) —
+ * оба файла лежат на один уровень ниже корня server/.
+ */
+const APP_VERSION = (
+  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
+).version;
 
 export async function buildApp(): Promise<FastifyInstance> {
   const env = loadEnv();
@@ -136,7 +147,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
   startMetricsSampler();
 
-  app.get('/health', async () => ({ ok: true, version: '0.25.0' }));
+  app.get('/health', async () => ({ ok: true, version: APP_VERSION }));
 
   await app.register(
     async (api) => {
