@@ -1,5 +1,67 @@
 import 'package:flutter/material.dart';
+import '../app_config.dart';
 import '../theme/vellin_theme.dart';
+
+/// Аватар пользователя: загруженная картинка или градиент-заглушка с инициалом.
+/// Опционально — индикатор «онлайн».
+class VellinAvatar extends StatelessWidget {
+  final String username;
+  final String avatarSeed;
+  final String? avatarUrl;
+  final double size;
+  final bool? online;
+
+  const VellinAvatar({
+    super.key,
+    required this.username,
+    required this.avatarSeed,
+    this.avatarUrl,
+    this.size = 40,
+    this.online,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final url = AppConfig.mediaUrl(avatarUrl);
+    final initial = username.isNotEmpty ? username[0].toUpperCase() : '?';
+    // Детерминированный оттенок заглушки по seed.
+    final hue = (avatarSeed.isEmpty ? username : avatarSeed).hashCode % 360;
+    final grad = HSLColor.fromAHSL(1, hue.abs().toDouble(), 0.5, 0.4).toColor();
+
+    final avatar = Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: VellinColors.bg3,
+        image: url != null ? DecorationImage(image: NetworkImage(url), fit: BoxFit.cover) : null,
+        gradient: url == null ? LinearGradient(colors: [grad, grad.withValues(alpha: 0.6)]) : null,
+      ),
+      alignment: Alignment.center,
+      child: url == null
+          ? Text(initial, style: TextStyle(color: Colors.white, fontSize: size * 0.4, fontWeight: FontWeight.w600))
+          : null,
+    );
+
+    if (online == null) return avatar;
+    return Stack(clipBehavior: Clip.none, children: [
+      avatar,
+      Positioned(
+        right: -1,
+        bottom: -1,
+        child: Container(
+          width: size * 0.28,
+          height: size * 0.28,
+          decoration: BoxDecoration(
+            color: online! ? VellinColors.ok : VellinColors.text3,
+            shape: BoxShape.circle,
+            border: Border.all(color: VellinColors.bg0, width: 2),
+          ),
+        ),
+      ),
+    ]);
+  }
+}
 
 /// Поле ввода в стиле Vellin (label капсом + тёмный инпут).
 class VellinField extends StatelessWidget {

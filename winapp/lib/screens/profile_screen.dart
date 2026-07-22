@@ -1,6 +1,5 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../api/auth_api.dart';
@@ -30,65 +29,28 @@ class ProfileScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: VellinColors.bg0,
-      body: Column(
-        children: [
-          _Header(onLogout: () async {
-            await context.read<AuthController>().logout();
-            if (context.mounted) context.go('/login');
-          }),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 48),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 620),
-                  child: Column(
-                    children: [
-                      _IdentityCard(user: user),
-                      const SizedBox(height: 16),
-                      _EmailCard(user: user),
-                      const SizedBox(height: 16),
-                      const _PasswordCard(),
-                      const SizedBox(height: 20),
-                      Text('Vellin для Windows · v${AppConfig.appVersion}',
-                          style: const TextStyle(color: VellinColors.text3, fontSize: 12)),
-                    ],
-                  ),
-                ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 620),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 48),
+            children: [
+              const Text('Профиль',
+                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: VellinColors.text0, letterSpacing: -0.5)),
+              const SizedBox(height: 20),
+              _IdentityCard(user: user),
+              const SizedBox(height: 16),
+              _EmailCard(user: user),
+              const SizedBox(height: 16),
+              const _PasswordCard(),
+              const SizedBox(height: 20),
+              Center(
+                child: Text('Vellin для Windows · v${AppConfig.appVersion}',
+                    style: const TextStyle(color: VellinColors.text3, fontSize: 12)),
               ),
-            ),
+            ],
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  final VoidCallback onLogout;
-  const _Header({required this.onLogout});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-      decoration: const BoxDecoration(
-        color: VellinColors.bg0,
-        border: Border(bottom: BorderSide(color: VellinColors.line2)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(children: [
-            Container(width: 9, height: 9, decoration: const BoxDecoration(color: VellinColors.accent, shape: BoxShape.circle)),
-            const SizedBox(width: 8),
-            const Text('Vellin', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: VellinColors.text0)),
-          ]),
-          TextButton(
-            onPressed: onLogout,
-            style: TextButton.styleFrom(foregroundColor: VellinColors.text1),
-            child: const Text('Выйти'),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -171,7 +133,7 @@ class _IdentityCardState extends State<_IdentityCard> {
       allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
     );
     final path = picked?.files.single.path;
-    if (path == null) return;
+    if (path == null || !mounted) return;
     setState(() { _busy = true; _error = null; _ok = null; });
     final auth = context.read<AuthController>();
     try {

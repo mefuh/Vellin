@@ -6,9 +6,12 @@ import 'theme/vellin_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/friends_screen.dart';
+import 'screens/home_shell.dart';
 
 /// Роутер с guard'ом авторизации. Пока сессия восстанавливается — сплэш; при
-/// 426 — экран принудительного обновления; иначе разводим гостя/пользователя.
+/// 426 — экран принудительного обновления; авторизованная часть живёт в
+/// оболочке HomeShell (боковая навигация Друзья/Профиль).
 GoRouter buildRouter(AuthController auth) {
   return GoRouter(
     refreshListenable: auth,
@@ -18,7 +21,13 @@ GoRouter buildRouter(AuthController auth) {
       GoRoute(path: '/upgrade', builder: (_, _) => _UpgradeScreen(minVersion: auth.upgradeMinVersion ?? '')),
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
       GoRoute(path: '/register', builder: (_, _) => const RegisterScreen()),
-      GoRoute(path: '/profile', builder: (_, _) => const ProfileScreen()),
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) => HomeShell(shell: navigationShell),
+        branches: [
+          StatefulShellBranch(routes: [GoRoute(path: '/friends', builder: (_, _) => const FriendsScreen())]),
+          StatefulShellBranch(routes: [GoRoute(path: '/profile', builder: (_, _) => const ProfileScreen())]),
+        ],
+      ),
     ],
     redirect: (context, state) {
       final loc = state.matchedLocation;
@@ -26,7 +35,7 @@ GoRouter buildRouter(AuthController auth) {
       if (!auth.ready) return loc == '/splash' ? null : '/splash';
       final authed = auth.authenticated;
       final onAuthPage = loc == '/login' || loc == '/register';
-      if (authed) return onAuthPage || loc == '/splash' ? '/profile' : null;
+      if (authed) return onAuthPage || loc == '/splash' ? '/friends' : null;
       return onAuthPage ? null : '/login';
     },
   );
