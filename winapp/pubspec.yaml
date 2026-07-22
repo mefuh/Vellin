@@ -37,6 +37,8 @@ dependencies:
 
   # HTTP-клиент к бэкенду Vellin.
   http: ^1.2.2
+  # MediaType для указания content-type частей multipart (загрузка файлов).
+  http_parser: ^4.0.2
   # Хранилище сессии. На Windows реализовано через pure-Dart win32 FFI (без
   # компиляции C++/ATL). Hardening-TODO: перевести на ОС-шифрование секретов
   # (Credential Manager через flutter_secure_storage) — требует ATL в VS.

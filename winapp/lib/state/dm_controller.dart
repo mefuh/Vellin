@@ -127,8 +127,6 @@ class DmController extends ChangeNotifier {
         'imageWidth': img.width,
         'imageHeight': img.height,
       });
-    } catch (_) {
-      // тихо игнорируем; можно добавить баннер ошибки позже
     } finally {
       sendingImage = false;
       notifyListeners();

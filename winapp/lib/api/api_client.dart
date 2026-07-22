@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart' show MediaType;
 import '../app_config.dart';
 
 /// Ошибка API с HTTP-статусом и сообщением из тела `{error,message,statusCode}`.
@@ -68,11 +69,29 @@ class ApiClient {
   Future<dynamic> delete(String path) async =>
       _decode(await http.delete(_uri(path), headers: _headers()));
 
-  /// Multipart-загрузка файла (аватар). content-type проставит http сам.
+  /// content-type части файла по расширению. Без него MultipartFile шлёт
+  /// application/octet-stream, и сервер отклоняет загрузку (принимает только
+  /// image/jpeg|png|webp).
+  static MediaType? _mediaTypeFor(String filePath) {
+    final ext = filePath.contains('.') ? filePath.split('.').last.toLowerCase() : '';
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+        return MediaType('image', 'jpeg');
+      case 'png':
+        return MediaType('image', 'png');
+      case 'webp':
+        return MediaType('image', 'webp');
+      default:
+        return null;
+    }
+  }
+
+  /// Multipart-загрузка файла (аватар, картинка ЛС).
   Future<dynamic> uploadFile(String path, String field, String filePath) async {
     final req = http.MultipartRequest('POST', _uri(path))
       ..headers.addAll(_headers())
-      ..files.add(await http.MultipartFile.fromPath(field, filePath));
+      ..files.add(await http.MultipartFile.fromPath(field, filePath, contentType: _mediaTypeFor(filePath)));
     final streamed = await req.send();
     return _decode(await http.Response.fromStream(streamed));
   }

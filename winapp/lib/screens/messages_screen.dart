@@ -151,7 +151,15 @@ class _ChatPaneState extends State<_ChatPane> {
     if (path == null) return;
     final caption = _input.text;
     _input.clear();
-    await widget.dm.sendImage(path, caption: caption);
+    try {
+      await widget.dm.sendImage(path, caption: caption);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось отправить: $e'), backgroundColor: VellinColors.bg3),
+        );
+      }
+    }
   }
 
   void _scrollToBottom() {
