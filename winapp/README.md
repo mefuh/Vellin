@@ -41,20 +41,26 @@ Vite-прокси. Полноценная нативная оболочка (О�
 ## Нативная сборка (Tauri) — требуется тулчейн
 
 Для `tauri dev` / `tauri build` нужен **Rust** и **MSVC C++ build tools**
-(на этой машине пока не установлены):
+(линковщик `link.exe` + Windows SDK). На машине разработки уже установлены:
+Rust 1.97 (`stable-x86_64-pc-windows-msvc`) и VS 2019 BuildTools (MSVC 14.29 +
+Windows SDK 10.0.19041); WebView2 присутствует на Windows 11. Нативная оболочка
+собрана и проверена (`vellin-winapp.exe`, окно открывается).
+
+Если тулчейна нет — установить так:
 
 ```powershell
 # 1. Rust (per-user, без прав администратора)
 winget install Rustlang.Rustup
 
-# 2. MSVC C++ build tools (нужен линковщик MSVC; несколько ГБ, требует UAC)
+# 2. MSVC C++ build tools (нужен линковщик MSVC; несколько ГБ, требует UAC).
+#    Подойдёт и уже установленный VS 2019/2022 BuildTools с workload VCTools.
 winget install --id Microsoft.VisualStudio.2022.BuildTools ^
   --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 
 # 3. WebView2 Runtime — уже присутствует на Windows 11
 ```
 
-После установки:
+Сборка/запуск (cargo должен быть на PATH — `%USERPROFILE%\.cargo\bin`):
 
 ```bash
 npm run dev:winapp -- --help          # sanity
