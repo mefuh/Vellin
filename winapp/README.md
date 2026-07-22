@@ -1,81 +1,66 @@
 # Vellin WinApp
 
-Десктоп-клиент Vellin для Windows на **Tauri 2 + React + TypeScript**. Живёт
-воркспейсом в монорепо и переиспользует общие типы `@vellin/shared`, дизайн-
-токены и примитивы веб-клиента.
+Полностью нативный десктоп-клиент Vellin для Windows на **Flutter** (Dart).
+UI отрисовывается собственным движком Flutter (Impeller/Direct3D через
+`flutter_windows.dll`) — **без WebView и HTML/JS-рантайма**. Один стек ведёт ко
+всем целям: Windows (сейчас), затем macOS/iOS/Android.
 
-На текущем этапе реализованы **авторизация/регистрация** (только
-зарегистрированные пользователи — гостевого входа в клиентах нет) и **профиль**
-(личные данные, аватар, смена email/пароля). Комнат пока нет.
+Реализованы **авторизация/регистрация** (только зарегистрированные
+пользователи — гостевого входа в клиентах нет) и **профиль** (личные данные,
+аватар, смена email/пароля). Комнат пока нет.
 
-## Архитектура
+## Архитектура (`lib/`)
 
-- `src/runtime/` — различия сред: определение Tauri, версия/платформа клиента
-  (заголовки `X-App-Platform: windows` / `X-App-Version`), безопасное хранилище
-  сессии, резолвинг адресов бэкенда и media-URL.
-- `src/api/` — HTTP-клиент. Нативно запросы идут через Tauri HTTP-плагин (минуя
-  CORS WebView); в браузер-dev — обычный `fetch` + Vite-прокси. Ответ `426` →
-  экран принудительного обновления.
-- `src/stores/authStore.ts` — сессия (Zustand), только зарегистрированные.
-- `src/pages/` — `Login`, `Register`, `Profile`, каркас `AuthShell`.
-- `src-tauri/` — нативная оболочка (Rust): плагины `os`, `store`, `http`.
+- `app_config.dart` — адрес бэкенда (`--dart-define=SERVER_URL=...`, по умолчанию
+  прод), версия/платформа клиента для заголовков `X-App-Platform`/`X-App-Version`.
+- `models/` — Dart-модели, зеркалящие типы `@vellin/shared` (источник истины —
+  общий TS-пакет бэкенда).
+- `api/` — `ApiClient` (базовый URL, заголовки платформы/версии, Bearer-токен,
+  разбор ошибок и `426 → экран обновления`) + `AuthApi` (register/login/me/
+  профиль). Гостевой вход не проброшен.
+- `storage/session_store.dart` — хранилище сессии (token + user).
+- `state/auth_controller.dart` — состояние (ChangeNotifier), только
+  зарегистрированные; восстановление сессии асинхронное.
+- `theme/vellin_theme.dart` — дизайн-токены Vellin (цвета/радиусы из
+  `design/tokens.css`).
+- `screens/` — `login`, `register`, `profile`; `router.dart` — go_router с
+  guard'ом, сплэшем и экраном force-update.
 
-Хранилище токена: сейчас плагин `store` (JSON в приватном каталоге приложения).
-**Hardening на следующий шаг** — переезд на ОС-хранилище секретов (Windows
-Credential Manager). Точка изоляции — `src/runtime/secureStore.ts`.
+### Hardening-TODO: хранение токена
 
-## Разработка UI в браузере (Rust не нужен)
+Сейчас `SessionStore` использует `shared_preferences` (на Windows — pure-Dart
+`win32` FFI, без C++/ATL). Значения не шифруются — приемлемый MVP. Следующий
+шаг — ОС-хранилище секретов (Windows Credential Manager через
+`flutter_secure_storage`); оно требует компонента **ATL** в Visual Studio Build
+Tools. Точка изоляции — только `storage/session_store.dart`.
 
-Быстрый цикл разработки интерфейса — обычный Vite против локального бэкенда:
+## Требования к тулчейну (уже установлены на машине разработки)
 
-```bash
-# из корня монорепо (нужен запущенный сервер :3001 и Postgres)
-npm run dev:server
-npm run dev:winapp        # Vite на http://127.0.0.1:1420, прокси /api → :3001
-```
+- **Flutter SDK** (stable) в `C:\src\flutter` (в PATH — `C:\src\flutter\bin`).
+- **Visual Studio Build Tools 2019** с workload «Desktop C++» (MSVC + Windows
+  SDK) — Flutter Windows-десктоп собирается через CMake/MSVC.
+- **Developer Mode** Windows включён (Flutter-плагинам нужны симлинки).
 
-Токен в этом режиме хранится в `localStorage` (fallback), запросы идут через
-Vite-прокси. Полноценная нативная оболочка (ОС-хранилище, HTTP без CORS) —
-только под Tauri (см. ниже).
+`flutter doctor` по Windows-десктопу — зелёный.
 
-## Нативная сборка (Tauri) — требуется тулчейн
-
-Для `tauri dev` / `tauri build` нужен **Rust** и **MSVC C++ build tools**
-(линковщик `link.exe` + Windows SDK). На машине разработки уже установлены:
-Rust 1.97 (`stable-x86_64-pc-windows-msvc`) и VS 2019 BuildTools (MSVC 14.29 +
-Windows SDK 10.0.19041); WebView2 присутствует на Windows 11. Нативная оболочка
-собрана и проверена (`vellin-winapp.exe`, окно открывается).
-
-Если тулчейна нет — установить так:
-
-```powershell
-# 1. Rust (per-user, без прав администратора)
-winget install Rustlang.Rustup
-
-# 2. MSVC C++ build tools (нужен линковщик MSVC; несколько ГБ, требует UAC).
-#    Подойдёт и уже установленный VS 2019/2022 BuildTools с workload VCTools.
-winget install --id Microsoft.VisualStudio.2022.BuildTools ^
-  --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-
-# 3. WebView2 Runtime — уже присутствует на Windows 11
-```
-
-Сборка/запуск (cargo должен быть на PATH — `%USERPROFILE%\.cargo\bin`):
+## Разработка и сборка
 
 ```bash
-npm run dev:winapp -- --help          # sanity
-npm run winapp:tauri dev              # запустить нативное окно
-npm run winapp:tauri build            # собрать установщик (NSIS)
-npm run tauri:icon -w @vellin/winapp  # перегенерировать иконки из src-tauri/icons/source.png
-```
+cd winapp
 
-Иконки в `src-tauri/icons/` сейчас плейсхолдеры (сплошной брендовый квадрат) —
-заменить реальным логотипом через `tauri icon`.
+# запуск против прод-бэкенда (по умолчанию https://vellin.ru)
+flutter run -d windows
+
+# против локального бэкенда :3001
+flutter run -d windows --dart-define=SERVER_URL=http://localhost:3001
+
+# сборка релизного exe
+flutter build windows            # build/windows/x64/runner/Release/
+```
 
 ## Продакшн (заложено на будущее)
 
-- **Автообновление** — Tauri Updater (подписанные апдейты); версия сверяется с
-  `/api/config.minVersions.windows`, устаревший клиент ловит `426`.
-- **Подпись** — Authenticode для установщика.
-- **Телеметрия/краши** — Sentry.
-- **CI/CD** — GitHub Actions (матрица + подпись).
+- **Версионный гейтинг** — заголовки `X-App-*`; сервер отдаёт `426`, клиент
+  показывает экран обновления (сверка с `/api/config.minVersions.windows`).
+- Установщик (MSIX/Inno Setup) + подпись Authenticode, автообновление,
+  телеметрия (Sentry), CI/CD — отдельные шаги.
