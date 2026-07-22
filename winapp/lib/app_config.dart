@@ -11,6 +11,9 @@ class AppConfig {
   /// База REST API.
   static String get apiBase => '$serverUrl/api';
 
+  /// WS-адрес пользовательского realtime-канала (http→ws).
+  static String get userWsUrl => '${serverUrl.replaceFirst(RegExp(r'^http'), 'ws')}/ws/user';
+
   /// Платформа клиента (заголовок X-App-Platform).
   static const String platform = 'windows';
 

@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../api/friends_api.dart';
 import '../models/social.dart';
 import '../state/friends_controller.dart';
+import '../state/dm_controller.dart';
 import '../theme/vellin_theme.dart';
 import '../widgets/common.dart';
 
@@ -187,11 +189,21 @@ class _FriendsScreenState extends State<FriendsScreen> {
   Widget _friendTile(FriendUser f) => _row(
         f.user,
         online: f.online,
-        trailing: IconButton(
-          icon: const Icon(Icons.person_remove_outlined, size: 20, color: VellinColors.text2),
-          tooltip: 'Удалить из друзей',
-          onPressed: () => context.read<FriendsController>().removeFriend(f.user.id),
-        ),
+        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          IconButton(
+            icon: const Icon(Icons.chat_bubble_outline, size: 20, color: VellinColors.text2),
+            tooltip: 'Написать',
+            onPressed: () {
+              context.read<DmController>().openThread(f.user.publicId);
+              context.go('/messages');
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.person_remove_outlined, size: 20, color: VellinColors.text2),
+            tooltip: 'Удалить из друзей',
+            onPressed: () => context.read<FriendsController>().removeFriend(f.user.id),
+          ),
+        ]),
       );
 
   Widget _row(PublicUser u, {bool? online, required Widget trailing}) {

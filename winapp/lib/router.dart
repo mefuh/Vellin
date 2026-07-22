@@ -7,6 +7,7 @@ import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/friends_screen.dart';
+import 'screens/messages_screen.dart';
 import 'screens/home_shell.dart';
 
 /// Роутер с guard'ом авторизации. Пока сессия восстанавливается — сплэш; при
@@ -25,6 +26,7 @@ GoRouter buildRouter(AuthController auth) {
         builder: (context, state, navigationShell) => HomeShell(shell: navigationShell),
         branches: [
           StatefulShellBranch(routes: [GoRoute(path: '/friends', builder: (_, _) => const FriendsScreen())]),
+          StatefulShellBranch(routes: [GoRoute(path: '/messages', builder: (_, _) => const MessagesScreen())]),
           StatefulShellBranch(routes: [GoRoute(path: '/profile', builder: (_, _) => const ProfileScreen())]),
         ],
       ),
