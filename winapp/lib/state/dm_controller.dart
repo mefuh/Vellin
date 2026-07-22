@@ -133,6 +133,35 @@ class DmController extends ChangeNotifier {
     }
   }
 
+  /// Отправить голосовое: загрузить (REST) → отправить (WS dm_send с voiceUrl).
+  Future<void> sendVoice(String filePath, int durationSec, List<int> peaks) async {
+    if (_activePeerUserId == null) return;
+    final url = await _api.uploadVoice(filePath);
+    final nonce = 'n${DateTime.now().millisecondsSinceEpoch}_${_nonceSeq++}';
+    activeMessages.add(DirectMessage(
+      id: nonce,
+      conversationId: _activeConversationId ?? '',
+      senderId: _myUserId,
+      body: '',
+      createdAt: DateTime.now().toIso8601String(),
+      voiceUrl: url,
+      voiceDurationSec: durationSec,
+      voicePeaks: peaks,
+      nonce: nonce,
+      pending: true,
+    ));
+    notifyListeners();
+    _socket.send({
+      't': 'dm_send',
+      'toUserId': _activePeerUserId,
+      'body': '',
+      'nonce': nonce,
+      'voiceUrl': url,
+      'voiceDurationSec': durationSec,
+      'voicePeaks': peaks,
+    });
+  }
+
   /// Отправить текст активному собеседнику (оптимистично + по WS).
   void sendText(String text) {
     final body = text.trim();

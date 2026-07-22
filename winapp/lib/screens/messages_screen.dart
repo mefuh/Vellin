@@ -1,11 +1,15 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:record/record.dart';
 import '../app_config.dart';
 import '../models/dm.dart';
 import '../state/dm_controller.dart';
 import '../theme/vellin_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/voice_bubble.dart';
 
 /// Раздел «Сообщения»: слева список диалогов, справа активный чат (two-pane).
 class MessagesScreen extends StatelessWidget {
@@ -128,10 +132,22 @@ class _ChatPaneState extends State<_ChatPane> {
   final _scroll = ScrollController();
   int _lastCount = 0;
 
+  // Запись голосового.
+  final _rec = AudioRecorder();
+  bool _recording = false;
+  int _recSeconds = 0;
+  Timer? _recTimer;
+  StreamSubscription<Amplitude>? _ampSub;
+  final List<int> _peaks = [];
+  String? _recPath;
+
   @override
   void dispose() {
     _input.dispose();
     _scroll.dispose();
+    _recTimer?.cancel();
+    _ampSub?.cancel();
+    _rec.dispose();
     super.dispose();
   }
 
@@ -141,6 +157,65 @@ class _ChatPaneState extends State<_ChatPane> {
     widget.dm.sendText(text);
     _input.clear();
   }
+
+  Future<void> _startRecord() async {
+    if (!await _rec.hasPermission()) {
+      if (mounted) _snack('Нет доступа к микрофону');
+      return;
+    }
+    _peaks.clear();
+    _recSeconds = 0;
+    _recPath = '${Directory.systemTemp.path}${Platform.pathSeparator}vellin_voice_${DateTime.now().millisecondsSinceEpoch}.wav';
+    await _rec.start(const RecordConfig(encoder: AudioEncoder.wav), path: _recPath!);
+    _ampSub = _rec.onAmplitudeChanged(const Duration(milliseconds: 150)).listen((amp) {
+      // dBFS (~ -45..0) → 0..100.
+      final norm = ((amp.current + 45) / 45 * 100).clamp(0, 100).round();
+      _peaks.add(norm);
+    });
+    _recTimer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _recSeconds++));
+    setState(() => _recording = true);
+  }
+
+  Future<void> _stopRecordAndSend() async {
+    final path = await _rec.stop();
+    _recTimer?.cancel();
+    await _ampSub?.cancel();
+    final seconds = _recSeconds;
+    setState(() => _recording = false);
+    if (path == null || seconds < 1) return; // слишком коротко — отбрасываем
+    // Прореживаем пики до ≤56 столбиков.
+    final peaks = _downsample(_peaks, 56);
+    try {
+      await widget.dm.sendVoice(path, seconds, peaks);
+    } catch (e) {
+      if (mounted) _snack('Не удалось отправить голосовое: $e');
+    }
+  }
+
+  Future<void> _cancelRecord() async {
+    await _rec.stop();
+    _recTimer?.cancel();
+    await _ampSub?.cancel();
+    setState(() => _recording = false);
+    if (_recPath != null) {
+      try {
+        await File(_recPath!).delete();
+      } catch (_) {}
+    }
+  }
+
+  static List<int> _downsample(List<int> src, int target) {
+    if (src.length <= target) return List.of(src);
+    final out = <int>[];
+    final step = src.length / target;
+    for (var i = 0; i < target; i++) {
+      out.add(src[(i * step).floor()]);
+    }
+    return out;
+  }
+
+  void _snack(String msg) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: VellinColors.bg3));
 
   Future<void> _attach() async {
     final picked = await FilePicker.platform.pickFiles(
@@ -206,7 +281,16 @@ class _ChatPaneState extends State<_ChatPane> {
           padding: EdgeInsets.only(bottom: 4),
           child: Text('Отправка изображения…', style: TextStyle(color: VellinColors.text3, fontSize: 12)),
         ),
-      _Composer(controller: _input, onSend: _send, onAttach: _attach),
+      _Composer(
+        controller: _input,
+        onSend: _send,
+        onAttach: _attach,
+        recording: _recording,
+        recSeconds: _recSeconds,
+        onStartRecord: _startRecord,
+        onStopSend: _stopRecordAndSend,
+        onCancelRecord: _cancelRecord,
+      ),
     ]);
   }
 }
@@ -219,6 +303,7 @@ class _Bubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasImage = m.imageUrl != null;
+    final hasVoice = m.voiceUrl != null;
     final hasText = m.body.isNotEmpty;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
@@ -228,7 +313,9 @@ class _Bubble extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 8),
           padding: hasImage
               ? const EdgeInsets.all(4)
-              : const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              : hasVoice
+                  ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
+                  : const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           constraints: const BoxConstraints(maxWidth: 440),
           decoration: BoxDecoration(
             color: mine ? VellinColors.accent : VellinColors.bg2,
@@ -238,6 +325,13 @@ class _Bubble extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (hasVoice)
+                VoiceBubble(
+                  url: AppConfig.mediaUrl(m.voiceUrl)!,
+                  durationSec: m.voiceDurationSec ?? 0,
+                  peaks: m.voicePeaks ?? const [],
+                  mine: mine,
+                ),
               if (hasImage)
                 ClipRRect(
                   borderRadius: BorderRadius.circular(VellinRadius.md),
@@ -261,7 +355,7 @@ class _Bubble extends StatelessWidget {
                     style: TextStyle(color: mine ? Colors.white : VellinColors.text0, fontSize: 14.5, height: 1.35),
                   ),
                 ),
-              if (!hasImage && !hasText)
+              if (!hasImage && !hasVoice && !hasText)
                 Text(m.previewText,
                     style: TextStyle(color: mine ? Colors.white : VellinColors.text0, fontSize: 14.5, height: 1.35)),
             ],
@@ -276,50 +370,119 @@ class _Composer extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onSend;
   final VoidCallback onAttach;
-  const _Composer({required this.controller, required this.onSend, required this.onAttach});
+  final bool recording;
+  final int recSeconds;
+  final VoidCallback onStartRecord;
+  final VoidCallback onStopSend;
+  final VoidCallback onCancelRecord;
+
+  const _Composer({
+    required this.controller,
+    required this.onSend,
+    required this.onAttach,
+    required this.recording,
+    required this.recSeconds,
+    required this.onStartRecord,
+    required this.onStopSend,
+    required this.onCancelRecord,
+  });
+
+  String _fmt(int s) => '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       decoration: const BoxDecoration(border: Border(top: BorderSide(color: VellinColors.line2))),
-      child: Row(children: [
-        IconButton(
-          onPressed: onAttach,
-          tooltip: 'Прикрепить изображение',
-          icon: const Icon(Icons.image_outlined, color: VellinColors.text2),
-        ),
-        const SizedBox(width: 4),
-        Expanded(
-          child: TextField(
-            controller: controller,
-            onSubmitted: (_) => onSend(),
-            textInputAction: TextInputAction.send,
-            style: const TextStyle(color: VellinColors.text0, fontSize: 15),
-            decoration: InputDecoration(
-              hintText: 'Сообщение…',
-              hintStyle: const TextStyle(color: VellinColors.text3),
-              filled: true,
-              fillColor: VellinColors.bg2,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(VellinRadius.md),
-                borderSide: const BorderSide(color: VellinColors.line2),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(VellinRadius.md),
-                borderSide: const BorderSide(color: VellinColors.accentHi),
-              ),
+      child: recording ? _recordingBar() : _inputBar(),
+    );
+  }
+
+  Widget _recordingBar() {
+    return Row(children: [
+      IconButton(
+        onPressed: onCancelRecord,
+        tooltip: 'Отменить',
+        icon: const Icon(Icons.delete_outline, color: VellinColors.text2),
+      ),
+      const SizedBox(width: 8),
+      const _RecDot(),
+      const SizedBox(width: 10),
+      Text('Идёт запись · ${_fmt(recSeconds)}', style: const TextStyle(color: VellinColors.text1, fontSize: 14)),
+      const Spacer(),
+      IconButton.filled(
+        onPressed: onStopSend,
+        style: IconButton.styleFrom(backgroundColor: VellinColors.accent),
+        icon: const Icon(Icons.send, color: Colors.white, size: 20),
+      ),
+    ]);
+  }
+
+  Widget _inputBar() {
+    return Row(children: [
+      IconButton(
+        onPressed: onAttach,
+        tooltip: 'Прикрепить изображение',
+        icon: const Icon(Icons.image_outlined, color: VellinColors.text2),
+      ),
+      const SizedBox(width: 4),
+      Expanded(
+        child: TextField(
+          controller: controller,
+          onSubmitted: (_) => onSend(),
+          textInputAction: TextInputAction.send,
+          style: const TextStyle(color: VellinColors.text0, fontSize: 15),
+          decoration: InputDecoration(
+            hintText: 'Сообщение…',
+            hintStyle: const TextStyle(color: VellinColors.text3),
+            filled: true,
+            fillColor: VellinColors.bg2,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(VellinRadius.md),
+              borderSide: const BorderSide(color: VellinColors.line2),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(VellinRadius.md),
+              borderSide: const BorderSide(color: VellinColors.accentHi),
             ),
           ),
         ),
-        const SizedBox(width: 10),
-        IconButton.filled(
-          onPressed: onSend,
-          style: IconButton.styleFrom(backgroundColor: VellinColors.accent),
-          icon: const Icon(Icons.send, color: Colors.white, size: 20),
-        ),
-      ]),
+      ),
+      const SizedBox(width: 6),
+      IconButton(
+        onPressed: onStartRecord,
+        tooltip: 'Записать голосовое',
+        icon: const Icon(Icons.mic_none, color: VellinColors.text2),
+      ),
+      IconButton.filled(
+        onPressed: onSend,
+        style: IconButton.styleFrom(backgroundColor: VellinColors.accent),
+        icon: const Icon(Icons.send, color: Colors.white, size: 20),
+      ),
+    ]);
+  }
+}
+
+class _RecDot extends StatefulWidget {
+  const _RecDot();
+  @override
+  State<_RecDot> createState() => _RecDotState();
+}
+
+class _RecDotState extends State<_RecDot> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 800))..repeat(reverse: true);
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.3, end: 1).animate(_c),
+      child: Container(width: 10, height: 10, decoration: const BoxDecoration(color: VellinColors.accent, shape: BoxShape.circle)),
     );
   }
 }

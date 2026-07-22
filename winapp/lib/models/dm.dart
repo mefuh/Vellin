@@ -12,6 +12,8 @@ class DirectMessage {
   final int? imageWidth;
   final int? imageHeight;
   final String? voiceUrl;
+  final int? voiceDurationSec;
+  final List<int>? voicePeaks;
   final String? videoStatus;
   final String? inviteRoomId;
   /// Эхо оптимистичной отправки (только у отправителя).
@@ -29,6 +31,8 @@ class DirectMessage {
     this.imageWidth,
     this.imageHeight,
     this.voiceUrl,
+    this.voiceDurationSec,
+    this.voicePeaks,
     this.videoStatus,
     this.inviteRoomId,
     this.nonce,
@@ -45,6 +49,8 @@ class DirectMessage {
         imageWidth: (j['imageWidth'] as num?)?.toInt(),
         imageHeight: (j['imageHeight'] as num?)?.toInt(),
         voiceUrl: j['voiceUrl'] as String?,
+        voiceDurationSec: (j['voiceDurationSec'] as num?)?.toInt(),
+        voicePeaks: (j['voicePeaks'] as List?)?.map((e) => (e as num).toInt()).toList(),
         videoStatus: j['videoStatus'] as String?,
         inviteRoomId: j['inviteRoomId'] as String?,
         nonce: j['nonce'] as String?,

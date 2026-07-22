@@ -82,6 +82,16 @@ class ApiClient {
         return MediaType('image', 'png');
       case 'webp':
         return MediaType('image', 'webp');
+      case 'wav':
+        return MediaType('audio', 'wav');
+      case 'm4a':
+        return MediaType('audio', 'mp4');
+      case 'webm':
+        return MediaType('audio', 'webm');
+      case 'ogg':
+        return MediaType('audio', 'ogg');
+      case 'mp3':
+        return MediaType('audio', 'mpeg');
       default:
         return null;
     }

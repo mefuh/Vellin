@@ -40,4 +40,10 @@ class DmApi {
       height: (j['height'] as num?)?.toInt() ?? 0,
     );
   }
+
+  /// Загрузить голосовое (multipart). Возвращает url для dm_send с voiceUrl.
+  Future<String> uploadVoice(String filePath) async {
+    final j = await _c.uploadFile('/dm/voice', 'file', filePath) as Map<String, dynamic>;
+    return j['url'] as String;
+  }
 }

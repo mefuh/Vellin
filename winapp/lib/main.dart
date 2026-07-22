@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 import 'api/api_client.dart';
 import 'api/auth_api.dart';
@@ -14,6 +15,7 @@ import 'theme/vellin_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
 
   final client = ApiClient();
   final authApi = AuthApi(client);
