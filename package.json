@@ -6,7 +6,8 @@
   "workspaces": [
     "shared",
     "server",
-    "client"
+    "client",
+    "winapp"
   ],
   "scripts": {
     "build": "npm run build -w @vellin/shared && npm run build -w @vellin/server && npm run build -w @vellin/client",
@@ -17,6 +18,8 @@
     "dev": "concurrently -n shared,server,client -c blue,green,magenta \"npm run dev -w @vellin/shared\" \"npm run dev -w @vellin/server\" \"npm run dev -w @vellin/client\"",
     "dev:server": "npm run dev -w @vellin/server",
     "dev:client": "npm run dev -w @vellin/client",
+    "dev:winapp": "npm run dev -w @vellin/winapp",
+    "winapp:tauri": "npm run tauri -w @vellin/winapp --",
     "db:migrate": "npm run db:migrate -w @vellin/server",
     "db:generate": "npm run db:generate -w @vellin/server",
     "db:studio": "npm run db:studio -w @vellin/server",

@@ -1,0 +1,878 @@
+@import './tokens.css';
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg-0);
+  font-family: var(--font-ui);
+  color: var(--text-0);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'ss01', 'ss02', 'cv11';
+  letter-spacing: -0.01em;
+}
+
+/* Скроллит сам документ (body). НЕ делаем #root отдельным скролл-контейнером:
+   на iOS WebKit position:fixed внутри прокручиваемого overflow-контейнера
+   позиционируется как absolute относительно контента — из-за этого нижний док
+   уезжал вверх (к центру), а фикс-чат получал неверные размеры/рамки. С обычным
+   скроллом документа fixed надёжно цепляется за вьюпорт. */
+html {
+  height: 100%;
+}
+body {
+  /* Гасим «резинку» — она дёргает fixed-элементы на iOS. */
+  overscroll-behavior-y: none;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+input,
+textarea {
+  font-family: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+input,
+textarea {
+  outline: none;
+}
+
+/* iOS/Safari авто-зумит страницу при фокусе на поле, если его шрифт < 16px.
+   На мобильных принудительно делаем 16px (перебивая инлайн-стили) — зум
+   пропадает, при этом десктопные компактные размеры не трогаем. */
+@media (max-width: 900px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* iOS/WebKit рендерит <input type="date"> через теневой псевдоэлемент и по
+   умолчанию центрирует значение — из-за этого на iPhone поле даты выглядело
+   выровненным иначе, чем остальные поля. Прижимаем значение влево, как у
+   обычных текстовых полей (на других движках безвредно). */
+input[type='date']::-webkit-date-and-time-value {
+  text-align: left;
+}
+input[type='date']::-webkit-datetime-edit {
+  text-align: left;
+  padding: 0;
+}
+/* На iOS нативный date-input имеет собственную «интринсик»-ширину и игнорирует
+   width:100% — поле выезжало за рамки шире остальных. Сбрасываем нативный вид,
+   чтобы оно уважало ширину/box-sizing контейнера. Ограничено только iOS
+   (@supports c -webkit-touch-callout) — на десктопе так нельзя, иначе пропадёт
+   иконка календаря. Высота задаётся инлайн-стилем, поэтому не схлопнется. */
+@supports (-webkit-touch-callout: none) {
+  input[type='date'] {
+    -webkit-appearance: none;
+    appearance: none;
+    min-width: 0;
+  }
+}
+
+/* Mobile address-bar friendly height — falls back to 100vh on older browsers. */
+.h-screen {
+  height: 100vh;
+  height: 100svh;
+}
+
+/* Responsive cols utility — driven by data-cols attr. Used by RoomInfoCards. */
+.responsive-cols {
+  display: grid;
+  gap: 12px;
+}
+.responsive-cols[data-cols='3'] {
+  grid-template-columns: repeat(3, 1fr);
+}
+.responsive-cols[data-cols='2'] {
+  grid-template-columns: repeat(2, 1fr);
+}
+@media (max-width: 720px) {
+  .responsive-cols[data-cols='3'],
+  .responsive-cols[data-cols='2'] {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Chat bubble — fluid width replaces fixed maxWidth: 220 */
+.chat-bubble-col {
+  max-width: min(70%, 360px);
+}
+@media (max-width: 720px) {
+  .chat-bubble-col {
+    max-width: 78%;
+  }
+}
+
+/* Hide on narrow screens — for header decorations, volume slider, etc. */
+@media (max-width: 600px) {
+  .hide-on-mobile {
+    display: none !important;
+  }
+}
+
+/* Fullscreen chat overlay — message entry, and the ephemeral pop-and-fade
+   shown over the video while the player controls are hidden. */
+@keyframes vellinFsChatIn {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes vellinFsChatPop {
+  0% {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  6% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  84% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+
+@keyframes vellinBufferSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Пульсация индикатора активной записи голосового. */
+@keyframes vellinPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* Эквалайзер активной записи голосового. */
+/* Появление нового пузыря сообщения (текст/голос/фото): мягко всплывает снизу
+   с лёгким масштабом — «живо», без рывка. transform-origin задаётся по стороне. */
+@keyframes dmBubbleIn {
+  from {
+    opacity: 0;
+    transform: translateY(9px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Ripple по нажатию на кнопки карточки-приглашения (Material-подобный отклик). */
+@keyframes inviteRipple {
+  from {
+    transform: scale(0);
+    opacity: 0.45;
+  }
+  to {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+/* ─── Hero-анимации страниц профиля (редизайн) ─────────────────────────────
+   Появления и «дыхание» построены на transform/opacity/filter (GPU-friendly).
+   Всё «двигающееся» глушится в prefers-reduced-motion ниже. */
+@keyframes heroFadeUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.985); filter: blur(6px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes heroFloatIn {
+  from { opacity: 0; transform: scale(0.86); filter: blur(10px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes heroBreathe {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.07); }
+}
+@keyframes heroDotPulse {
+  0% { box-shadow: 0 0 0 0 var(--hero-pulse, var(--accent-glow)); }
+  70% { box-shadow: 0 0 0 10px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@keyframes heroRingPulse {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.03); }
+}
+@keyframes heroShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes heroLivePip {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+@keyframes heroPopIn {
+  0% { opacity: 0; transform: scale(0.6) translateY(10px); }
+  60% { transform: scale(1.05); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes heroBarIn {
+  from { opacity: 0; transform: translate(-50%, 30px); filter: blur(6px); }
+  to { opacity: 1; transform: translate(-50%, 0); filter: blur(0); }
+}
+@keyframes heroSpin {
+  to { transform: rotate(360deg); }
+}
+/* Выходы (закрытие меню действий): зеркальны heroPopIn/heroFadeUp. */
+@keyframes heroPopOut {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.9) translateY(-6px); }
+}
+/* Исчезновение тоста «Сохранено» — зеркально heroPopIn (сжимается и уходит вниз). */
+@keyframes heroPopOutDown {
+  0% { opacity: 1; transform: none; }
+  40% { transform: scale(1.05); }
+  100% { opacity: 0; transform: scale(0.6) translateY(10px); }
+}
+@keyframes heroFadeOut {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(8px); filter: blur(4px); }
+}
+/* Затемнение-подложка модалки поиска фильмов: плавное появление/исчезновение. */
+@keyframes filmOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes filmOverlayOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+/* ── Модалка жалобы: подложка + панель, симметричные вход/выход ────────────── */
+@keyframes reportPanelIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.96); filter: blur(8px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes reportPanelOut {
+  from { opacity: 1; transform: none; filter: blur(0); }
+  to { opacity: 0; transform: translateY(10px) scale(0.97); filter: blur(6px); }
+}
+.report-overlay {
+  animation: filmOverlayIn 0.24s ease both;
+}
+.report-overlay[data-closing='true'] {
+  animation: filmOverlayOut 0.2s ease both;
+}
+.report-panel {
+  animation: reportPanelIn 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.report-overlay[data-closing='true'] .report-panel {
+  animation: reportPanelOut 0.2s cubic-bezier(0.4, 0, 1, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .report-panel,
+  .report-overlay[data-closing='true'] .report-panel {
+    animation: filmOverlayIn 0.2s ease both;
+  }
+  .report-overlay[data-closing='true'] .report-panel {
+    animation: filmOverlayOut 0.16s ease both;
+  }
+}
+
+/* Ховер-подъём карточки результата поиска. */
+.film-result {
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .film-result:not([data-disabled='true']):hover {
+    transform: translateY(-5px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .film-result:hover {
+    transform: none !important;
+  }
+}
+/* Hover-подъём постеров полки «Любимое кино» и карточек грида «Кино». */
+.hero-poster {
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* Hover-подъём аватара в стопке друзей (перекрывает соседей). */
+.hero-friend:hover {
+  transform: translateY(-6px);
+  z-index: 30 !important;
+}
+/* Тактильный отклик кнопок-таблеток hero: подъём на hover, вдавливание на tap. */
+.hero-press {
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), filter 0.2s ease;
+}
+.hero-press:active {
+  transform: translateY(0) scale(0.98);
+}
+@media (hover: hover) and (pointer: fine) {
+  .hero-poster:hover {
+    transform: translateY(-10px) scale(1.03);
+  }
+  .hero-press:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Класс-маркер на анимированных hero-элементах — гасим движение полностью. */
+  .hero-anim {
+    animation: none !important;
+  }
+  .hero-poster,
+  .hero-friend:hover,
+  .hero-press:hover,
+  .hero-press:active {
+    transform: none !important;
+  }
+}
+
+/* Карточка безрамочных полей настроек: rounded-контейнер с автоматическими
+   разделителями между прямыми детьми (каждый ребёнок = одна строка-поле). */
+.settings-card {
+  border-radius: 24px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  padding: 0 26px;
+}
+.settings-card > * {
+  display: block;
+  padding: 20px 0;
+}
+.settings-card > * + * {
+  border-top: 1px solid var(--line-1);
+}
+@media (max-width: 600px) {
+  .settings-card {
+    padding: 0 18px;
+  }
+}
+/* Ховер-оверлей «Изменить» на аватаре настроек. */
+@media (hover: hover) and (pointer: fine) {
+  .settings-avatar:hover .settings-avatar-overlay {
+    opacity: 1;
+  }
+}
+
+/* Круглая кнопка «···» действий профиля и её выпадающее меню. */
+.more-btn {
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+.pf-menu-item {
+  transition: background 0.15s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .more-btn:hover {
+    background: var(--bg-3);
+    color: var(--text-0);
+    border-color: var(--line-3);
+  }
+  .pf-menu-item:hover {
+    background: var(--bg-3);
+  }
+}
+
+/* Карточки грида «Кино»: действия видны всегда на тач-устройствах и по ховеру
+   на десктопе (где ховер осмыслен). */
+.fav-acts {
+  opacity: 1;
+}
+@media (hover: hover) and (pointer: fine) {
+  .fav-card .fav-acts {
+    opacity: 0;
+    transition: opacity 0.28s ease;
+  }
+  .fav-card:hover .fav-acts {
+    opacity: 1;
+  }
+}
+
+/* «Совместное время»: медленное вращение светящегося ореола вокруг кольца. */
+@keyframes sharedRingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Живой пульс индикатора «сейчас вместе». */
+@keyframes sharedLivePulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.35);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shared-ring-halo {
+    animation: none !important;
+  }
+}
+
+/* Бегущие точки индикатора «печатает…». */
+@keyframes dmTypingDot {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+/* Строка списка диалогов: плавный ховер + лёгкий отклик на нажатие. */
+.dm-row {
+  transition:
+    background-color 0.16s ease,
+    transform 0.12s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .dm-row:hover {
+    background-color: var(--bg-2);
+  }
+}
+.dm-row[data-active='true'] {
+  background-color: var(--accent-soft);
+}
+.dm-row:active {
+  transform: scale(0.985);
+}
+
+/* Кнопка «к последнему сообщению»: плавно появляется/исчезает (opacity + transform
+   на GPU). Движение задаётся инлайн (translateY/scale), здесь — только кривые. */
+.dm-jump {
+  transition:
+    opacity 0.2s ease,
+    transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dm-jump {
+    transition: opacity 0.2s ease;
+  }
+}
+
+/* Нажимаемые кнопки: тактильный отклик (scale на :active). */
+.dm-press {
+  transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.dm-press:active {
+  transform: scale(0.96);
+}
+
+/* Сниженная анимация: убираем движение, оставляем смену цвета. */
+@media (prefers-reduced-motion: reduce) {
+  .dm-press:active,
+  .dm-row:active {
+    transform: none;
+  }
+  /* Инлайновые анимации появления (кнопки, панель записи, превью) — без движения. */
+  .dm-anim {
+    animation: none !important;
+  }
+}
+
+/* Подсказка-стрелка «потяни вверх» у аффорданса фиксации записи. */
+@keyframes vellinNudgeUp {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* Появление действия-кнопки (отправить/голосовое): из чуть уменьшенного — не из
+   scale(0). Ровно один «pop» при подмене иконки. transform-origin — центр. */
+@keyframes dmActionPop {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Панель записи «выезжает» снизу с затуханием (ease-out задаётся в shorthand). */
+@keyframes dmRecIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Отмена записи: панель схлопывается на месте и растворяется (scale + затухание,
+   transform-origin по центру). Без сдвигов — ничего не «уезжает», чистое удаление. */
+@keyframes dmRecDiscard {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+}
+
+/* Пульсация красной точки записи видео. */
+@keyframes dmRecDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.82); }
+}
+/* Крутящийся индикатор загрузки/обработки видео (на GPU). */
+@keyframes dmSpin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dm-rec-dot { animation: none !important; }
+}
+
+/* Бегущий блик скелетона загрузки (constant motion → linear).
+   Двигаем оверлей через transform (GPU), а не background-position (paint). */
+@keyframes dmSkeleton {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Поле ввода сообщения: мягкая реакция на фокус (рамка + свечение + фон).
+   Текст в поле остаётся выделяемым, даже если контейнер композера помечен
+   .dm-noselect. */
+.dm-input {
+  user-select: text;
+  -webkit-user-select: text;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
+}
+.dm-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Служебный хром (хедер, композер, панель записи, мини-плеер) — не выделяется.
+   Текст сообщений остаётся выделяемым: класс вешаем только на не-текстовые зоны. */
+.dm-noselect {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Скелетон: серый блок с пробегающим бликом-оверлеем (transform, на GPU).
+   Фазу блика по рядам сдвигаем через --skel-delay (наследуется в ::after). */
+.dm-skel {
+  position: relative;
+  border-radius: 12px;
+  background: var(--bg-2);
+  overflow: hidden;
+}
+.dm-skel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, var(--bg-3) 50%, transparent 80%);
+  transform: translateX(-100%);
+  animation: dmSkeleton 1.4s linear infinite;
+  animation-delay: var(--skel-delay, 0s);
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dm-skel::after {
+    animation: none;
+  }
+}
+
+/* ─── Страница «Друзья» (редизайн) ──────────────────────────────────────────
+   Карточки людей построены на тех же hero-примитивах, что и профиль: мягкое
+   всплытие при появлении, лёгкий подъём на ховер, тактильное вдавливание на
+   нажатие, и layout-схлопывание при принятии/отклонении/удалении. Всё движение
+   глушится в prefers-reduced-motion. */
+.friend-card {
+  transition:
+    transform 0.4s cubic-bezier(0.22, 1.2, 0.36, 1),
+    background 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .friend-card:not([data-exiting='true']):hover {
+    transform: translateY(-3px);
+    border-color: var(--line-2);
+  }
+}
+
+/* Пилюля-кнопка карточки («Написать», «Присоединиться», действия заявок). */
+.friend-pill {
+  transition:
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    filter 0.2s ease;
+}
+.friend-pill:active {
+  transform: scale(0.96);
+}
+@media (hover: hover) and (pointer: fine) {
+  .friend-pill:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.06);
+  }
+}
+/* «Написать» подсвечивается акцентом на ховер. */
+@media (hover: hover) and (pointer: fine) {
+  .friend-msg:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent-glow);
+    color: var(--accent-hi);
+  }
+}
+
+/* Поле поиска: мягкая реакция на фокус. */
+.friend-search {
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+.friend-search:focus-within {
+  border-color: var(--line-3);
+  background: var(--bg-2);
+}
+/* Подсказка — фоновый слой, а не контент: приглушена до уровня подложки, чтобы
+   пустое поле не перетягивало внимание со списка. Введённый текст при этом
+   остаётся полноконтрастным. */
+.friend-search input::placeholder {
+  color: var(--text-3);
+  font-weight: 400;
+  opacity: 1; /* Firefox по умолчанию приглушает placeholder ещё и своей opacity. */
+}
+
+/* Круглая кнопка «отклонить» (×) во входящих заявках. */
+.friend-x {
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .friend-x:hover {
+    background: var(--bg-3);
+    color: var(--text-0);
+    border-color: var(--line-3);
+  }
+}
+
+/* Приём заявки: карточка вспыхивает зелёным и схлопывается вверх. */
+@keyframes friendAccept {
+  0% {
+    max-height: 140px;
+    opacity: 1;
+    transform: scale(1);
+    margin-bottom: 0;
+  }
+  12% {
+    transform: scale(1.02);
+    border-color: color-mix(in srgb, var(--ok) 55%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--ok) 50%, transparent),
+      0 18px 44px -14px color-mix(in srgb, var(--ok) 50%, transparent);
+  }
+  45% {
+    max-height: 140px;
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    max-height: 0;
+    opacity: 0;
+    transform: scale(0.97) translateY(-6px);
+    margin-bottom: -12px;
+    border-width: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+/* Отклонение/отмена/удаление: карточка уезжает вбок и схлопывается. */
+@keyframes friendReject {
+  0% {
+    max-height: 140px;
+    opacity: 1;
+    transform: translateX(0);
+    margin-bottom: 0;
+  }
+  100% {
+    max-height: 0;
+    opacity: 0;
+    transform: translateX(44px);
+    margin-bottom: -12px;
+    border-width: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .friend-card,
+  .friend-pill:hover,
+  .friend-pill:active {
+    transform: none !important;
+  }
+  /* Exit-анимации оставляем как мгновенное затухание (удаление всё равно
+     должно произойти по завершении), без движения. */
+  .friend-card[data-exiting='true'] {
+    animation: heroFadeOut 0.2s ease both !important;
+  }
+}
+
+/* ── Боковая навигация админ-панели ──────────────────────────────────────── */
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 -6px;
+  padding: 0 6px;
+}
+.admin-nav-group {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  padding: 0 12px;
+  margin: 18px 0 6px;
+}
+.admin-nav-group:first-child { margin-top: 2px; }
+
+.admin-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  position: relative;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.admin-nav-item:hover { background: var(--bg-2); color: var(--text-1); }
+.admin-nav-item:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: 1px; }
+.admin-nav-icon { color: var(--text-3); flex-shrink: 0; transition: color 0.16s ease; }
+.admin-nav-item:hover .admin-nav-icon { color: var(--text-1); }
+
+.admin-nav-item[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--text-0);
+  font-weight: 600;
+}
+.admin-nav-item[aria-current='page'] .admin-nav-icon { color: var(--accent-hi); }
+.admin-nav-item[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-hi);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+/* Горизонтальные вкладки на мобилке */
+.admin-nav-item--compact {
+  padding: 8px 13px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 13px;
+  scroll-snap-align: center;
+}
+.admin-nav-item--compact[aria-current='page']::after { display: none; }
+.admin-nav-item--compact[aria-current='page'] {
+  box-shadow: inset 0 0 0 1px var(--accent-glow);
+}
+
+/* Скроллер вкладок: снап, скрытый скроллбар, «затухание» у краёв как намёк на
+   продолжение списка за пределами экрана. */
+.admin-nav-scroller {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 2px 14px;
+  margin: 0 -14px;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+}
+.admin-nav-scroller::-webkit-scrollbar { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-nav-item, .admin-nav-icon { transition: none; }
+  .admin-nav-scroller { scroll-behavior: auto; }
+}
