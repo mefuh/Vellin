@@ -1,5 +1,5 @@
-name: vellin_winapp
-description: "Vellin — десктоп-клиент для Windows"
+name: vellin_installer
+description: "Установщик Vellin"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.1.0+1
+version: 1.0.0+1
 
 environment:
   sdk: ^3.12.2
@@ -35,36 +35,21 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
-  # HTTP-клиент к бэкенду Vellin.
-  http: ^1.2.2
-  # MediaType для указания content-type частей multipart (загрузка файлов).
-  http_parser: ^4.0.2
-  # Хранилище сессии. На Windows реализовано через pure-Dart win32 FFI (без
-  # компиляции C++/ATL). Hardening-TODO: перевести на ОС-шифрование секретов
-  # (Credential Manager через flutter_secure_storage) — требует ATL в VS.
-  shared_preferences: ^2.3.3
-  # Управление состоянием (ChangeNotifier).
-  provider: ^6.1.2
-  # Роутинг с guard'ом авторизации.
-  go_router: ^14.6.2
-  # Выбор файла аватара (desktop).
-  file_picker: ^8.1.6
-  # WebSocket для realtime-канала /ws/user (личные сообщения, presence).
-  web_socket_channel: ^3.0.1
-  # Запись голосовых (микрофон).
-  record: ^7.1.1
-  # Воспроизведение аудио/видео-вложений (media_kit несёт готовые нативные либы —
-  # без nuget/FetchContent, надёжно на Windows). video-либы включают и аудио.
-  media_kit: ^1.1.11
-  media_kit_video: ^1.2.5
-  media_kit_libs_windows_video: ^1.0.9
-  # Запись видео-кружков (вебка) на десктопе.
-  camera: ^0.11.0+2
-  camera_windows: ^0.2.3
+  # Безрамочное кастомное окно (своя рамка/шапка вместо системной).
+  bitsdojo_window: ^0.1.6
+  # Распаковка встроенного payload.zip (чистый Dart).
+  archive: ^3.6.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.14.1
+
+flutter_launcher_icons:
+  windows:
+    generate: true
+    image_path: "assets/vellin_icon.png"
+    icon_size: 256
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -72,17 +57,6 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
-
-  # Генерация иконки приложения (Windows .ico) из assets/vellin_icon.png.
-  flutter_launcher_icons: ^0.14.1
-
-# Иконка приложения — брендовая «V» Vellin (совпадает с favicon сайта).
-# Перегенерация: dart run flutter_launcher_icons
-flutter_launcher_icons:
-  windows:
-    generate: true
-    image_path: "assets/vellin_icon.png"
-    icon_size: 256
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -94,6 +68,10 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/payload.zip
+    - assets/vellin_icon.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

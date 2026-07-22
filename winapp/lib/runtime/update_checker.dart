@@ -71,8 +71,8 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       final path = await _download(widget.info.url, (p) {
         if (mounted) setState(() => _progress = p);
       });
-      // Запускаем установщик и закрываемся, чтобы он заменил файлы.
-      await Process.start(path, ['/SILENT'], mode: ProcessStartMode.detached);
+      // Запускаем установщик тихо и закрываемся, чтобы он заменил файлы.
+      await Process.start(path, ['--silent'], mode: ProcessStartMode.detached);
       exit(0);
     } catch (e) {
       if (mounted) {
