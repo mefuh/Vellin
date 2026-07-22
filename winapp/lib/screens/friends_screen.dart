@@ -8,7 +8,6 @@ import '../state/friends_controller.dart';
 import '../state/dm_controller.dart';
 import '../theme/vellin_theme.dart';
 import '../widgets/common.dart';
-import '../widgets/user_profile_dialog.dart';
 
 class FriendsScreen extends StatefulWidget {
   const FriendsScreen({super.key});
@@ -219,7 +218,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(VellinRadius.md),
-          onTap: () => showUserProfile(context, u.publicId),
+          onTap: () => context.push('/u/${u.publicId}'),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(children: [

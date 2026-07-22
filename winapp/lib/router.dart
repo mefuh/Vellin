@@ -8,6 +8,7 @@ import 'screens/register_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/friends_screen.dart';
 import 'screens/messages_screen.dart';
+import 'screens/public_profile_screen.dart';
 import 'screens/home_shell.dart';
 
 /// Ключ корневого навигатора — для показа глобальных диалогов (обновление).
@@ -26,6 +27,10 @@ GoRouter buildRouter(AuthController auth) {
       GoRoute(path: '/upgrade', builder: (_, _) => _UpgradeScreen(minVersion: auth.upgradeMinVersion ?? '')),
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
       GoRoute(path: '/register', builder: (_, _) => const RegisterScreen()),
+      GoRoute(
+        path: '/u/:publicId',
+        builder: (_, state) => PublicProfileScreen(publicId: state.pathParameters['publicId']!),
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) => HomeShell(shell: navigationShell),
         branches: [

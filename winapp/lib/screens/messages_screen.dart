@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 import '../app_config.dart';
@@ -12,7 +13,6 @@ import '../widgets/common.dart';
 import '../widgets/voice_bubble.dart';
 import '../widgets/video_bubble.dart';
 import '../widgets/circle_recorder.dart';
-import '../widgets/user_profile_dialog.dart';
 
 /// Раздел «Сообщения»: слева список диалогов, справа активный чат (two-pane).
 class MessagesScreen extends StatelessWidget {
@@ -309,7 +309,7 @@ class _ChatPaneState extends State<_ChatPane> {
     return Column(children: [
       // Заголовок собеседника (тап — открыть профиль).
       InkWell(
-        onTap: dm.activePeerPublicId != null ? () => showUserProfile(context, dm.activePeerPublicId!) : null,
+        onTap: dm.activePeerPublicId != null ? () => context.push('/u/${dm.activePeerPublicId!}') : null,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: VellinColors.line2))),
