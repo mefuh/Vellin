@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'api/api_client.dart';
 import 'api/auth_api.dart';
 import 'api/friends_api.dart';
+import 'api/catalog_api.dart';
 import 'api/dm_api.dart';
 import 'realtime/user_socket.dart';
 import 'router.dart';
@@ -21,6 +22,7 @@ void main() {
   final client = ApiClient();
   final authApi = AuthApi(client);
   final friendsApi = FriendsApi(client);
+  final catalogApi = CatalogApi(client);
   final dmApi = DmApi(client);
   final socket = UserSocket(dmApi.realtimeTicket);
   final auth = AuthController(client, authApi, SessionStore());
@@ -34,6 +36,7 @@ void main() {
         Provider<ApiClient>.value(value: client),
         Provider<AuthApi>.value(value: authApi),
         Provider<FriendsApi>.value(value: friendsApi),
+        Provider<CatalogApi>.value(value: catalogApi),
         ChangeNotifierProvider<AuthController>.value(value: auth),
         ChangeNotifierProvider<FriendsController>(create: (_) => FriendsController(friendsApi)),
         ChangeNotifierProvider<DmController>(create: (_) => DmController(dmApi, socket)),
