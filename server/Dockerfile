@@ -21,7 +21,9 @@ COPY shared ./shared
 COPY server ./server
 RUN cd shared && npx tsc -b
 RUN cd server && npx prisma generate
-RUN cd server && npx tsc -b
+# npm run build = tsc -b + копирование не-ts ассетов (scripts/copy-assets.mjs),
+# поэтому cities-ru.json попадает в dist сам — отдельный COPY в runtime не нужен.
+RUN cd server && npm run build
 
 FROM node:20-alpine AS runtime
 WORKDIR /app
@@ -33,9 +35,6 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/shared/dist ./shared/dist
 COPY --from=build /app/shared/package.json ./shared/package.json
 COPY --from=build /app/server/dist ./server/dist
-# Оверлей русских названий городов — tsc не копирует .json, кладём рядом с
-# собранным модулем (server/src/geo/cities.ts → dist/geo/cities.js).
-COPY --from=build /app/server/src/geo/cities-ru.json ./server/dist/geo/cities-ru.json
 COPY --from=build /app/server/package.json ./server/package.json
 COPY --from=build /app/server/prisma ./server/prisma
 WORKDIR /app/server
