@@ -29,4 +29,15 @@ class DmApi {
     final j = await _c.get('/dm/with/$publicId$q') as Map<String, dynamic>;
     return ConversationThread.fromJson(j);
   }
+
+  /// Загрузить изображение для ЛС (multipart). Возвращает url + размеры для
+  /// последующей отправки по WS (dm_send с imageUrl).
+  Future<({String url, int width, int height})> uploadImage(String filePath) async {
+    final j = await _c.uploadFile('/dm/image', 'file', filePath) as Map<String, dynamic>;
+    return (
+      url: j['url'] as String,
+      width: (j['width'] as num?)?.toInt() ?? 0,
+      height: (j['height'] as num?)?.toInt() ?? 0,
+    );
+  }
 }

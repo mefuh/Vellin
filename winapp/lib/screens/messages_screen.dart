@@ -1,5 +1,7 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../app_config.dart';
 import '../models/dm.dart';
 import '../state/dm_controller.dart';
 import '../theme/vellin_theme.dart';
@@ -140,6 +142,18 @@ class _ChatPaneState extends State<_ChatPane> {
     _input.clear();
   }
 
+  Future<void> _attach() async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
+    );
+    final path = picked?.files.single.path;
+    if (path == null) return;
+    final caption = _input.text;
+    _input.clear();
+    await widget.dm.sendImage(path, caption: caption);
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
@@ -179,7 +193,12 @@ class _ChatPaneState extends State<_ChatPane> {
                 itemBuilder: (_, i) => _Bubble(m: msgs[i], mine: msgs[i].senderId == dm.myUserId),
               ),
       ),
-      _Composer(controller: _input, onSend: _send),
+      if (dm.sendingImage)
+        const Padding(
+          padding: EdgeInsets.only(bottom: 4),
+          child: Text('Отправка изображения…', style: TextStyle(color: VellinColors.text3, fontSize: 12)),
+        ),
+      _Composer(controller: _input, onSend: _send, onAttach: _attach),
     ]);
   }
 }
@@ -191,19 +210,54 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasImage = m.imageUrl != null;
+    final hasText = m.body.isNotEmpty;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        constraints: const BoxConstraints(maxWidth: 440),
-        decoration: BoxDecoration(
-          color: mine ? VellinColors.accent : VellinColors.bg2,
-          borderRadius: BorderRadius.circular(VellinRadius.lg),
-        ),
-        child: Text(
-          m.previewText,
-          style: TextStyle(color: mine ? Colors.white : VellinColors.text0, fontSize: 14.5, height: 1.35),
+      child: Opacity(
+        opacity: m.pending ? 0.7 : 1,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: hasImage
+              ? const EdgeInsets.all(4)
+              : const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          constraints: const BoxConstraints(maxWidth: 440),
+          decoration: BoxDecoration(
+            color: mine ? VellinColors.accent : VellinColors.bg2,
+            borderRadius: BorderRadius.circular(VellinRadius.lg),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (hasImage)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(VellinRadius.md),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 300, maxHeight: 360),
+                    child: Image.network(
+                      AppConfig.mediaUrl(m.imageUrl)!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const SizedBox(
+                        width: 200, height: 120,
+                        child: Center(child: Icon(Icons.broken_image_outlined, color: VellinColors.text3)),
+                      ),
+                    ),
+                  ),
+                ),
+              if (hasText)
+                Padding(
+                  padding: hasImage ? const EdgeInsets.fromLTRB(10, 8, 10, 4) : EdgeInsets.zero,
+                  child: Text(
+                    m.body,
+                    style: TextStyle(color: mine ? Colors.white : VellinColors.text0, fontSize: 14.5, height: 1.35),
+                  ),
+                ),
+              if (!hasImage && !hasText)
+                Text(m.previewText,
+                    style: TextStyle(color: mine ? Colors.white : VellinColors.text0, fontSize: 14.5, height: 1.35)),
+            ],
+          ),
         ),
       ),
     );
@@ -213,7 +267,8 @@ class _Bubble extends StatelessWidget {
 class _Composer extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onSend;
-  const _Composer({required this.controller, required this.onSend});
+  final VoidCallback onAttach;
+  const _Composer({required this.controller, required this.onSend, required this.onAttach});
 
   @override
   Widget build(BuildContext context) {
@@ -221,6 +276,12 @@ class _Composer extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       decoration: const BoxDecoration(border: Border(top: BorderSide(color: VellinColors.line2))),
       child: Row(children: [
+        IconButton(
+          onPressed: onAttach,
+          tooltip: 'Прикрепить изображение',
+          icon: const Icon(Icons.image_outlined, color: VellinColors.text2),
+        ),
+        const SizedBox(width: 4),
         Expanded(
           child: TextField(
             controller: controller,

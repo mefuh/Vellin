@@ -9,6 +9,8 @@ class DirectMessage {
   final String body;
   final String createdAt;
   final String? imageUrl;
+  final int? imageWidth;
+  final int? imageHeight;
   final String? voiceUrl;
   final String? videoStatus;
   final String? inviteRoomId;
@@ -24,6 +26,8 @@ class DirectMessage {
     required this.body,
     required this.createdAt,
     this.imageUrl,
+    this.imageWidth,
+    this.imageHeight,
     this.voiceUrl,
     this.videoStatus,
     this.inviteRoomId,
@@ -38,6 +42,8 @@ class DirectMessage {
         body: j['body'] as String? ?? '',
         createdAt: j['createdAt'] as String? ?? '',
         imageUrl: j['imageUrl'] as String?,
+        imageWidth: (j['imageWidth'] as num?)?.toInt(),
+        imageHeight: (j['imageHeight'] as num?)?.toInt(),
         voiceUrl: j['voiceUrl'] as String?,
         videoStatus: j['videoStatus'] as String?,
         inviteRoomId: j['inviteRoomId'] as String?,

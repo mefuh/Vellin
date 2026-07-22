@@ -95,6 +95,46 @@ class DmController extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool sendingImage = false;
+
+  /// Отправить изображение активному собеседнику: загрузить (REST) → отправить
+  /// (WS dm_send с imageUrl). Необязательная подпись — в body.
+  Future<void> sendImage(String filePath, {String caption = ''}) async {
+    if (_activePeerUserId == null) return;
+    sendingImage = true;
+    notifyListeners();
+    try {
+      final img = await _api.uploadImage(filePath);
+      final nonce = 'n${DateTime.now().millisecondsSinceEpoch}_${_nonceSeq++}';
+      activeMessages.add(DirectMessage(
+        id: nonce,
+        conversationId: _activeConversationId ?? '',
+        senderId: _myUserId,
+        body: caption.trim(),
+        createdAt: DateTime.now().toIso8601String(),
+        imageUrl: img.url,
+        imageWidth: img.width,
+        imageHeight: img.height,
+        nonce: nonce,
+        pending: true,
+      ));
+      _socket.send({
+        't': 'dm_send',
+        'toUserId': _activePeerUserId,
+        'body': caption.trim(),
+        'nonce': nonce,
+        'imageUrl': img.url,
+        'imageWidth': img.width,
+        'imageHeight': img.height,
+      });
+    } catch (_) {
+      // тихо игнорируем; можно добавить баннер ошибки позже
+    } finally {
+      sendingImage = false;
+      notifyListeners();
+    }
+  }
+
   /// Отправить текст активному собеседнику (оптимистично + по WS).
   void sendText(String text) {
     final body = text.trim();
