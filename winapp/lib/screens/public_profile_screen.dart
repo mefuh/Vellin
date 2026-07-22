@@ -74,34 +74,54 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: VellinColors.text1),
           tooltip: 'Назад',
-          onPressed: () => context.canPop() ? context.pop() : context.go('/friends'),
+          onPressed: () => context.canPop() ? context.pop() : context.go('/messages'),
         ),
         title: const Text('Профиль',
             style: TextStyle(color: VellinColors.text0, fontSize: 17, fontWeight: FontWeight.w600)),
       ),
       body: _error != null
-          ? _errorState(_error!)
+          ? ProfileErrorState(_error!)
           : _profile == null
               ? const Center(child: CircularProgressIndicator(color: VellinColors.accentHi))
-              : _content(_profile!),
+              : ProfileView(profile: _profile!, actions: _actions(_profile!)),
     );
   }
 
-  Widget _errorState(String msg) => Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.person_off_outlined, color: VellinColors.text3, size: 44),
-              const SizedBox(height: 14),
-              Text(msg, textAlign: TextAlign.center, style: const TextStyle(color: VellinColors.text2, fontSize: 14)),
-            ]),
-          ),
-        ),
-      );
+  Widget _actions(PublicProfile p) {
+    if (p.relationship == 'self') return const SizedBox.shrink();
+    Widget? friendAction;
+    switch (p.relationship) {
+      case 'incoming':
+        friendAction = PrimaryButton(label: 'Принять заявку', secondary: true, loading: _busy, onPressed: () => _acceptFriend(p));
+        break;
+      case 'friends':
+      case 'outgoing':
+      case 'blocked':
+        friendAction = null;
+        break;
+      default:
+        friendAction = PrimaryButton(label: 'Добавить в друзья', secondary: true, loading: _busy, onPressed: () => _addFriend(p));
+    }
+    return Row(children: [
+      Expanded(child: PrimaryButton(label: 'Написать сообщение', onPressed: () => _message(p))),
+      if (friendAction != null) ...[const SizedBox(width: 12), Expanded(child: friendAction)],
+    ]);
+  }
+}
 
-  Widget _content(PublicProfile p) {
+/// Переиспользуемое тело профиля (публичного и собственного): хедер с аватаром,
+/// слот действий, «О себе», факты и любимое кино. Оформление одинаково везде.
+class ProfileView extends StatelessWidget {
+  final PublicProfile profile;
+
+  /// Блок кнопок под хедером (написать/в друзья или «настройки профиля»).
+  final Widget actions;
+
+  const ProfileView({super.key, required this.profile, required this.actions});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = profile;
     return LayoutBuilder(builder: (context, constraints) {
       final wide = constraints.maxWidth >= 720;
       return SingleChildScrollView(
@@ -113,7 +133,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 _header(p, wide),
                 const SizedBox(height: 20),
-                _actions(p),
+                actions,
                 if (p.bio != null && p.bio!.isNotEmpty) ...[
                   const SizedBox(height: 24),
                   _card(
@@ -179,7 +199,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   }
 
   Widget _relationshipBadge(String rel) {
-    final (String text, Color color)? spec = switch (rel) {
+    final (String, Color)? spec = switch (rel) {
       'friends' => ('В друзьях', VellinColors.ok),
       'outgoing' => ('Заявка отправлена', VellinColors.text2),
       'incoming' => ('Ждёт вашего ответа', VellinColors.warn),
@@ -196,27 +216,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
       ),
       child: Text(spec.$1, style: TextStyle(color: spec.$2, fontSize: 12.5, fontWeight: FontWeight.w600)),
     );
-  }
-
-  Widget _actions(PublicProfile p) {
-    if (p.relationship == 'self') return const SizedBox.shrink();
-    Widget? friendAction;
-    switch (p.relationship) {
-      case 'incoming':
-        friendAction = PrimaryButton(label: 'Принять заявку', secondary: true, loading: _busy, onPressed: () => _acceptFriend(p));
-        break;
-      case 'friends':
-      case 'outgoing':
-      case 'blocked':
-        friendAction = null;
-        break;
-      default:
-        friendAction = PrimaryButton(label: 'Добавить в друзья', secondary: true, loading: _busy, onPressed: () => _addFriend(p));
-    }
-    return Row(children: [
-      Expanded(child: PrimaryButton(label: 'Написать сообщение', onPressed: () => _message(p))),
-      if (friendAction != null) ...[const SizedBox(width: 12), Expanded(child: friendAction)],
-    ]);
   }
 
   Widget _facts(PublicProfile p) {
@@ -297,6 +296,26 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
   Widget _cardLabel(String text) => Text(text.toUpperCase(),
       style: const TextStyle(fontSize: 11, letterSpacing: 0.6, color: VellinColors.text2, fontWeight: FontWeight.w600));
+}
+
+/// Состояние ошибки загрузки профиля.
+class ProfileErrorState extends StatelessWidget {
+  final String message;
+  const ProfileErrorState(this.message, {super.key});
+  @override
+  Widget build(BuildContext context) => Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.person_off_outlined, color: VellinColors.text3, size: 44),
+              const SizedBox(height: 14),
+              Text(message, textAlign: TextAlign.center, style: const TextStyle(color: VellinColors.text2, fontSize: 14)),
+            ]),
+          ),
+        ),
+      );
 }
 
 String _genderRu(String? g) => switch (g) { 'male' => 'Мужской', 'female' => 'Женский', 'other' => 'Другой', _ => '' };

@@ -6,6 +6,7 @@ import 'theme/vellin_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/self_profile_screen.dart';
 import 'screens/friends_screen.dart';
 import 'screens/messages_screen.dart';
 import 'screens/public_profile_screen.dart';
@@ -31,12 +32,13 @@ GoRouter buildRouter(AuthController auth) {
         path: '/u/:publicId',
         builder: (_, state) => PublicProfileScreen(publicId: state.pathParameters['publicId']!),
       ),
+      GoRoute(path: '/settings', builder: (_, _) => const ProfileSettingsScreen()),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) => HomeShell(shell: navigationShell),
         branches: [
-          StatefulShellBranch(routes: [GoRoute(path: '/friends', builder: (_, _) => const FriendsScreen())]),
           StatefulShellBranch(routes: [GoRoute(path: '/messages', builder: (_, _) => const MessagesScreen())]),
-          StatefulShellBranch(routes: [GoRoute(path: '/profile', builder: (_, _) => const ProfileScreen())]),
+          StatefulShellBranch(routes: [GoRoute(path: '/friends', builder: (_, _) => const FriendsScreen())]),
+          StatefulShellBranch(routes: [GoRoute(path: '/profile', builder: (_, _) => const SelfProfileScreen())]),
         ],
       ),
     ],
@@ -46,7 +48,7 @@ GoRouter buildRouter(AuthController auth) {
       if (!auth.ready) return loc == '/splash' ? null : '/splash';
       final authed = auth.authenticated;
       final onAuthPage = loc == '/login' || loc == '/register';
-      if (authed) return onAuthPage || loc == '/splash' ? '/friends' : null;
+      if (authed) return onAuthPage || loc == '/splash' ? '/messages' : null;
       return onAuthPage ? null : '/login';
     },
   );

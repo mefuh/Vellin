@@ -76,12 +76,12 @@ class _HomeShellState extends State<HomeShell> {
             ),
           ),
           destinations: [
-            const NavigationRailDestination(icon: Icon(Icons.people_alt_outlined), selectedIcon: Icon(Icons.people_alt), label: Text('Друзья')),
             NavigationRailDestination(
               icon: _BadgedIcon(icon: Icons.chat_bubble_outline, count: unread),
               selectedIcon: _BadgedIcon(icon: Icons.chat_bubble, count: unread),
               label: const Text('Сообщения'),
             ),
+            const NavigationRailDestination(icon: Icon(Icons.people_alt_outlined), selectedIcon: Icon(Icons.people_alt), label: Text('Друзья')),
             const NavigationRailDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: Text('Профиль')),
           ],
         ),

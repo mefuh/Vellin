@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../api/auth_api.dart';
@@ -18,8 +19,10 @@ String? _resolveAvatar(String? url) {
 
 String _errText(Object e) => e is ApiException ? e.message : 'Что-то пошло не так';
 
-class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key});
+/// Страница настроек профиля (редактирование личных данных, email, пароля).
+/// Открывается из вкладки «Профиль» через `context.push('/settings')`.
+class ProfileSettingsScreen extends StatelessWidget {
+  const ProfileSettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -29,15 +32,24 @@ class ProfileScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: VellinColors.bg0,
+      appBar: AppBar(
+        backgroundColor: VellinColors.bg0,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: VellinColors.text1),
+          tooltip: 'Назад',
+          onPressed: () => context.canPop() ? context.pop() : context.go('/profile'),
+        ),
+        title: const Text('Настройки профиля',
+            style: TextStyle(color: VellinColors.text0, fontSize: 17, fontWeight: FontWeight.w600)),
+      ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 620),
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(24, 28, 24, 48),
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 48),
             children: [
-              const Text('Профиль',
-                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: VellinColors.text0, letterSpacing: -0.5)),
-              const SizedBox(height: 20),
               _IdentityCard(user: user),
               const SizedBox(height: 16),
               _EmailCard(user: user),
