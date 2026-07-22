@@ -18,18 +18,23 @@ class FriendsController extends ChangeNotifier {
     loading = true;
     error = null;
     notifyListeners();
+    // Списки грузим НЕЗАВИСИМО: сбой заявок не должен прятать друзей (и наоборот).
+    String? err;
     try {
-      final results = await Future.wait([_api.listFriends(), _api.listRequests()]);
-      friends = results[0] as List<FriendUser>;
-      final requests = results[1] as List<FriendRequest>;
+      friends = await _api.listFriends();
+    } catch (e) {
+      err = e.toString();
+    }
+    try {
+      final requests = await _api.listRequests();
       incoming = requests.where((r) => r.isIncoming).toList();
       outgoing = requests.where((r) => !r.isIncoming).toList();
     } catch (e) {
-      error = 'Не удалось загрузить друзей';
-    } finally {
-      loading = false;
-      notifyListeners();
+      err ??= e.toString();
     }
+    error = err;
+    loading = false;
+    notifyListeners();
   }
 
   Future<void> accept(String requestId) async {

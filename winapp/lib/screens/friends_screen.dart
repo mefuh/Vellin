@@ -83,6 +83,10 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 _searchResults(),
               ],
               const SizedBox(height: 24),
+              if (ctrl.error != null) ...[
+                ErrorBanner('Не удалось загрузить: ${ctrl.error}'),
+                const SizedBox(height: 16),
+              ],
               if (ctrl.incoming.isNotEmpty) ...[
                 _sectionTitle('Заявки в друзья', ctrl.incoming.length),
                 const SizedBox(height: 10),

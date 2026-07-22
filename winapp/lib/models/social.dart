@@ -64,12 +64,17 @@ class FriendRequest {
     required this.createdAt,
   });
 
-  factory FriendRequest.fromJson(Map<String, dynamic> j) => FriendRequest(
-        id: j['id'] as String,
-        direction: j['direction'] as String? ?? 'incoming',
-        user: PublicUser.fromJson(j['user'] as Map<String, dynamic>),
-        createdAt: j['createdAt'] as String? ?? '',
-      );
+  factory FriendRequest.fromJson(Map<String, dynamic> j) {
+    final u = j['user'];
+    return FriendRequest(
+      id: j['id'] as String? ?? '',
+      direction: j['direction'] as String? ?? 'incoming',
+      user: u is Map<String, dynamic>
+          ? PublicUser.fromJson(u)
+          : const PublicUser(id: '', publicId: '', username: '', avatarSeed: '', avatarUrl: null, kind: 'user'),
+      createdAt: j['createdAt'] as String? ?? '',
+    );
+  }
 
   bool get isIncoming => direction == 'incoming';
 }
