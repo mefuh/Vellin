@@ -10,11 +10,15 @@ import 'screens/friends_screen.dart';
 import 'screens/messages_screen.dart';
 import 'screens/home_shell.dart';
 
+/// Ключ корневого навигатора — для показа глобальных диалогов (обновление).
+final rootNavigatorKey = GlobalKey<NavigatorState>();
+
 /// Роутер с guard'ом авторизации. Пока сессия восстанавливается — сплэш; при
 /// 426 — экран принудительного обновления; авторизованная часть живёт в
 /// оболочке HomeShell (боковая навигация Друзья/Профиль).
 GoRouter buildRouter(AuthController auth) {
   return GoRouter(
+    navigatorKey: rootNavigatorKey,
     refreshListenable: auth,
     initialLocation: '/splash',
     routes: [

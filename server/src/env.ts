@@ -41,6 +41,18 @@ const schema = z.object({
   MIN_APP_VERSION_MACOS: z.string().default(''),
   MIN_APP_VERSION_IOS: z.string().default(''),
   MIN_APP_VERSION_ANDROID: z.string().default(''),
+  /**
+   * Автообновление Windows-клиента: последняя опубликованная версия и URL
+   * установщика. Если обе заданы — `/api/config` отдаёт данные обновления, и
+   * клиент с версией ниже предлагает обновиться. WINAPP_UPDATE_MANDATORY='1'
+   * делает обновление обязательным (блокирующим).
+   */
+  WINAPP_LATEST_VERSION: z.string().default(''),
+  WINAPP_DOWNLOAD_URL: z.string().default(''),
+  WINAPP_UPDATE_MANDATORY: z
+    .string()
+    .default('0')
+    .transform((v) => v === '1' || v.toLowerCase() === 'true'),
   /** Optional JSON-encoded RTCIceServer[] appended to the default STUN. */
   ICE_SERVERS: z.string().optional(),
   /**

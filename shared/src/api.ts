@@ -493,6 +493,23 @@ export interface AppConfigResponse {
     mode: 'webpush';
     vapidPublicKey: string | null;
   };
+  /**
+   * Данные автообновления десктоп-клиентов. Для каждой платформы — последняя
+   * доступная версия и URL установщика; null — обновление не опубликовано.
+   * Клиент сравнивает latestVersion со своей и предлагает обновиться.
+   */
+  update: {
+    windows: DesktopUpdate | null;
+  };
+}
+
+/** Публикация обновления десктоп-клиента: версия + URL установщика. */
+export interface DesktopUpdate {
+  latestVersion: string;
+  /** Абсолютный URL установщика (напр. https://vellin.ru/winapp/Vellin-Setup-1.2.0.exe). */
+  url: string;
+  /** Обязательное обновление — клиент не даёт продолжить без установки. */
+  mandatory: boolean;
 }
 
 /**

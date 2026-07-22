@@ -12,6 +12,7 @@ import 'state/friends_controller.dart';
 import 'state/dm_controller.dart';
 import 'storage/session_store.dart';
 import 'theme/vellin_theme.dart';
+import 'runtime/update_checker.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -42,18 +43,33 @@ void main() {
   );
 }
 
-class VellinApp extends StatelessWidget {
+class VellinApp extends StatefulWidget {
   const VellinApp({super.key});
+  @override
+  State<VellinApp> createState() => _VellinAppState();
+}
+
+class _VellinAppState extends State<VellinApp> {
+  late final _router = buildRouter(context.read<AuthController>());
+
+  @override
+  void initState() {
+    super.initState();
+    // Проверяем обновление на старте; при наличии — показываем диалог.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final info = await checkForUpdate(context.read<ApiClient>());
+      final ctx = rootNavigatorKey.currentContext;
+      if (info != null && ctx != null && ctx.mounted) showUpdateDialog(ctx, info);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.read<AuthController>();
-    final router = buildRouter(auth);
     return MaterialApp.router(
       title: 'Vellin',
       debugShowCheckedModeBanner: false,
       theme: buildVellinTheme(),
-      routerConfig: router,
+      routerConfig: _router,
     );
   }
 }

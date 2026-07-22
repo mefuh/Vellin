@@ -1,9 +1,21 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppConfigResponse } from '@vellin/shared';
+import type { DesktopUpdate } from '@vellin/shared';
 import { loadEnv } from '../env.js';
 import { APP_VERSION, getMinVersions } from '../appMeta.js';
 import { getSettings } from '../admin/platform/config.js';
 import { getVapidPublicKey } from '../push/vapid.js';
+
+/** Данные автообновления Windows-клиента из окружения (null — не опубликовано). */
+function windowsUpdate(): DesktopUpdate | null {
+  const env = loadEnv();
+  if (!env.WINAPP_LATEST_VERSION || !env.WINAPP_DOWNLOAD_URL) return null;
+  return {
+    latestVersion: env.WINAPP_LATEST_VERSION,
+    url: env.WINAPP_DOWNLOAD_URL,
+    mandatory: env.WINAPP_UPDATE_MANDATORY,
+  };
+}
 
 /**
  * Собирает абсолютные адреса из PUBLIC_BASE_URL. Если база не задана — отдаём
@@ -43,6 +55,7 @@ export async function configRoutes(app: FastifyInstance): Promise<void> {
       maintenance: settings.maintenance,
       limits: settings.limits,
       push: { mode: 'webpush', vapidPublicKey: vapid },
+      update: { windows: windowsUpdate() },
     };
     return response;
   });
