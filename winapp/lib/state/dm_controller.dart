@@ -25,6 +25,8 @@ class DmController extends ChangeNotifier {
   String? _activeConversationId;
   List<DirectMessage> activeMessages = [];
   bool threadLoading = false;
+  bool activeHasMore = false;
+  bool loadingOlder = false;
 
   int _nonceSeq = 0;
 
@@ -66,6 +68,7 @@ class DmController extends ChangeNotifier {
   Future<void> openThread(String publicId) async {
     activePeerPublicId = publicId;
     activeMessages = [];
+    activeHasMore = false;
     threadLoading = true;
     notifyListeners();
     try {
@@ -73,6 +76,7 @@ class DmController extends ChangeNotifier {
       _activeConversationId = t.conversationId.isEmpty ? null : t.conversationId;
       _activePeerUserId = t.peer.id;
       activeMessages = t.messages;
+      activeHasMore = t.hasMore;
       threadLoading = false;
       notifyListeners();
       // Отметить прочитанным (если диалог уже существует).
@@ -92,7 +96,33 @@ class DmController extends ChangeNotifier {
     _activePeerUserId = null;
     _activeConversationId = null;
     activeMessages = [];
+    activeHasMore = false;
     notifyListeners();
+  }
+
+  /// Подгрузить более ранние сообщения (пагинация «раньше»). Старые страницы
+  /// добавляются в начало списка. Возвращает число догруженных сообщений.
+  Future<int> loadOlder() async {
+    if (loadingOlder || !activeHasMore || activeMessages.isEmpty || activePeerPublicId == null) {
+      return 0;
+    }
+    loadingOlder = true;
+    notifyListeners();
+    var added = 0;
+    try {
+      final oldest = activeMessages.first.createdAt;
+      final t = await _api.thread(activePeerPublicId!, before: oldest);
+      final existing = activeMessages.map((m) => m.id).toSet();
+      final older = t.messages.where((m) => !existing.contains(m.id)).toList();
+      added = older.length;
+      activeMessages = [...older, ...activeMessages];
+      activeHasMore = t.hasMore;
+    } catch (_) {
+    } finally {
+      loadingOlder = false;
+      notifyListeners();
+    }
+    return added;
   }
 
   bool sendingImage = false;

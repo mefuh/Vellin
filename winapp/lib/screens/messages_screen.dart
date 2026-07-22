@@ -12,6 +12,7 @@ import '../widgets/common.dart';
 import '../widgets/voice_bubble.dart';
 import '../widgets/video_bubble.dart';
 import '../widgets/circle_recorder.dart';
+import '../widgets/user_profile_dialog.dart';
 
 /// Раздел «Сообщения»: слева список диалогов, справа активный чат (two-pane).
 class MessagesScreen extends StatelessWidget {
@@ -132,7 +133,9 @@ class _ChatPane extends StatefulWidget {
 class _ChatPaneState extends State<_ChatPane> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
-  int _lastCount = 0;
+  String? _shownPeer;
+  String? _lastMsgId;
+  bool _loadingOlder = false;
 
   // Запись голосового.
   final _rec = AudioRecorder();
@@ -142,6 +145,33 @@ class _ChatPaneState extends State<_ChatPane> {
   StreamSubscription<Amplitude>? _ampSub;
   final List<int> _peaks = [];
   String? _recPath;
+
+  @override
+  void initState() {
+    super.initState();
+    // Скролл к верху → подгрузка более ранних сообщений (пагинация).
+    _scroll.addListener(() {
+      if (_scroll.hasClients && _scroll.position.pixels <= 200) _maybeLoadOlder();
+    });
+  }
+
+  Future<void> _maybeLoadOlder() async {
+    if (_loadingOlder || !widget.dm.activeHasMore) return;
+    _loadingOlder = true;
+    final before = _scroll.position.maxScrollExtent;
+    final pixels = _scroll.position.pixels;
+    final added = await widget.dm.loadOlder();
+    if (added > 0) {
+      // Сохраняем позицию: сдвигаем на прирост высоты сверху.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) {
+          final after = _scroll.position.maxScrollExtent;
+          _scroll.jumpTo((pixels + (after - before)).clamp(0.0, after));
+        }
+      });
+    }
+    _loadingOlder = false;
+  }
 
   @override
   void dispose() {
@@ -259,8 +289,15 @@ class _ChatPaneState extends State<_ChatPane> {
   Widget build(BuildContext context) {
     final dm = widget.dm;
     final msgs = dm.activeMessages;
-    if (msgs.length != _lastCount) {
-      _lastCount = msgs.length;
+    // Скролл вниз: при открытии другого диалога и при новом сообщении в конце.
+    // При пагинации (сообщения добавляются в начало) — не трогаем позицию.
+    final lastId = msgs.isNotEmpty ? msgs.last.id : null;
+    if (dm.activePeerPublicId != _shownPeer) {
+      _shownPeer = dm.activePeerPublicId;
+      _lastMsgId = lastId;
+      _scrollToBottom();
+    } else if (lastId != null && lastId != _lastMsgId) {
+      _lastMsgId = lastId;
       _scrollToBottom();
     }
     final peerName = dm.conversations
@@ -270,13 +307,16 @@ class _ChatPaneState extends State<_ChatPane> {
         .username;
 
     return Column(children: [
-      // Заголовок собеседника.
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: VellinColors.line2))),
-        alignment: Alignment.centerLeft,
-        child: Text(peerName ?? 'Диалог',
-            style: const TextStyle(color: VellinColors.text0, fontSize: 16, fontWeight: FontWeight.w600)),
+      // Заголовок собеседника (тап — открыть профиль).
+      InkWell(
+        onTap: dm.activePeerPublicId != null ? () => showUserProfile(context, dm.activePeerPublicId!) : null,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: VellinColors.line2))),
+          alignment: Alignment.centerLeft,
+          child: Text(peerName ?? 'Диалог',
+              style: const TextStyle(color: VellinColors.text0, fontSize: 16, fontWeight: FontWeight.w600)),
+        ),
       ),
       Expanded(
         child: dm.threadLoading
@@ -284,8 +324,19 @@ class _ChatPaneState extends State<_ChatPane> {
             : ListView.builder(
                 controller: _scroll,
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                itemCount: msgs.length,
-                itemBuilder: (_, i) => _Bubble(m: msgs[i], mine: msgs[i].senderId == dm.myUserId),
+                itemCount: msgs.length + 1,
+                itemBuilder: (_, i) {
+                  if (i == 0) {
+                    return dm.loadingOlder
+                        ? const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 10),
+                            child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: VellinColors.accentHi))),
+                          )
+                        : const SizedBox.shrink();
+                  }
+                  final m = msgs[i - 1];
+                  return _Bubble(m: m, mine: m.senderId == dm.myUserId);
+                },
               ),
       ),
       if (dm.sendingImage)

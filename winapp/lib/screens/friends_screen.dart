@@ -8,6 +8,7 @@ import '../state/friends_controller.dart';
 import '../state/dm_controller.dart';
 import '../theme/vellin_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/user_profile_dialog.dart';
 
 class FriendsScreen extends StatefulWidget {
   const FriendsScreen({super.key});
@@ -209,22 +210,31 @@ class _FriendsScreenState extends State<FriendsScreen> {
   Widget _row(PublicUser u, {bool? online, required Widget trailing}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: VellinColors.bg1,
         borderRadius: BorderRadius.circular(VellinRadius.md),
         border: Border.all(color: VellinColors.line2),
       ),
-      child: Row(children: [
-        VellinAvatar(username: u.username, avatarSeed: u.avatarSeed, avatarUrl: u.avatarUrl, size: 40, online: online),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(u.username,
-              style: const TextStyle(color: VellinColors.text0, fontSize: 15, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(VellinRadius.md),
+          onTap: () => showUserProfile(context, u.publicId),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(children: [
+              VellinAvatar(username: u.username, avatarSeed: u.avatarSeed, avatarUrl: u.avatarUrl, size: 40, online: online),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(u.username,
+                    style: const TextStyle(color: VellinColors.text0, fontSize: 15, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(width: 8),
+              trailing,
+            ]),
+          ),
         ),
-        const SizedBox(width: 8),
-        trailing,
-      ]),
+      ),
     );
   }
 

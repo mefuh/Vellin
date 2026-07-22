@@ -34,4 +34,10 @@ class FriendsApi {
     final j = await _c.get('/users/search?q=${Uri.encodeQueryComponent(query)}') as Map<String, dynamic>;
     return (j['users'] as List).map((e) => SearchUser.fromJson(e as Map<String, dynamic>)).toList();
   }
+
+  /// Публичный профиль пользователя по publicId.
+  Future<PublicProfile> profile(String publicId) async {
+    final j = await _c.get('/users/$publicId') as Map<String, dynamic>;
+    return PublicProfile.fromJson(j['profile'] as Map<String, dynamic>);
+  }
 }
