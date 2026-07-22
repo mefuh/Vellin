@@ -9,6 +9,7 @@ import { isDmImageUrl } from './image.js';
 import { isDmVoiceUrl, sanitizeVoicePeaks } from './voice.js';
 import { authorizeJoin, getRoomById, videoCardInfo, RoomServiceError } from '../rooms/service.js';
 import { roomStore } from '../rooms/store.js';
+import { absoluteUrl } from '../utils/urls.js';
 import type { RoomInviteInfoResponse } from '@vellin/shared';
 
 export const MAX_DM_BODY = 4000;
@@ -53,21 +54,21 @@ export function dmRowToDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
     ...(m.videoStatus
       ? {
           videoStatus: m.videoStatus as 'processing' | 'ready' | 'failed',
-          ...(m.videoUrl ? { videoUrl: m.videoUrl } : {}),
-          ...(m.videoThumbUrl ? { videoThumbUrl: m.videoThumbUrl } : {}),
+          ...(m.videoUrl ? { videoUrl: absoluteUrl(m.videoUrl) } : {}),
+          ...(m.videoThumbUrl ? { videoThumbUrl: absoluteUrl(m.videoThumbUrl) } : {}),
           ...(m.videoDurationSec != null ? { videoDurationSec: m.videoDurationSec } : {}),
         }
       : {}),
     ...(m.imageUrl
       ? {
-          imageUrl: m.imageUrl,
+          imageUrl: absoluteUrl(m.imageUrl),
           ...(m.imageWidth != null ? { imageWidth: m.imageWidth } : {}),
           ...(m.imageHeight != null ? { imageHeight: m.imageHeight } : {}),
         }
       : {}),
     ...(m.voiceUrl
       ? {
-          voiceUrl: m.voiceUrl,
+          voiceUrl: absoluteUrl(m.voiceUrl),
           ...(m.voiceDurationSec != null ? { voiceDurationSec: m.voiceDurationSec } : {}),
           ...(() => {
             const peaks = parseVoicePeaks(m.voicePeaksJson);
@@ -82,7 +83,7 @@ export function dmRowToDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
           ...(m.inviteRoomSlug ? { inviteRoomSlug: m.inviteRoomSlug } : {}),
           ...(m.inviteRoomName ? { inviteRoomName: m.inviteRoomName } : {}),
           ...(m.inviteVideoTitle ? { inviteVideoTitle: m.inviteVideoTitle } : {}),
-          ...(m.inviteVideoPoster ? { inviteVideoPoster: m.inviteVideoPoster } : {}),
+          ...(m.inviteVideoPoster ? { inviteVideoPoster: absoluteUrl(m.inviteVideoPoster) } : {}),
           inviteStatus: (m.inviteStatus ?? 'pending') as 'pending' | 'accepted' | 'declined' | 'expired',
         }
       : {}),

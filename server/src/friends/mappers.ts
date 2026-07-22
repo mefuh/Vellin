@@ -1,6 +1,7 @@
 import type { Notification, User } from '@prisma/client';
 import type { AppNotification, NotificationType, PublicUser } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
+import { absoluteUrl } from '../utils/urls.js';
 
 type PublicUserCols = Pick<User, 'id' | 'publicId' | 'username' | 'avatarSeed' | 'avatarUrl'>;
 
@@ -18,7 +19,7 @@ export function toPublicUser(u: PublicUserCols): PublicUser {
     publicId: u.publicId,
     username: u.username,
     avatarSeed: u.avatarSeed,
-    avatarUrl: u.avatarUrl ?? null,
+    avatarUrl: absoluteUrl(u.avatarUrl) ?? null,
     kind: 'user',
   };
 }

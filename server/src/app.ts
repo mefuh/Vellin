@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -50,16 +49,9 @@ import { getAcceptedFriendIds } from './friends/service.js';
 import { parsePrivacy } from './privacy/privacy.js';
 import { logger } from './utils/logger.js';
 import { prisma } from './db/prisma.js';
-
-/**
- * Версия приложения — читается из package.json в рантайме (а не хардкодится),
- * чтобы /health всегда совпадал с реальным релизом. Путь '../package.json'
- * одинаково валиден и в dev (src/app.ts), и в прод-сборке (dist/app.js) —
- * оба файла лежат на один уровень ниже корня server/.
- */
-const APP_VERSION = (
-  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
-).version;
+import { APP_VERSION, getMinVersions, isClientOutdated, isClientPlatform } from './appMeta.js';
+import { configRoutes } from './config/routes.js';
+import { registerOpenApi } from './openapi/register.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const env = loadEnv();
@@ -113,6 +105,38 @@ export async function buildApp(): Promise<FastifyInstance> {
     decorateReply: false,
   });
 
+  // Версионный гейтинг клиентов (force-update). Нативные приложения шлют
+  // X-App-Platform + X-App-Version; если версия ниже минимальной для платформы
+  // (env MIN_APP_VERSION_*), отвечаем 426 Upgrade Required. Веб не гейтится
+  // (браузер всегда грузит свежий бандл). Исключения — /health, /api/config и
+  // документация: клиент обязан достучаться до них даже устаревшим, чтобы
+  // узнать об обновлении. Гейтинг активен только если задан минимум — иначе
+  // хук ничего не делает (нулевая стоимость на dev/без конфигурации).
+  const gatingActive = Object.values(getMinVersions()).some((v) => v);
+  if (gatingActive) {
+    const EXEMPT = ['/health', '/api/config', '/api/docs', '/api/openapi.json'];
+    app.addHook('onRequest', async (req, reply) => {
+      if (req.method === 'OPTIONS') return;
+      const rawPlatform = req.headers['x-app-platform'];
+      const platform = Array.isArray(rawPlatform) ? rawPlatform[0] : rawPlatform;
+      // Нет заголовка платформы → обычный веб/легаси-клиент, не гейтим.
+      if (!isClientPlatform(platform)) return;
+      const pathOnly = req.url.split('?')[0];
+      if (EXEMPT.some((p) => pathOnly === p || pathOnly.startsWith(`${p}/`))) return;
+      const rawVersion = req.headers['x-app-version'];
+      const version = Array.isArray(rawVersion) ? rawVersion[0] : rawVersion;
+      if (isClientOutdated(platform, version)) {
+        reply.code(426).send({
+          error: 'UpgradeRequired',
+          message: 'Обновите приложение, чтобы продолжить',
+          statusCode: 426,
+          minVersion: getMinVersions()[platform],
+          platform,
+        });
+      }
+    });
+  }
+
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ZodError) {
       reply.code(400).send({
@@ -149,8 +173,14 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   app.get('/health', async () => ({ ok: true, version: APP_VERSION }));
 
+  // OpenAPI-спека + Swagger UI (/api/docs, /api/openapi.json) — статический
+  // документ клиентской поверхности API для команд разработки приложений.
+  await registerOpenApi(app);
+
   await app.register(
     async (api) => {
+      // Публичный конфиг/дискавери — без requireAuth и вне гейтинга.
+      await api.register(configRoutes);
       // КАЖДЫЙ из этих register() — отдельный плагин-контекст. roomRoutes и
       // adminRoutes навешивают свой preHandler через addHook, поэтому их
       // нельзя объединять в один колбэк — иначе хук протечёт на auth-роуты.
