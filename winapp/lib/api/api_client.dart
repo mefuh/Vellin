@@ -92,6 +92,12 @@ class ApiClient {
         return MediaType('audio', 'ogg');
       case 'mp3':
         return MediaType('audio', 'mpeg');
+      case 'mp4':
+        return MediaType('video', 'mp4');
+      case 'mov':
+        return MediaType('video', 'quicktime');
+      case 'mkv':
+        return MediaType('video', 'x-matroska');
       default:
         return null;
     }

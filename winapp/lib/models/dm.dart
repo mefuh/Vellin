@@ -15,6 +15,9 @@ class DirectMessage {
   final int? voiceDurationSec;
   final List<int>? voicePeaks;
   final String? videoStatus;
+  final String? videoUrl;
+  final String? videoThumbUrl;
+  final int? videoDurationSec;
   final String? inviteRoomId;
   /// Эхо оптимистичной отправки (только у отправителя).
   final String? nonce;
@@ -34,6 +37,9 @@ class DirectMessage {
     this.voiceDurationSec,
     this.voicePeaks,
     this.videoStatus,
+    this.videoUrl,
+    this.videoThumbUrl,
+    this.videoDurationSec,
     this.inviteRoomId,
     this.nonce,
     this.pending = false,
@@ -52,6 +58,9 @@ class DirectMessage {
         voiceDurationSec: (j['voiceDurationSec'] as num?)?.toInt(),
         voicePeaks: (j['voicePeaks'] as List?)?.map((e) => (e as num).toInt()).toList(),
         videoStatus: j['videoStatus'] as String?,
+        videoUrl: j['videoUrl'] as String?,
+        videoThumbUrl: j['videoThumbUrl'] as String?,
+        videoDurationSec: (j['videoDurationSec'] as num?)?.toInt(),
         inviteRoomId: j['inviteRoomId'] as String?,
         nonce: j['nonce'] as String?,
       );

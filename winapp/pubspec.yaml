@@ -53,10 +53,14 @@ dependencies:
   web_socket_channel: ^3.0.1
   # Запись голосовых (микрофон).
   record: ^7.1.1
-  # Воспроизведение аудио-вложений (media_kit несёт готовые нативные либы —
-  # без nuget/FetchContent, надёжно на Windows).
+  # Воспроизведение аудио/видео-вложений (media_kit несёт готовые нативные либы —
+  # без nuget/FetchContent, надёжно на Windows). video-либы включают и аудио.
   media_kit: ^1.1.11
-  media_kit_libs_windows_audio: ^1.0.9
+  media_kit_video: ^1.2.5
+  media_kit_libs_windows_video: ^1.0.9
+  # Запись видео-кружков (вебка) на десктопе.
+  camera: ^0.11.0+2
+  camera_windows: ^0.2.3
 
 dev_dependencies:
   flutter_test:

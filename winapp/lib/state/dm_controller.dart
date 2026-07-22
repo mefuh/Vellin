@@ -162,6 +162,35 @@ class DmController extends ChangeNotifier {
     });
   }
 
+  /// Отправить видео-кружок: загрузить сырьё (REST) → dm_send с videoUploadId.
+  /// Сервер транскодирует в фоне; статус придёт через dm_message_updated.
+  Future<void> sendVideoNote(String filePath, int durationSec) async {
+    if (_activePeerUserId == null) return;
+    final uploadId = await _api.uploadVideoNote(filePath);
+    final nonce = 'n${DateTime.now().millisecondsSinceEpoch}_${_nonceSeq++}';
+    activeMessages.add(DirectMessage(
+      id: nonce,
+      conversationId: _activeConversationId ?? '',
+      senderId: _myUserId,
+      body: '',
+      createdAt: DateTime.now().toIso8601String(),
+      videoStatus: 'processing',
+      videoDurationSec: durationSec,
+      nonce: nonce,
+      pending: true,
+    ));
+    notifyListeners();
+    _socket.send({
+      't': 'dm_send',
+      'toUserId': _activePeerUserId,
+      'body': '',
+      'nonce': nonce,
+      'videoUploadId': uploadId,
+      'videoDurationSec': durationSec,
+      'videoMirrored': true,
+    });
+  }
+
   /// Отправить текст активному собеседнику (оптимистично + по WS).
   void sendText(String text) {
     final body = text.trim();
@@ -189,7 +218,20 @@ class DmController extends ChangeNotifier {
       case 'dm_message':
         _onDmMessage(DirectMessage.fromJson(msg['message'] as Map<String, dynamic>));
         break;
+      case 'dm_message_updated':
+        _onDmMessageUpdated(DirectMessage.fromJson(msg['message'] as Map<String, dynamic>));
+        break;
     }
+  }
+
+  /// Обновление существующего сообщения (напр. видео-кружок processing→ready).
+  void _onDmMessageUpdated(DirectMessage m) {
+    final idx = activeMessages.indexWhere((x) => x.id == m.id);
+    if (idx >= 0) {
+      activeMessages[idx] = m;
+      notifyListeners();
+    }
+    loadConversations();
   }
 
   void _onDmMessage(DirectMessage m) {

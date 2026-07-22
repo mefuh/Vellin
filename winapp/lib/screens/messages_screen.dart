@@ -10,6 +10,8 @@ import '../state/dm_controller.dart';
 import '../theme/vellin_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/voice_bubble.dart';
+import '../widgets/video_bubble.dart';
+import '../widgets/circle_recorder.dart';
 
 /// Раздел «Сообщения»: слева список диалогов, справа активный чат (two-pane).
 class MessagesScreen extends StatelessWidget {
@@ -237,6 +239,16 @@ class _ChatPaneState extends State<_ChatPane> {
     }
   }
 
+  Future<void> _recordCircle() async {
+    final rec = await showCircleRecorder(context);
+    if (rec == null) return;
+    try {
+      await widget.dm.sendVideoNote(rec.path, rec.seconds);
+    } catch (e) {
+      if (mounted) _snack('Не удалось отправить кружок: $e');
+    }
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
@@ -290,6 +302,7 @@ class _ChatPaneState extends State<_ChatPane> {
         onStartRecord: _startRecord,
         onStopSend: _stopRecordAndSend,
         onCancelRecord: _cancelRecord,
+        onVideoNote: _recordCircle,
       ),
     ]);
   }
@@ -302,6 +315,19 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Видео-кружок — отдельный круглый бабл без прямоугольной подложки.
+    if (m.videoStatus != null) {
+      return Align(
+        alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Opacity(
+            opacity: m.pending && m.videoStatus == 'processing' ? 0.85 : 1,
+            child: VideoBubble(status: m.videoStatus, videoUrl: m.videoUrl, thumbUrl: m.videoThumbUrl),
+          ),
+        ),
+      );
+    }
     final hasImage = m.imageUrl != null;
     final hasVoice = m.voiceUrl != null;
     final hasText = m.body.isNotEmpty;
@@ -375,6 +401,7 @@ class _Composer extends StatelessWidget {
   final VoidCallback onStartRecord;
   final VoidCallback onStopSend;
   final VoidCallback onCancelRecord;
+  final VoidCallback onVideoNote;
 
   const _Composer({
     required this.controller,
@@ -385,6 +412,7 @@ class _Composer extends StatelessWidget {
     required this.onStartRecord,
     required this.onStopSend,
     required this.onCancelRecord,
+    required this.onVideoNote,
   });
 
   String _fmt(int s) => '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
@@ -450,6 +478,11 @@ class _Composer extends StatelessWidget {
         ),
       ),
       const SizedBox(width: 6),
+      IconButton(
+        onPressed: onVideoNote,
+        tooltip: 'Записать видео-кружок',
+        icon: const Icon(Icons.videocam_outlined, color: VellinColors.text2),
+      ),
       IconButton(
         onPressed: onStartRecord,
         tooltip: 'Записать голосовое',

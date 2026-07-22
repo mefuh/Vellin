@@ -46,4 +46,11 @@ class DmApi {
     final j = await _c.uploadFile('/dm/voice', 'file', filePath) as Map<String, dynamic>;
     return j['url'] as String;
   }
+
+  /// Загрузить сырое видео-кружок (multipart). Возвращает uploadId; сервер
+  /// транскодирует в mp4 в фоне после dm_send (videoUploadId).
+  Future<String> uploadVideoNote(String filePath) async {
+    final j = await _c.uploadFile('/dm/video-note', 'file', filePath) as Map<String, dynamic>;
+    return j['uploadId'] as String;
+  }
 }
