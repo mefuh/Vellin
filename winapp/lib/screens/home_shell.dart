@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../state/auth_controller.dart';
 import '../state/dm_controller.dart';
+import '../state/presence_controller.dart';
 import '../theme/vellin_theme.dart';
 
 /// Каркас авторизованной части: боковая навигация (NavigationRail) слева +
@@ -16,30 +17,44 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   DmController? _dm;
+  PresenceController? _presence;
 
   @override
   void initState() {
     super.initState();
-    // Запускаем realtime-канал ЛС на время авторизованной сессии.
+    WidgetsBinding.instance.addObserver(this);
+    // Запускаем realtime-каналы (ЛС + присутствие) на время авторизованной сессии.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final user = context.read<AuthController>().user;
       if (user != null) {
         _dm = context.read<DmController>();
         _dm!.start(user.id);
+        _presence = context.read<PresenceController>();
+        _presence!.start();
+        _presence!.setActive(true);
       }
     });
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Свёрнуто/на фоне → офлайн для собеседников; развёрнуто → снова в сети.
+    _presence?.setActive(state == AppLifecycleState.resumed);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _dm?.stop();
+    _presence?.stop();
     super.dispose();
   }
 
   Future<void> _logout(BuildContext context) async {
     await _dm?.stop();
+    await _presence?.stop();
     if (!context.mounted) return;
     await context.read<AuthController>().logout();
     if (context.mounted) context.go('/login');

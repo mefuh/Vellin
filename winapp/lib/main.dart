@@ -11,6 +11,7 @@ import 'router.dart';
 import 'state/auth_controller.dart';
 import 'state/friends_controller.dart';
 import 'state/dm_controller.dart';
+import 'state/presence_controller.dart';
 import 'storage/session_store.dart';
 import 'theme/vellin_theme.dart';
 import 'runtime/update_checker.dart';
@@ -40,6 +41,7 @@ void main() {
         ChangeNotifierProvider<AuthController>.value(value: auth),
         ChangeNotifierProvider<FriendsController>(create: (_) => FriendsController(friendsApi)),
         ChangeNotifierProvider<DmController>(create: (_) => DmController(dmApi, socket)),
+        ChangeNotifierProvider<PresenceController>(create: (_) => PresenceController(socket)),
       ],
       child: const VellinApp(),
     ),

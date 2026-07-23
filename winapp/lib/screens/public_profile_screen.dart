@@ -6,6 +6,7 @@ import '../api/friends_api.dart';
 import '../models/social.dart';
 import '../state/dm_controller.dart';
 import '../state/friends_controller.dart';
+import '../state/presence_controller.dart';
 import '../theme/vellin_theme.dart';
 import '../widgets/common.dart';
 
@@ -23,6 +24,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   PublicProfile? _profile;
   String? _error;
   bool _busy = false;
+  String? _watchedId; // на чьё присутствие подписаны
 
   @override
   void initState() {
@@ -30,10 +32,24 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    if (_watchedId != null) context.read<PresenceController>().unwatch(_watchedId!);
+    super.dispose();
+  }
+
   Future<void> _load() async {
     try {
       final p = await context.read<FriendsApi>().profile(widget.publicId);
-      if (mounted) setState(() { _profile = p; _error = null; });
+      if (mounted) {
+        setState(() { _profile = p; _error = null; });
+        // Подписаться на live-присутствие открытого профиля.
+        if (_watchedId != p.user.id) {
+          if (_watchedId != null) context.read<PresenceController>().unwatch(_watchedId!);
+          _watchedId = p.user.id;
+          context.read<PresenceController>().watch(p.user.id);
+        }
+      }
     } catch (e) {
       if (mounted) setState(() => _error = e is ApiException ? e.message : 'Не удалось загрузить профиль');
     }
@@ -122,6 +138,10 @@ class ProfileView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = profile;
+    // Живое присутствие поверх снимка из REST.
+    final live = context.watch<PresenceController>().of(p.user.id);
+    final online = live?.online ?? p.online;
+    final lastSeen = live?.lastSeenAt ?? p.lastSeenAt;
     return LayoutBuilder(builder: (context, constraints) {
       final wide = constraints.maxWidth >= 720;
       return SingleChildScrollView(
@@ -131,7 +151,7 @@ class ProfileView extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(24, 12, 24, 48),
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                _header(p, wide),
+                _header(p, wide, online, lastSeen),
                 const SizedBox(height: 20),
                 actions,
                 if (p.bio != null && p.bio!.isNotEmpty) ...[
@@ -164,8 +184,9 @@ class ProfileView extends StatelessWidget {
     });
   }
 
-  Widget _header(PublicProfile p, bool wide) {
+  Widget _header(PublicProfile p, bool wide, bool online, String? lastSeen) {
     final u = p.user;
+    final status = online ? 'В сети' : _cap(presenceLabel(online: false, lastSeenAt: lastSeen));
     final name = Column(
       crossAxisAlignment: wide ? CrossAxisAlignment.start : CrossAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
@@ -177,11 +198,10 @@ class ProfileView extends StatelessWidget {
         Row(mainAxisSize: MainAxisSize.min, children: [
           Container(
             width: 8, height: 8,
-            decoration: BoxDecoration(color: p.online ? VellinColors.ok : VellinColors.text3, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: online ? VellinColors.ok : VellinColors.text3, shape: BoxShape.circle),
           ),
           const SizedBox(width: 7),
-          Text(p.online ? 'В сети' : _lastSeen(p.lastSeenAt),
-              style: TextStyle(fontSize: 13.5, color: p.online ? VellinColors.ok : VellinColors.text2)),
+          Text(status, style: TextStyle(fontSize: 13.5, color: online ? VellinColors.ok : VellinColors.text2)),
         ]),
         const SizedBox(height: 10),
         _relationshipBadge(p.relationship),
@@ -331,8 +351,5 @@ String _dateRu(String? iso) {
 
 String _yearOf(String iso) => iso.length >= 4 ? iso.substring(0, 4) : '';
 
-String _lastSeen(String? iso) {
-  if (iso == null) return 'Не в сети';
-  final d = _dateRu(iso);
-  return d.isEmpty ? 'Не в сети' : 'Был(а) в сети $d';
-}
+/// Первая буква — заглавная (для статуса присутствия в крупной шапке).
+String _cap(String s) => s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';

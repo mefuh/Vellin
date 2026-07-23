@@ -6,6 +6,7 @@ import '../api/friends_api.dart';
 import '../models/social.dart';
 import '../state/friends_controller.dart';
 import '../state/dm_controller.dart';
+import '../state/presence_controller.dart';
 import '../theme/vellin_theme.dart';
 import '../widgets/common.dart';
 
@@ -189,6 +190,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
   Widget _friendTile(FriendUser f) => _row(
         f.user,
         online: f.online,
+        presence: true,
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(
             icon: const Icon(Icons.chat_bubble_outline, size: 20, color: VellinColors.text2),
@@ -206,7 +208,10 @@ class _FriendsScreenState extends State<FriendsScreen> {
         ]),
       );
 
-  Widget _row(PublicUser u, {bool? online, required Widget trailing}) {
+  Widget _row(PublicUser u, {bool? online, bool presence = false, required Widget trailing}) {
+    // Живое присутствие поверх статического значения из REST.
+    final info = context.watch<PresenceController>().of(u.id);
+    final on = info?.online ?? online;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -222,11 +227,18 @@ class _FriendsScreenState extends State<FriendsScreen> {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(children: [
-              VellinAvatar(username: u.username, avatarSeed: u.avatarSeed, avatarUrl: u.avatarUrl, size: 40, online: online),
+              VellinAvatar(username: u.username, avatarSeed: u.avatarSeed, avatarUrl: u.avatarUrl, size: 40, online: on),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(u.username,
-                    style: const TextStyle(color: VellinColors.text0, fontSize: 15, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                  Text(u.username,
+                      style: const TextStyle(color: VellinColors.text0, fontSize: 15, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+                  if (presence) ...[
+                    const SizedBox(height: 2),
+                    Text(presenceLabel(online: on ?? false, lastSeenAt: info?.lastSeenAt),
+                        style: TextStyle(color: (on ?? false) ? VellinColors.ok : VellinColors.text3, fontSize: 12)),
+                  ],
+                ]),
               ),
               const SizedBox(width: 8),
               trailing,

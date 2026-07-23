@@ -28,7 +28,18 @@ class DmController extends ChangeNotifier {
   bool activeHasMore = false;
   bool loadingOlder = false;
 
+  /// Что делает собеседник прямо сейчас в активном треде: null / 'text'
+  /// (печатает) / 'voice' (записывает голосовое) / 'video' (записывает кружок).
+  String? peerActivity;
+  Timer? _peerActivityTimer;
+
+  // Мой сигнал «печатаю» (троттлинг старт + авто-стоп по простою).
+  bool _myTyping = false;
+  Timer? _myTypingStop;
+
   int _nonceSeq = 0;
+
+  String? get activePeerUserId => _activePeerUserId;
 
   void start(String myUserId) {
     if (_started) return;
@@ -43,6 +54,10 @@ class DmController extends ChangeNotifier {
     _started = false;
     await _sub?.cancel();
     _sub = null;
+    _peerActivityTimer?.cancel();
+    _myTypingStop?.cancel();
+    _myTyping = false;
+    peerActivity = null;
     conversations = [];
     activeMessages = [];
     activePeerPublicId = null;
@@ -66,6 +81,9 @@ class DmController extends ChangeNotifier {
 
   /// Открыть тред с пользователем по publicId: загрузить историю и отметить прочтённым.
   Future<void> openThread(String publicId) async {
+    _stopTyping();
+    _peerActivityTimer?.cancel();
+    peerActivity = null;
     activePeerPublicId = publicId;
     activeMessages = [];
     activeHasMore = false;
@@ -92,11 +110,64 @@ class DmController extends ChangeNotifier {
   }
 
   void closeThread() {
+    _stopTyping();
+    _peerActivityTimer?.cancel();
+    peerActivity = null;
     activePeerPublicId = null;
     _activePeerUserId = null;
     _activeConversationId = null;
     activeMessages = [];
     activeHasMore = false;
+    notifyListeners();
+  }
+
+  // ── Индикаторы «печатает / записывает» ────────────────────────────────────
+
+  /// Вызывать на каждый ввод символа: единожды шлёт «печатает», авто-стоп через
+  /// 3 c простоя.
+  void typingText() {
+    if (_activePeerUserId == null) return;
+    if (!_myTyping) {
+      _myTyping = true;
+      _socket.send({'t': 'dm_typing', 'toUserId': _activePeerUserId, 'typing': true, 'kind': 'text'});
+    }
+    _myTypingStop?.cancel();
+    _myTypingStop = Timer(const Duration(seconds: 3), _stopTyping);
+  }
+
+  /// Явный сигнал записи голосового/кружка (kind: 'voice' | 'video').
+  void sendRecordingSignal(bool active, String kind) {
+    if (_activePeerUserId == null) return;
+    if (active) _stopTyping(); // запись отменяет «печатает»
+    _socket.send({'t': 'dm_typing', 'toUserId': _activePeerUserId, 'typing': active, 'kind': kind});
+  }
+
+  void _stopTyping() {
+    _myTypingStop?.cancel();
+    if (_myTyping) {
+      _myTyping = false;
+      if (_activePeerUserId != null) {
+        _socket.send({'t': 'dm_typing', 'toUserId': _activePeerUserId, 'typing': false, 'kind': 'text'});
+      }
+    }
+  }
+
+  void _onTyping(Map<String, dynamic> msg) {
+    final from = msg['fromUserId'] as String?;
+    if (from == null || from != _activePeerUserId) return; // только активный собеседник
+    final typing = msg['typing'] as bool? ?? false;
+    _peerActivityTimer?.cancel();
+    if (typing) {
+      final kind = msg['kind'] as String?;
+      peerActivity = (kind == 'voice' || kind == 'video') ? kind : 'text';
+      // Страховка: авто-сброс, если «перестал» потеряется.
+      _peerActivityTimer = Timer(const Duration(seconds: 6), () {
+        peerActivity = null;
+        notifyListeners();
+      });
+    } else {
+      peerActivity = null;
+    }
     notifyListeners();
   }
 
@@ -225,6 +296,7 @@ class DmController extends ChangeNotifier {
   void sendText(String text) {
     final body = text.trim();
     if (body.isEmpty || _activePeerUserId == null) return;
+    _stopTyping();
     final nonce = 'n${DateTime.now().millisecondsSinceEpoch}_${_nonceSeq++}';
     activeMessages.add(DirectMessage(
       id: nonce,
@@ -250,6 +322,9 @@ class DmController extends ChangeNotifier {
         break;
       case 'dm_message_updated':
         _onDmMessageUpdated(DirectMessage.fromJson(msg['message'] as Map<String, dynamic>));
+        break;
+      case 'dm_typing':
+        _onTyping(msg);
         break;
     }
   }

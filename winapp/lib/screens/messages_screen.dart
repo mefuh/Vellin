@@ -8,6 +8,7 @@ import 'package:record/record.dart';
 import '../app_config.dart';
 import '../models/dm.dart';
 import '../state/dm_controller.dart';
+import '../state/presence_controller.dart';
 import '../theme/vellin_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/voice_bubble.dart';
@@ -76,6 +77,7 @@ class _ConversationTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = c.peer.publicId == dm.activePeerPublicId;
+    final online = context.watch<PresenceController>().of(c.peer.id)?.online ?? c.online;
     return Material(
       color: active ? VellinColors.bg3 : Colors.transparent,
       borderRadius: BorderRadius.circular(VellinRadius.md),
@@ -85,7 +87,7 @@ class _ConversationTile extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
           child: Row(children: [
-            VellinAvatar(username: c.peer.username, avatarSeed: c.peer.avatarSeed, avatarUrl: c.peer.avatarUrl, size: 42, online: c.online),
+            VellinAvatar(username: c.peer.username, avatarSeed: c.peer.avatarSeed, avatarUrl: c.peer.avatarUrl, size: 42, online: online),
             const SizedBox(width: 12),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -136,6 +138,7 @@ class _ChatPaneState extends State<_ChatPane> {
   String? _shownPeer;
   String? _lastMsgId;
   bool _loadingOlder = false;
+  String? _watchedPeerId; // на чьё присутствие подписаны сейчас
 
   // Запись голосового.
   final _rec = AudioRecorder();
@@ -153,6 +156,21 @@ class _ChatPaneState extends State<_ChatPane> {
     _scroll.addListener(() {
       if (_scroll.hasClients && _scroll.position.pixels <= 200) _maybeLoadOlder();
     });
+    // Ввод текста → сигнал «печатает» собеседнику.
+    _input.addListener(() {
+      if (_input.text.isNotEmpty) widget.dm.typingText();
+    });
+  }
+
+  /// Подписаться на live-присутствие текущего собеседника (и отписаться от
+  /// прежнего). Вызывается из build при смене активного треда.
+  void _syncPresenceWatch() {
+    final peerId = widget.dm.activePeerUserId;
+    if (peerId == _watchedPeerId) return;
+    final presence = context.read<PresenceController>();
+    if (_watchedPeerId != null) presence.unwatch(_watchedPeerId!);
+    if (peerId != null) presence.watch(peerId);
+    _watchedPeerId = peerId;
   }
 
   Future<void> _maybeLoadOlder() async {
@@ -175,6 +193,11 @@ class _ChatPaneState extends State<_ChatPane> {
 
   @override
   void dispose() {
+    if (_watchedPeerId != null) {
+      // Не через context (виджет размонтируется) — читаем провайдер заранее нельзя,
+      // поэтому отписку делаем безопасно: presence уже знает счётчик.
+      context.read<PresenceController>().unwatch(_watchedPeerId!);
+    }
     _input.dispose();
     _scroll.dispose();
     _recTimer?.cancel();
@@ -206,6 +229,7 @@ class _ChatPaneState extends State<_ChatPane> {
     });
     _recTimer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _recSeconds++));
     setState(() => _recording = true);
+    widget.dm.sendRecordingSignal(true, 'voice'); // «записывает голосовое»
   }
 
   Future<void> _stopRecordAndSend() async {
@@ -214,6 +238,7 @@ class _ChatPaneState extends State<_ChatPane> {
     await _ampSub?.cancel();
     final seconds = _recSeconds;
     setState(() => _recording = false);
+    widget.dm.sendRecordingSignal(false, 'voice');
     if (path == null || seconds < 1) return; // слишком коротко — отбрасываем
     // Прореживаем пики до ≤56 столбиков.
     final peaks = _downsample(_peaks, 56);
@@ -229,6 +254,7 @@ class _ChatPaneState extends State<_ChatPane> {
     _recTimer?.cancel();
     await _ampSub?.cancel();
     setState(() => _recording = false);
+    widget.dm.sendRecordingSignal(false, 'voice');
     if (_recPath != null) {
       try {
         await File(_recPath!).delete();
@@ -270,7 +296,13 @@ class _ChatPaneState extends State<_ChatPane> {
   }
 
   Future<void> _recordCircle() async {
-    final rec = await showCircleRecorder(context);
+    widget.dm.sendRecordingSignal(true, 'video'); // «записывает видео»
+    CircleRecording? rec;
+    try {
+      rec = await showCircleRecorder(context);
+    } finally {
+      widget.dm.sendRecordingSignal(false, 'video');
+    }
     if (rec == null) return;
     try {
       await widget.dm.sendVideoNote(rec.path, rec.seconds);
@@ -288,6 +320,9 @@ class _ChatPaneState extends State<_ChatPane> {
   @override
   Widget build(BuildContext context) {
     final dm = widget.dm;
+    // Синхронизируем подписку на присутствие собеседника после смены треда.
+    WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _syncPresenceWatch(); });
+    final presence = context.watch<PresenceController>();
     final msgs = dm.activeMessages;
     // Скролл вниз: при открытии другого диалога и при новом сообщении в конце.
     // При пагинации (сообщения добавляются в начало) — не трогаем позицию.
@@ -306,16 +341,23 @@ class _ChatPaneState extends State<_ChatPane> {
         ?.peer
         .username;
 
+    final peerId = dm.activePeerUserId;
+    final info = peerId != null ? presence.of(peerId) : null;
+
     return Column(children: [
       // Заголовок собеседника (тап — открыть профиль).
       InkWell(
         onTap: dm.activePeerPublicId != null ? () => context.push('/u/${dm.activePeerPublicId!}') : null,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: VellinColors.line2))),
           alignment: Alignment.centerLeft,
-          child: Text(peerName ?? 'Диалог',
-              style: const TextStyle(color: VellinColors.text0, fontSize: 16, fontWeight: FontWeight.w600)),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(peerName ?? 'Диалог',
+                style: const TextStyle(color: VellinColors.text0, fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 2),
+            _StatusLine(activity: dm.peerActivity, online: info?.online ?? false, lastSeenAt: info?.lastSeenAt),
+          ]),
         ),
       ),
       Expanded(
@@ -545,6 +587,74 @@ class _Composer extends StatelessWidget {
         icon: const Icon(Icons.send, color: Colors.white, size: 20),
       ),
     ]);
+  }
+}
+
+/// Строка статуса в шапке чата: живой индикатор «печатает/записывает …» либо
+/// присутствие («в сети» / «был(а) в сети …»). Меняется в реальном времени.
+class _StatusLine extends StatelessWidget {
+  final String? activity; // 'text' | 'voice' | 'video' | null
+  final bool online;
+  final String? lastSeenAt;
+  const _StatusLine({required this.activity, required this.online, required this.lastSeenAt});
+
+  @override
+  Widget build(BuildContext context) {
+    if (activity != null) {
+      final label = switch (activity) {
+        'voice' => 'записывает голосовое',
+        'video' => 'записывает видео',
+        _ => 'печатает',
+      };
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Text(label, style: const TextStyle(color: VellinColors.accentHi, fontSize: 12.5, fontWeight: FontWeight.w500)),
+        const SizedBox(width: 5),
+        const _TypingDots(),
+      ]);
+    }
+    return Text(
+      presenceLabel(online: online, lastSeenAt: lastSeenAt),
+      style: TextStyle(color: online ? VellinColors.ok : VellinColors.text2, fontSize: 12.5),
+    );
+  }
+}
+
+/// Три пульсирующие точки рядом с «печатает».
+class _TypingDots extends StatefulWidget {
+  const _TypingDots();
+  @override
+  State<_TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<_TypingDots> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))..repeat();
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  double _opacity(int i) {
+    final phase = ((_c.value - i * 0.18) % 1.0 + 1.0) % 1.0;
+    final v = phase < 0.5 ? 0.3 + phase * 1.4 : 1.0 - (phase - 0.5) * 1.4;
+    return v.clamp(0.3, 1.0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (_, _) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(3, (i) => Padding(
+              padding: const EdgeInsets.only(right: 2),
+              child: Opacity(
+                opacity: _opacity(i),
+                child: Container(width: 3.5, height: 3.5, decoration: const BoxDecoration(color: VellinColors.accentHi, shape: BoxShape.circle)),
+              ),
+            )),
+      ),
+    );
   }
 }
 
