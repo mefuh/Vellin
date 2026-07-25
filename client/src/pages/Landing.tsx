@@ -35,6 +35,11 @@ export function Landing() {
       >
         <VellinLogo />
         <nav style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Link to="/download">
+            <Button variant="ghost" size="md" icon="download">
+              {isMobile ? 'Windows' : 'Для Windows'}
+            </Button>
+          </Link>
           {user ? (
             <Link to="/library">
               <Button variant="primary" size="md" iconRight="arrow">
