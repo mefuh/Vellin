@@ -25,10 +25,14 @@ int compareSemver(String a, String b) {
 }
 
 /// Проверяет `/api/config` на наличие более новой версии Windows-клиента.
-/// Возвращает null, если обновления нет или проверка не удалась.
+/// Возвращает null, если обновления нет или проверка не удалась/зависла.
+///
+/// Таймаут обязателен: проверка стоит на старте (gate) перед входом в
+/// приложение, и без ограничения по времени медленная сеть/оффлайн подвесили
+/// бы запуск. При любой ошибке/таймауте — null (пускаем в приложение).
 Future<UpdateInfo?> checkForUpdate(ApiClient client) async {
   try {
-    final j = await client.get('/config') as Map<String, dynamic>;
+    final j = await client.get('/config').timeout(const Duration(seconds: 4)) as Map<String, dynamic>;
     final w = (j['update'] as Map<String, dynamic>?)?['windows'] as Map<String, dynamic>?;
     if (w == null) return null;
     final latest = w['latestVersion'] as String?;
@@ -41,23 +45,23 @@ Future<UpdateInfo?> checkForUpdate(ApiClient client) async {
   }
 }
 
-/// Показывает диалог обновления. Для обязательного (mandatory) — без «Позже».
-void showUpdateDialog(BuildContext context, UpdateInfo info) {
-  showDialog<void>(
-    context: context,
-    barrierDismissible: !info.mandatory,
-    builder: (_) => _UpdateDialog(info: info),
-  );
-}
-
-class _UpdateDialog extends StatefulWidget {
+/// Полноэкранный gate обновления (в стиле Discord): показывается ДО входа в
+/// приложение, если найдено обновление. Не императивный диалог — отдельный
+/// маршрут, поэтому его не сносит редирект роутера.
+///
+/// «Обновить» — качает установщик, запускает его `--silent` и закрывает
+/// приложение. «Позже» (только для необязательного обновления) — [onSkip],
+/// пропускает в приложение.
+class UpdateScreen extends StatefulWidget {
   final UpdateInfo info;
-  const _UpdateDialog({required this.info});
+  final VoidCallback onSkip;
+  const UpdateScreen({super.key, required this.info, required this.onSkip});
+
   @override
-  State<_UpdateDialog> createState() => _UpdateDialogState();
+  State<UpdateScreen> createState() => _UpdateScreenState();
 }
 
-class _UpdateDialogState extends State<_UpdateDialog> {
+class _UpdateScreenState extends State<UpdateScreen> {
   bool _downloading = false;
   double _progress = 0;
   String? _error;
@@ -102,51 +106,82 @@ class _UpdateDialogState extends State<_UpdateDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: VellinColors.bg1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(VellinRadius.xl)),
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Доступно обновление ${widget.info.version}',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: VellinColors.text0)),
-          const SizedBox(height: 10),
-          Text(
-            widget.info.mandatory
-                ? 'Для продолжения работы нужно обновить Vellin.'
-                : 'Вышла новая версия Vellin. Обновиться сейчас?',
-            style: const TextStyle(fontSize: 14, color: VellinColors.text1, height: 1.4),
-          ),
-          if (_downloading) ...[
-            const SizedBox(height: 20),
-            LinearProgressIndicator(
-              value: _progress > 0 ? _progress : null,
-              backgroundColor: VellinColors.bg3,
-              color: VellinColors.accentHi,
-            ),
-            const SizedBox(height: 8),
-            Text('Загрузка… ${(_progress * 100).round()}%', style: const TextStyle(fontSize: 12, color: VellinColors.text2)),
-          ],
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(fontSize: 13, color: VellinColors.accentHi)),
-          ],
-          const SizedBox(height: 22),
-          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-            if (!widget.info.mandatory && !_downloading)
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                style: TextButton.styleFrom(foregroundColor: VellinColors.text1),
-                child: const Text('Позже'),
+    final info = widget.info;
+    return Scaffold(
+      backgroundColor: VellinColors.bg0,
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+              // Брендовый бейдж: красный скруглённый квадрат с белой «V».
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(color: VellinColors.accent, borderRadius: BorderRadius.circular(16)),
+                alignment: Alignment.center,
+                child: const Text('V',
+                    style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w800, height: 1)),
               ),
-            const SizedBox(width: 8),
-            FilledButton(
-              onPressed: _downloading ? null : _update,
-              style: FilledButton.styleFrom(backgroundColor: VellinColors.accent, foregroundColor: Colors.white),
-              child: Text(_downloading ? 'Загрузка…' : 'Обновить'),
-            ),
-          ]),
-        ]),
+              const SizedBox(height: 22),
+              Text('Доступно обновление ${info.version}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: VellinColors.text0, letterSpacing: -0.4)),
+              const SizedBox(height: 10),
+              Text(
+                info.mandatory
+                    ? 'Для продолжения работы нужно обновить Vellin.'
+                    : 'Вышла новая версия Vellin. Обновиться сейчас?',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 14, color: VellinColors.text1, height: 1.5),
+              ),
+              if (_downloading) ...[
+                const SizedBox(height: 24),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    value: _progress > 0 ? _progress : null,
+                    minHeight: 6,
+                    backgroundColor: VellinColors.bg3,
+                    color: VellinColors.accentHi,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text('Загрузка… ${(_progress * 100).round()}%',
+                    style: const TextStyle(fontSize: 12, color: VellinColors.text2)),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 14),
+                Text(_error!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: VellinColors.accentHi)),
+              ],
+              const SizedBox(height: 26),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                if (!info.mandatory && !_downloading) ...[
+                  TextButton(
+                    onPressed: widget.onSkip,
+                    style: TextButton.styleFrom(
+                      foregroundColor: VellinColors.text1,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    ),
+                    child: const Text('Позже'),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                FilledButton(
+                  onPressed: _downloading ? null : _update,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: VellinColors.accent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(VellinRadius.md)),
+                  ),
+                  child: Text(_downloading ? 'Загрузка…' : 'Обновить'),
+                ),
+              ]),
+            ]),
+          ),
+        ),
       ),
     );
   }
