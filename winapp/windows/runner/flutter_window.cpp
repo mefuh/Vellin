@@ -11,6 +11,12 @@
 #ifndef DWMWA_COLOR_NONE
 #define DWMWA_COLOR_NONE 0xFFFFFFFE
 #endif
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+#ifndef DWMWCP_DONOTROUND
+#define DWMWCP_DONOTROUND 1
+#endif
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -29,6 +35,10 @@ bool FlutterWindow::OnCreate() {
   if (hwnd) {
     COLORREF border = DWMWA_COLOR_NONE;
     DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
+    // Квадратные углы окна: крупное скругление рисует Flutter (ClipRRect).
+    // Иначе системная дуга ~8px конфликтует с нашей 26px — артефакты на углах.
+    DWORD corner = DWMWCP_DONOTROUND;
+    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
   }
 
   RECT frame = GetClientArea();

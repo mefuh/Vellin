@@ -130,9 +130,11 @@ class _UpdateScreenState extends State<UpdateScreen> {
                   style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: VellinColors.text0, letterSpacing: -0.4)),
               const SizedBox(height: 10),
               Text(
-                info.mandatory
-                    ? 'Для продолжения работы нужно обновить Vellin.'
-                    : 'Вышла новая версия Vellin. Обновиться сейчас?',
+                _downloading
+                    ? 'Устанавливаем обновление. Приложение перезапустится автоматически.'
+                    : info.mandatory
+                        ? 'Для продолжения работы нужно обновить Vellin.'
+                        : 'Вышла новая версия Vellin. Обновиться сейчас?',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 14, color: VellinColors.text1, height: 1.5),
               ),
@@ -168,15 +170,19 @@ class _UpdateScreenState extends State<UpdateScreen> {
                   ),
                   const SizedBox(width: 10),
                 ],
-                FilledButton(
-                  onPressed: _downloading ? null : _update,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: VellinColors.accent,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(VellinRadius.md)),
+                SizedBox(
+                  height: 46,
+                  child: FilledButton(
+                    onPressed: _downloading ? null : _update,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: VellinColors.accent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 28),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(VellinRadius.md)),
+                      textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                    ),
+                    child: Text(_downloading ? 'Загрузка…' : 'Обновить'),
                   ),
-                  child: Text(_downloading ? 'Загрузка…' : 'Обновить'),
                 ),
               ]),
             ]),

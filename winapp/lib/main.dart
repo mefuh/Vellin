@@ -19,7 +19,11 @@ import 'theme/vellin_theme.dart';
 import 'runtime/update_checker.dart';
 
 /// Размер маленького окна апдейтера (безрамочное, скруглённое — как у Discord).
-const _updaterSize = Size(440, 300);
+/// Высота с запасом под двухстрочную подпись во время загрузки.
+const _updaterSize = Size(440, 360);
+
+/// Радиус скругления безрамочного окна апдейтера (крупнее системного ~8px).
+const _updaterRadius = 26.0;
 
 /// Размеры основного окна приложения.
 const _appSize = Size(1180, 760);
@@ -57,6 +61,10 @@ Future<void> main() async {
       await windowManager.setResizable(false);
       await windowManager.setMaximizable(false);
       await windowManager.setMinimizable(false);
+      // Полностью убираем неклиентскую рамку (иначе сверху остаётся 1px кромка)
+      // и системную тень — оба дают артефакты на углах поверх ClipRRect.
+      await windowManager.setAsFrameless();
+      await windowManager.setHasShadow(false);
       await windowManager.show();
       await windowManager.focus();
     },
@@ -98,6 +106,7 @@ class _VellinAppState extends State<VellinApp> {
     await windowManager.setResizable(true);
     await windowManager.setMaximizable(true);
     await windowManager.setMinimizable(true);
+    await windowManager.setHasShadow(true); // обычному окну тень возвращаем
     await windowManager.setMinimumSize(_appMinSize);
     await windowManager.setSize(_appSize);
     await windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
@@ -124,14 +133,19 @@ class _VellinAppState extends State<VellinApp> {
       );
     }
 
-    // Фаза апдейтера в маленьком безрамочном окне.
+    // Фаза апдейтера в маленьком безрамочном окне. Крупное скругление рисуем
+    // сами (ClipRRect): окно прозрачное, поэтому углы за радиусом — прозрачные
+    // и сглаженные (системный DWM даёт лишь ~8px).
     return MaterialApp(
       title: 'Vellin',
       debugShowCheckedModeBanner: false,
       theme: buildVellinTheme(),
-      home: update.pending != null
-          ? UpdateScreen(info: update.pending!, onSkip: update.skip)
-          : const _CheckingScreen(),
+      home: ClipRRect(
+        borderRadius: BorderRadius.circular(_updaterRadius),
+        child: update.pending != null
+            ? UpdateScreen(info: update.pending!, onSkip: update.skip)
+            : const _CheckingScreen(),
+      ),
     );
   }
 }
