@@ -8,6 +8,7 @@ import '../state/dm_controller.dart';
 import '../state/friends_controller.dart';
 import '../state/presence_controller.dart';
 import '../theme/vellin_theme.dart';
+import '../widgets/back_dismiss.dart';
 import '../widgets/common.dart';
 
 /// Полноценная страница публичного профиля пользователя (по publicId).
@@ -79,27 +80,32 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     context.go('/messages');
   }
 
+  void _back() => context.canPop() ? context.pop() : context.go('/messages');
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: VellinColors.bg0,
-      appBar: AppBar(
+    return BackDismissible(
+      onBack: _back,
+      child: Scaffold(
         backgroundColor: VellinColors.bg0,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: VellinColors.text1),
-          tooltip: 'Назад',
-          onPressed: () => context.canPop() ? context.pop() : context.go('/messages'),
+        appBar: AppBar(
+          backgroundColor: VellinColors.bg0,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: VellinColors.text1),
+            tooltip: 'Назад',
+            onPressed: _back,
+          ),
+          title: const Text('Профиль',
+              style: TextStyle(color: VellinColors.text0, fontSize: 17, fontWeight: FontWeight.w600)),
         ),
-        title: const Text('Профиль',
-            style: TextStyle(color: VellinColors.text0, fontSize: 17, fontWeight: FontWeight.w600)),
+        body: _error != null
+            ? ProfileErrorState(_error!)
+            : _profile == null
+                ? const Center(child: CircularProgressIndicator(color: VellinColors.accentHi))
+                : ProfileView(profile: _profile!, actions: _actions(_profile!)),
       ),
-      body: _error != null
-          ? ProfileErrorState(_error!)
-          : _profile == null
-              ? const Center(child: CircularProgressIndicator(color: VellinColors.accentHi))
-              : ProfileView(profile: _profile!, actions: _actions(_profile!)),
     );
   }
 

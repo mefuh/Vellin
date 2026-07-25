@@ -18,6 +18,7 @@ class FriendsScreen extends StatefulWidget {
 
 class _FriendsScreenState extends State<FriendsScreen> {
   final _searchCtrl = TextEditingController();
+  final _scroll = ScrollController();
   Timer? _debounce;
   List<SearchUser> _results = [];
   bool _searching = false;
@@ -32,6 +33,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
   void dispose() {
     _debounce?.cancel();
     _searchCtrl.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -69,51 +71,62 @@ class _FriendsScreenState extends State<FriendsScreen> {
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<FriendsController>();
+    // Прокрутка на всю ширину страницы (полоса у правого края окна), а
+    // содержимое — центрированной колонкой 620px.
     return Scaffold(
       backgroundColor: VellinColors.bg0,
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 620),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(24, 28, 24, 48),
-            children: [
-              const Text('Друзья',
-                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: VellinColors.text0, letterSpacing: -0.5)),
-              const SizedBox(height: 20),
-              _searchBox(),
-              if (_searching || _results.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                _searchResults(),
-              ],
-              const SizedBox(height: 24),
-              if (ctrl.error != null) ...[
-                ErrorBanner('Не удалось загрузить: ${ctrl.error}'),
-                const SizedBox(height: 16),
-              ],
-              if (ctrl.incoming.isNotEmpty) ...[
-                _sectionTitle('Заявки в друзья', ctrl.incoming.length),
-                const SizedBox(height: 10),
-                ...ctrl.incoming.map((r) => _requestTile(r)),
-                const SizedBox(height: 24),
-              ],
-              _sectionTitle('Мои друзья', ctrl.friends.length),
-              const SizedBox(height: 10),
-              if (ctrl.loading && ctrl.friends.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(child: CircularProgressIndicator(color: VellinColors.accentHi)),
-                )
-              else if (ctrl.friends.isEmpty)
-                _empty('Пока никого. Найдите друзей через поиск выше.')
-              else
-                ...ctrl.friends.map((f) => _friendTile(f)),
-              if (ctrl.outgoing.isNotEmpty) ...[
-                const SizedBox(height: 24),
-                _sectionTitle('Исходящие заявки', ctrl.outgoing.length),
-                const SizedBox(height: 10),
-                ...ctrl.outgoing.map((r) => _outgoingTile(r)),
-              ],
-            ],
+      body: Scrollbar(
+        controller: _scroll,
+        child: SingleChildScrollView(
+          controller: _scroll,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 620),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 28, 24, 48),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text('Друзья',
+                        style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: VellinColors.text0, letterSpacing: -0.5)),
+                    const SizedBox(height: 20),
+                    _searchBox(),
+                    if (_searching || _results.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      _searchResults(),
+                    ],
+                    const SizedBox(height: 24),
+                    if (ctrl.error != null) ...[
+                      ErrorBanner('Не удалось загрузить: ${ctrl.error}'),
+                      const SizedBox(height: 16),
+                    ],
+                    if (ctrl.incoming.isNotEmpty) ...[
+                      _sectionTitle('Заявки в друзья', ctrl.incoming.length),
+                      const SizedBox(height: 10),
+                      ...ctrl.incoming.map((r) => _requestTile(r)),
+                      const SizedBox(height: 24),
+                    ],
+                    _sectionTitle('Мои друзья', ctrl.friends.length),
+                    const SizedBox(height: 10),
+                    if (ctrl.loading && ctrl.friends.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Center(child: CircularProgressIndicator(color: VellinColors.accentHi)),
+                      )
+                    else if (ctrl.friends.isEmpty)
+                      _empty('Пока никого. Найдите друзей через поиск выше.')
+                    else
+                      ...ctrl.friends.map((f) => _friendTile(f)),
+                    if (ctrl.outgoing.isNotEmpty) ...[
+                      const SizedBox(height: 24),
+                      _sectionTitle('Исходящие заявки', ctrl.outgoing.length),
+                      const SizedBox(height: 10),
+                      ...ctrl.outgoing.map((r) => _outgoingTile(r)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),

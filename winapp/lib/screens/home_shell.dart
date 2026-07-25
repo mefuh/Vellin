@@ -74,8 +74,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           indicatorColor: VellinColors.accentSoft,
           selectedIconTheme: const IconThemeData(color: VellinColors.accentHi),
           unselectedIconTheme: const IconThemeData(color: VellinColors.text2),
-          selectedLabelTextStyle: const TextStyle(color: VellinColors.text0, fontSize: 12, fontWeight: FontWeight.w600),
-          unselectedLabelTextStyle: const TextStyle(color: VellinColors.text2, fontSize: 12),
+          // Одинаковая насыщенность у выбранной и невыбранной подписи: иначе
+          // жирная выбранная «Сообщения» (самое длинное слово) расширяет рейл и
+          // вся колонка сдвигается. Акцент выбранной — только цветом.
+          selectedLabelTextStyle: const TextStyle(color: VellinColors.text0, fontSize: 12, fontWeight: FontWeight.w500),
+          unselectedLabelTextStyle: const TextStyle(color: VellinColors.text2, fontSize: 12, fontWeight: FontWeight.w500),
           leading: const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: _RailMark()),
           trailing: Expanded(
             child: Align(

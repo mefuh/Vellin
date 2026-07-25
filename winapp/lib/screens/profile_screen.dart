@@ -11,6 +11,7 @@ import '../models/models.dart';
 import '../models/title.dart';
 import '../state/auth_controller.dart';
 import '../theme/vellin_theme.dart';
+import '../widgets/back_dismiss.dart';
 import '../widgets/common.dart';
 
 String? _resolveAvatar(String? url) {
@@ -33,7 +34,11 @@ class ProfileSettingsScreen extends StatelessWidget {
     final user = auth.user;
     if (user == null) return const SizedBox.shrink();
 
-    return Scaffold(
+    void back() => context.canPop() ? context.pop() : context.go('/profile');
+
+    return BackDismissible(
+      onBack: back,
+      child: Scaffold(
       backgroundColor: VellinColors.bg0,
       appBar: AppBar(
         backgroundColor: VellinColors.bg0,
@@ -42,7 +47,7 @@ class ProfileSettingsScreen extends StatelessWidget {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: VellinColors.text1),
           tooltip: 'Назад',
-          onPressed: () => context.canPop() ? context.pop() : context.go('/profile'),
+          onPressed: back,
         ),
         title: const Text('Настройки профиля',
             style: TextStyle(color: VellinColors.text0, fontSize: 17, fontWeight: FontWeight.w600)),
@@ -68,6 +73,7 @@ class ProfileSettingsScreen extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }

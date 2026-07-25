@@ -7,9 +7,11 @@ import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 import '../app_config.dart';
 import '../models/dm.dart';
+import '../state/auth_controller.dart';
 import '../state/dm_controller.dart';
 import '../state/presence_controller.dart';
 import '../theme/vellin_theme.dart';
+import '../widgets/back_dismiss.dart';
 import '../widgets/common.dart';
 import '../widgets/voice_bubble.dart';
 import '../widgets/video_bubble.dart';
@@ -22,13 +24,22 @@ class MessagesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dm = context.watch<DmController>();
-    return Scaffold(
-      backgroundColor: VellinColors.bg0,
-      body: Row(children: [
-        SizedBox(width: 300, child: _ConversationList(dm: dm)),
-        const VerticalDivider(width: 1, thickness: 1, color: VellinColors.line2),
-        Expanded(child: dm.activePeerPublicId == null ? const _EmptyChat() : _ChatPane(dm: dm)),
-      ]),
+
+    // Esc / Alt+← / боковая кнопка мыши закрывают открытый диалог. autofocus
+    // выключен: иначе обёртка перетягивала бы фокус с поля ввода после Enter.
+    return BackDismissible(
+      autofocus: false,
+      onBack: () {
+        if (dm.activePeerPublicId != null) dm.closeThread();
+      },
+      child: Scaffold(
+        backgroundColor: VellinColors.bg0,
+        body: Row(children: [
+          SizedBox(width: 300, child: _ConversationList(dm: dm)),
+          const VerticalDivider(width: 1, thickness: 1, color: VellinColors.line2),
+          Expanded(child: dm.activePeerPublicId == null ? const _EmptyChat() : _ChatPane(dm: dm)),
+        ]),
+      ),
     );
   }
 }
@@ -134,11 +145,13 @@ class _ChatPane extends StatefulWidget {
 
 class _ChatPaneState extends State<_ChatPane> {
   final _input = TextEditingController();
+  final _inputFocus = FocusNode();
   final _scroll = ScrollController();
   String? _shownPeer;
   String? _lastMsgId;
   bool _loadingOlder = false;
   String? _watchedPeerId; // на чьё присутствие подписаны сейчас
+  bool _atBottom = true; // виден конец переписки (иначе показываем стрелку вниз)
 
   // Запись голосового.
   final _rec = AudioRecorder();
@@ -152,9 +165,14 @@ class _ChatPaneState extends State<_ChatPane> {
   @override
   void initState() {
     super.initState();
-    // Скролл к верху → подгрузка более ранних сообщений (пагинация).
+    // Список рисуется снизу вверх (reverse), поэтому pixels — расстояние ОТ
+    // низа: 0 — самый низ, максимум — начало переписки.
     _scroll.addListener(() {
-      if (_scroll.hasClients && _scroll.position.pixels <= 200) _maybeLoadOlder();
+      if (!_scroll.hasClients) return;
+      final p = _scroll.position;
+      if (p.pixels >= p.maxScrollExtent - 200) _maybeLoadOlder();
+      final atBottom = p.pixels <= 120;
+      if (atBottom != _atBottom) setState(() => _atBottom = atBottom);
     });
     // Ввод текста → сигнал «печатает» собеседнику.
     _input.addListener(() {
@@ -176,18 +194,9 @@ class _ChatPaneState extends State<_ChatPane> {
   Future<void> _maybeLoadOlder() async {
     if (_loadingOlder || !widget.dm.activeHasMore) return;
     _loadingOlder = true;
-    final before = _scroll.position.maxScrollExtent;
-    final pixels = _scroll.position.pixels;
-    final added = await widget.dm.loadOlder();
-    if (added > 0) {
-      // Сохраняем позицию: сдвигаем на прирост высоты сверху.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scroll.hasClients) {
-          final after = _scroll.position.maxScrollExtent;
-          _scroll.jumpTo((pixels + (after - before)).clamp(0.0, after));
-        }
-      });
-    }
+    // Позицию сохранять не нужно: в reverse-списке отсчёт идёт от низа, а
+    // старые сообщения дописываются сверху и текущий кадр не смещают.
+    await widget.dm.loadOlder();
     _loadingOlder = false;
   }
 
@@ -199,6 +208,7 @@ class _ChatPaneState extends State<_ChatPane> {
       context.read<PresenceController>().unwatch(_watchedPeerId!);
     }
     _input.dispose();
+    _inputFocus.dispose();
     _scroll.dispose();
     _recTimer?.cancel();
     _ampSub?.cancel();
@@ -211,6 +221,8 @@ class _ChatPaneState extends State<_ChatPane> {
     if (text.trim().isEmpty) return;
     widget.dm.sendText(text);
     _input.clear();
+    // Оставляем фокус в поле — можно печатать дальше без клика.
+    _inputFocus.requestFocus();
   }
 
   Future<void> _startRecord() async {
@@ -311,10 +323,17 @@ class _ChatPaneState extends State<_ChatPane> {
     }
   }
 
+  /// Низ переписки в reverse-списке — позиция 0, поэтому прыжок точный и не
+  /// зависит от того, что картинки/кружки догрузятся позже.
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      if (_scroll.hasClients) _scroll.jumpTo(0);
     });
+  }
+
+  void _animateToBottom() {
+    if (!_scroll.hasClients) return;
+    _scroll.animateTo(0, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
   }
 
   @override
@@ -324,16 +343,22 @@ class _ChatPaneState extends State<_ChatPane> {
     WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _syncPresenceWatch(); });
     final presence = context.watch<PresenceController>();
     final msgs = dm.activeMessages;
-    // Скролл вниз: при открытии другого диалога и при новом сообщении в конце.
-    // При пагинации (сообщения добавляются в начало) — не трогаем позицию.
+    // В reverse-списке низ держится сам: новые сообщения приходят в позицию 0,
+    // и если пользователь внизу, он там и остаётся. Прыгаем вручную только при
+    // смене диалога и когда пользователь сам отправил сообщение, читая старое.
     final lastId = msgs.isNotEmpty ? msgs.last.id : null;
     if (dm.activePeerPublicId != _shownPeer) {
       _shownPeer = dm.activePeerPublicId;
       _lastMsgId = lastId;
       _scrollToBottom();
+      // Сразу ставим фокус в поле ввода при открытии диалога.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _inputFocus.requestFocus();
+      });
     } else if (lastId != null && lastId != _lastMsgId) {
+      final mine = msgs.last.senderId == dm.myUserId;
       _lastMsgId = lastId;
-      _scrollToBottom();
+      if (mine) _scrollToBottom();
     }
     final peerName = dm.conversations
         .cast<DmConversation?>()
@@ -363,23 +388,86 @@ class _ChatPaneState extends State<_ChatPane> {
       Expanded(
         child: dm.threadLoading
             ? const Center(child: CircularProgressIndicator(color: VellinColors.accentHi))
-            : ListView.builder(
-                controller: _scroll,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                itemCount: msgs.length + 1,
-                itemBuilder: (_, i) {
-                  if (i == 0) {
-                    return dm.loadingOlder
-                        ? const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 10),
-                            child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: VellinColors.accentHi))),
-                          )
-                        : const SizedBox.shrink();
+            : Builder(builder: (_) {
+                final me = context.read<AuthController>().user;
+                final peer = dm.activePeer;
+                // Плоский список: разделители дат вперемешку с сообщениями.
+                final rows = <Object>[];
+                DateTime? lastDay;
+                for (final m in msgs) {
+                  final t = DateTime.tryParse(m.createdAt)?.toLocal();
+                  if (t != null) {
+                    final day = DateTime(t.year, t.month, t.day);
+                    if (lastDay == null || day != lastDay) {
+                      rows.add(day);
+                      lastDay = day;
+                    }
                   }
-                  final m = msgs[i - 1];
-                  return _Bubble(m: m, mine: m.senderId == dm.myUserId);
-                },
-              ),
+                  rows.add(m);
+                }
+                // Аватар показываем только у последнего сообщения группы одного
+                // отправителя (Telegram-стиль), в остальных — колонка резервируется.
+                final showAvatar = <String>{};
+                for (var k = 0; k < rows.length; k++) {
+                  final r = rows[k];
+                  if (r is! DirectMessage) continue;
+                  final next = k + 1 < rows.length ? rows[k + 1] : null;
+                  if (next is! DirectMessage || next.senderId != r.senderId) showAvatar.add(r.id);
+                }
+                // reverse: список строится от низа. Индекс 0 — последнее
+                // сообщение, поэтому диалог всегда открывается точно в конце,
+                // даже если картинки и кружки догрузятся позже.
+                final display = rows.reversed.toList();
+                return Stack(children: [
+                  ListView.builder(
+                    controller: _scroll,
+                    reverse: true,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    itemCount: display.length + 1,
+                    itemBuilder: (_, i) {
+                      // Последний по индексу = самый верх: индикатор догрузки.
+                      if (i == display.length) {
+                        return dm.loadingOlder
+                            ? const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 10),
+                                child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: VellinColors.accentHi))),
+                              )
+                            : const SizedBox.shrink();
+                      }
+                      final row = display[i];
+                      if (row is DateTime) return _DateDivider(day: row);
+                      final m = row as DirectMessage;
+                      final mine = m.senderId == dm.myUserId;
+                      return _Bubble(
+                        m: m,
+                        mine: mine,
+                        showAvatar: showAvatar.contains(m.id),
+                        senderName: mine ? (me?.username ?? '') : (peer?.username ?? ''),
+                        senderSeed: mine ? (me?.avatarSeed ?? '') : (peer?.avatarSeed ?? ''),
+                        senderAvatarUrl: mine ? me?.avatarUrl : peer?.avatarUrl,
+                      );
+                    },
+                  ),
+                  // Возврат в конец переписки.
+                  Positioned(
+                    right: 20,
+                    bottom: 16,
+                    child: AnimatedSlide(
+                      offset: _atBottom ? const Offset(0, 1.4) : Offset.zero,
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      child: AnimatedOpacity(
+                        opacity: _atBottom ? 0 : 1,
+                        duration: const Duration(milliseconds: 180),
+                        child: IgnorePointer(
+                          ignoring: _atBottom,
+                          child: _ScrollDownButton(onTap: _animateToBottom),
+                        ),
+                      ),
+                    ),
+                  ),
+                ]);
+              }),
       ),
       if (dm.sendingImage)
         const Padding(
@@ -388,6 +476,7 @@ class _ChatPaneState extends State<_ChatPane> {
         ),
       _Composer(
         controller: _input,
+        focusNode: _inputFocus,
         onSend: _send,
         onAttach: _attach,
         recording: _recording,
@@ -401,85 +490,233 @@ class _ChatPaneState extends State<_ChatPane> {
   }
 }
 
-class _Bubble extends StatelessWidget {
-  final DirectMessage m;
-  final bool mine;
-  const _Bubble({required this.m, required this.mine});
+const _months = [
+  'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+];
+
+/// Время отправки «ЧЧ:ММ» (пусто, если дата не распарсилась).
+String _fmtTime(String iso) {
+  final t = DateTime.tryParse(iso)?.toLocal();
+  if (t == null) return '';
+  return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+}
+
+/// Подпись разделителя: «Сегодня» / «Вчера» / «24 июля» / «24 июля 2025».
+String _fmtDay(DateTime day) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final diff = today.difference(day).inDays;
+  if (diff == 0) return 'Сегодня';
+  if (diff == 1) return 'Вчера';
+  final base = '${day.day} ${_months[day.month - 1]}';
+  return day.year == now.year ? base : '$base ${day.year}';
+}
+
+/// Разделитель дня в ленте сообщений.
+class _DateDivider extends StatelessWidget {
+  final DateTime day;
+  const _DateDivider({required this.day});
 
   @override
   Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: VellinColors.bg2,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: VellinColors.line2),
+          ),
+          child: Text(_fmtDay(day),
+              style: const TextStyle(color: VellinColors.text2, fontSize: 12, fontWeight: FontWeight.w500)),
+        ),
+      ),
+    );
+  }
+}
+
+/// Круглая кнопка «в конец переписки».
+class _ScrollDownButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _ScrollDownButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: VellinColors.bg2,
+      shape: const CircleBorder(side: BorderSide(color: VellinColors.line2)),
+      elevation: 3,
+      shadowColor: Colors.black54,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: const SizedBox(
+          width: 42,
+          height: 42,
+          child: Icon(Icons.keyboard_arrow_down_rounded, color: VellinColors.text1, size: 26),
+        ),
+      ),
+    );
+  }
+}
+
+/// Время отправки внутри бабла.
+class _TimeLabel extends StatelessWidget {
+  final String iso;
+  final bool mine;
+  final bool onMedia; // поверх изображения — нужна тёмная подложка
+  const _TimeLabel({required this.iso, required this.mine, this.onMedia = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Text(
+      _fmtTime(iso),
+      style: TextStyle(
+        color: onMedia ? Colors.white : (mine ? Colors.white70 : VellinColors.text3),
+        fontSize: 11,
+      ),
+    );
+    if (!onMedia) return text;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(999)),
+      child: text,
+    );
+  }
+}
+
+/// Сообщение в стиле Telegram: все слева, слева от бабла — аватар отправителя
+/// (показывается только у последнего сообщения группы, иначе колонка пустая).
+class _Bubble extends StatelessWidget {
+  final DirectMessage m;
+  final bool mine;
+  final bool showAvatar;
+  final String senderName;
+  final String senderSeed;
+  final String? senderAvatarUrl;
+  const _Bubble({
+    required this.m,
+    required this.mine,
+    required this.showAvatar,
+    required this.senderName,
+    required this.senderSeed,
+    required this.senderAvatarUrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: showAvatar ? 10 : 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // Аватар — у последнего сообщения группы; иначе колонка резервируется.
+          SizedBox(
+            width: 32,
+            child: showAvatar
+                ? VellinAvatar(username: senderName, avatarSeed: senderSeed, avatarUrl: senderAvatarUrl, size: 32)
+                : null,
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Opacity(opacity: m.pending ? 0.7 : 1, child: _content()),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _content() {
     // Видео-кружок — отдельный круглый бабл без прямоугольной подложки.
     if (m.videoStatus != null) {
-      return Align(
-        alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Opacity(
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Opacity(
             opacity: m.pending && m.videoStatus == 'processing' ? 0.85 : 1,
             child: VideoBubble(status: m.videoStatus, videoUrl: m.videoUrl, thumbUrl: m.videoThumbUrl),
           ),
-        ),
+          Padding(
+            padding: const EdgeInsets.only(left: 6, top: 4),
+            child: _TimeLabel(iso: m.createdAt, mine: false),
+          ),
+        ],
       );
     }
     final hasImage = m.imageUrl != null;
     final hasVoice = m.voiceUrl != null;
     final hasText = m.body.isNotEmpty;
-    return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Opacity(
-        opacity: m.pending ? 0.7 : 1,
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: hasImage
-              ? const EdgeInsets.all(4)
-              : hasVoice
-                  ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
-                  : const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          constraints: const BoxConstraints(maxWidth: 440),
-          decoration: BoxDecoration(
-            color: mine ? VellinColors.accent : VellinColors.bg2,
-            borderRadius: BorderRadius.circular(VellinRadius.lg),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (hasVoice)
-                VoiceBubble(
-                  url: AppConfig.mediaUrl(m.voiceUrl)!,
-                  durationSec: m.voiceDurationSec ?? 0,
-                  peaks: m.voicePeaks ?? const [],
-                  mine: mine,
-                ),
-              if (hasImage)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(VellinRadius.md),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 300, maxHeight: 360),
-                    child: Image.network(
-                      AppConfig.mediaUrl(m.imageUrl)!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const SizedBox(
-                        width: 200, height: 120,
-                        child: Center(child: Icon(Icons.broken_image_outlined, color: VellinColors.text3)),
-                      ),
+    return Container(
+      padding: hasImage
+          ? const EdgeInsets.all(4)
+          : hasVoice
+              ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
+              : const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      constraints: const BoxConstraints(maxWidth: 440),
+      decoration: BoxDecoration(
+        color: mine ? VellinColors.accent : VellinColors.bg2,
+        borderRadius: BorderRadius.circular(VellinRadius.lg),
+      ),
+      child: Column(
+        // Без картинки колонка сама прижимает время вправо (Align нельзя —
+        // он растягивает бабл на всю максимальную ширину).
+        crossAxisAlignment: hasImage ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (hasVoice)
+            VoiceBubble(
+              url: AppConfig.mediaUrl(m.voiceUrl)!,
+              durationSec: m.voiceDurationSec ?? 0,
+              peaks: m.voicePeaks ?? const [],
+              mine: mine,
+            ),
+          if (hasImage)
+            Stack(children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(VellinRadius.md),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 300, maxHeight: 360),
+                  child: Image.network(
+                    AppConfig.mediaUrl(m.imageUrl)!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const SizedBox(
+                      width: 200, height: 120,
+                      child: Center(child: Icon(Icons.broken_image_outlined, color: VellinColors.text3)),
                     ),
                   ),
                 ),
-              if (hasText)
-                Padding(
-                  padding: hasImage ? const EdgeInsets.fromLTRB(10, 8, 10, 4) : EdgeInsets.zero,
-                  child: Text(
-                    m.body,
-                    style: TextStyle(color: mine ? Colors.white : VellinColors.text0, fontSize: 14.5, height: 1.35),
-                  ),
-                ),
-              if (!hasImage && !hasVoice && !hasText)
-                Text(m.previewText,
-                    style: TextStyle(color: mine ? Colors.white : VellinColors.text0, fontSize: 14.5, height: 1.35)),
-            ],
-          ),
-        ),
+              ),
+              Positioned(
+                right: 8,
+                bottom: 8,
+                child: _TimeLabel(iso: m.createdAt, mine: mine, onMedia: true),
+              ),
+            ]),
+          if (hasText)
+            Padding(
+              padding: hasImage ? const EdgeInsets.fromLTRB(10, 8, 10, 0) : EdgeInsets.zero,
+              child: Text(
+                m.body,
+                style: TextStyle(color: mine ? Colors.white : VellinColors.text0, fontSize: 14.5, height: 1.35),
+              ),
+            ),
+          if (!hasImage && !hasVoice && !hasText)
+            Text(m.previewText,
+                style: TextStyle(color: mine ? Colors.white : VellinColors.text0, fontSize: 14.5, height: 1.35)),
+          // Время: у картинок оно уже наложено на изображение.
+          if (!hasImage)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: _TimeLabel(iso: m.createdAt, mine: mine),
+            ),
+        ],
       ),
     );
   }
@@ -487,6 +724,7 @@ class _Bubble extends StatelessWidget {
 
 class _Composer extends StatelessWidget {
   final TextEditingController controller;
+  final FocusNode focusNode;
   final VoidCallback onSend;
   final VoidCallback onAttach;
   final bool recording;
@@ -498,6 +736,7 @@ class _Composer extends StatelessWidget {
 
   const _Composer({
     required this.controller,
+    required this.focusNode,
     required this.onSend,
     required this.onAttach,
     required this.recording,
@@ -550,6 +789,7 @@ class _Composer extends StatelessWidget {
       Expanded(
         child: TextField(
           controller: controller,
+          focusNode: focusNode,
           onSubmitted: (_) => onSend(),
           textInputAction: TextInputAction.send,
           style: const TextStyle(color: VellinColors.text0, fontSize: 15),

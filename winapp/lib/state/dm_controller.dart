@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../api/dm_api.dart';
 import '../models/dm.dart';
+import '../models/social.dart';
 import '../realtime/user_socket.dart';
 
 /// Состояние личных сообщений: WebSocket-канал, список диалогов и активный тред.
@@ -23,6 +24,7 @@ class DmController extends ChangeNotifier {
   String? activePeerPublicId;
   String? _activePeerUserId;
   String? _activeConversationId;
+  PublicUser? activePeer; // карточка собеседника — для аватара в баблах
   List<DirectMessage> activeMessages = [];
   bool threadLoading = false;
   bool activeHasMore = false;
@@ -85,6 +87,11 @@ class DmController extends ChangeNotifier {
     _peerActivityTimer?.cancel();
     peerActivity = null;
     activePeerPublicId = publicId;
+    // Аватар/имя из списка диалогов — сразу, до загрузки треда.
+    activePeer = conversations
+        .cast<DmConversation?>()
+        .firstWhere((c) => c?.peer.publicId == publicId, orElse: () => null)
+        ?.peer;
     activeMessages = [];
     activeHasMore = false;
     threadLoading = true;
@@ -93,6 +100,7 @@ class DmController extends ChangeNotifier {
       final t = await _api.thread(publicId);
       _activeConversationId = t.conversationId.isEmpty ? null : t.conversationId;
       _activePeerUserId = t.peer.id;
+      activePeer = t.peer;
       activeMessages = t.messages;
       activeHasMore = t.hasMore;
       threadLoading = false;
@@ -116,6 +124,7 @@ class DmController extends ChangeNotifier {
     activePeerPublicId = null;
     _activePeerUserId = null;
     _activeConversationId = null;
+    activePeer = null;
     activeMessages = [];
     activeHasMore = false;
     notifyListeners();
