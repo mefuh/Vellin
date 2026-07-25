@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { DesktopUpdate } from '@vellin/shared';
 import { Button, Chip, Icon, VellinLogo, VellinMark, type IconName } from '../shared';
-import { configApi } from '../api/config';
 import { useAuthStore } from '../stores/authStore';
+import { useAppConfig } from '../hooks/useAppConfig';
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery';
+import { NotFound } from './NotFound';
 
 /**
  * Страница загрузки Windows-клиента.
@@ -97,23 +97,19 @@ export function Download() {
   const isMobile = useIsMobile();
   const isNarrow = useMediaQuery('(max-width: 600px)');
 
-  const [release, setRelease] = useState<DesktopUpdate | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { config, loading } = useAppConfig();
+  const release = config?.update.windows ?? null;
   // Показываем подсказку «откройте на Windows», если зашли с другой ОС —
   // ссылку при этом не прячем: файл могут скачать заранее.
   const [isWindows] = useState(() =>
     typeof navigator !== 'undefined' ? /Windows/i.test(navigator.userAgent) : true,
   );
 
-  useEffect(() => {
-    const ac = new AbortController();
-    configApi
-      .get(ac.signal)
-      .then((cfg) => setRelease(cfg.update.windows))
-      .catch(() => setRelease(null))
-      .finally(() => setLoading(false));
-    return () => ac.abort();
-  }, []);
+  // Страница выключена в админ-панели (или закрыта для этого зрителя) — ведём
+  // себя так, будто маршрута не существует. Пока конфиг не пришёл, не рисуем
+  // ни страницу, ни 404: иначе на секунду мелькнёт неверный экран.
+  if (loading) return <div style={{ minHeight: '100svh', background: 'var(--bg-0)' }} />;
+  if (!config?.windowsDownloadVisible) return <NotFound />;
 
   const card: React.CSSProperties = {
     background: 'var(--bg-2)',

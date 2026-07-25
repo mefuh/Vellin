@@ -1,7 +1,10 @@
-import type { FastifyInstance } from 'fastify';
-import type { AppConfigResponse } from '@vellin/shared';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { AppConfigResponse, PlatformWindows } from '@vellin/shared';
 import type { DesktopUpdate } from '@vellin/shared';
-import { loadEnv } from '../env.js';
+import type { Principal } from '../auth/jwt.js';
+import { isWsTicket } from '../auth/jwt.js';
+import { prisma } from '../db/prisma.js';
+import { isAdminEmail, loadEnv } from '../env.js';
 import { APP_VERSION, getMinVersions } from '../appMeta.js';
 import { getSettings } from '../admin/platform/config.js';
 import { getVapidPublicKey } from '../push/vapid.js';
@@ -37,6 +40,46 @@ function buildEndpoints(): AppConfigResponse['endpoints'] {
 }
 
 /**
+ * Пользователь запроса, если Bearer-токен пришёл и валиден. Конфиг остаётся
+ * публичным: нет токена или он протух — просто аноним, без 401.
+ */
+async function optionalPrincipal(request: FastifyRequest): Promise<Principal | null> {
+  try {
+    const payload = await request.jwtVerify<Principal | { ticket: true }>();
+    if (isWsTicket(payload as never)) return null;
+    return payload as Principal;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Видна ли запросившему страница скачивания Windows-клиента (тумблер +
+ * аудитория из админ-панели). Администратор видит страницу при любой
+ * аудитории, пока сам тумблер включён, — иначе он терял бы доступ к разделу,
+ * которым управляет.
+ */
+async function isWindowsDownloadVisible(
+  windows: PlatformWindows,
+  principal: Principal | null,
+): Promise<boolean> {
+  if (!windows.downloadPage) return false;
+  if (windows.audience === 'everyone') return true;
+  if (!principal || principal.kind !== 'user') return false;
+
+  const user = await prisma.user.findUnique({
+    where: { id: principal.userId },
+    select: { email: true, username: true },
+  });
+  if (!user) return false;
+  if (isAdminEmail(user.email)) return true;
+  if (windows.audience === 'admins') return false;
+
+  const allowed = windows.usernames.map((u) => u.trim().toLowerCase());
+  return allowed.includes(user.username.toLowerCase());
+}
+
+/**
  * Публичный конфиг/дискавери сервиса — единая точка, из которой нативные
  * клиенты узнают версию API, минимальные поддерживаемые версии (force-update),
  * абсолютные базовые адреса, актуальные фиче-тумблеры, режим обслуживания и
@@ -44,9 +87,10 @@ function buildEndpoints(): AppConfigResponse['endpoints'] {
  * получить конфиг даже когда его версия устарела — чтобы узнать об апдейте).
  */
 export async function configRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/config', async () => {
+  app.get('/config', async (request) => {
     const settings = await getSettings();
     const vapid = getVapidPublicKey();
+    const principal = await optionalPrincipal(request);
     const response: AppConfigResponse = {
       version: APP_VERSION,
       minVersions: getMinVersions(),
@@ -56,6 +100,7 @@ export async function configRoutes(app: FastifyInstance): Promise<void> {
       limits: settings.limits,
       push: { mode: 'webpush', vapidPublicKey: vapid },
       update: { windows: windowsUpdate() },
+      windowsDownloadVisible: await isWindowsDownloadVisible(settings.windows, principal),
     };
     return response;
   });

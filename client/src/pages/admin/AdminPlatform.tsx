@@ -3,7 +3,9 @@ import type {
   AnnouncementDTO,
   FeatureFlagDTO,
   PlatformSettingsDTO,
+  PlatformWindows,
   UpsertAnnouncementRequest,
+  WindowsAudienceKind,
 } from '@vellin/shared';
 import { adminPlatformApi } from '../../api/adminPlatform';
 import { ApiHttpError } from '../../api/client';
@@ -69,6 +71,42 @@ function ToggleRow({ label, hint, checked, onChange, danger }: { label: string; 
   );
 }
 
+/**
+ * Сворачиваемая группа настроек («WEB», «Windows»). Раскрытое состояние живёт
+ * только в памяти вкладки — в разделе две-три группы, запоминать нечего.
+ */
+function PlatformGroup({ title, hint, badge, children }: {
+  title: string;
+  hint?: string;
+  badge?: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <AdminSurface>
+      <button
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px',
+          background: 'var(--bg-2)', border: 'none', cursor: 'pointer', textAlign: 'left',
+          borderBottom: open ? '1px solid var(--line-1)' : 'none',
+        }}
+      >
+        <span style={{ display: 'inline-flex', color: 'var(--text-2)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .16s' }}>
+          <Icon name="chevron" size={16} />
+        </span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontFamily: 'var(--font-mono)', fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-0)' }}>{title}</span>
+          {hint && <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-2)', marginTop: 3 }}>{hint}</span>}
+        </span>
+        {badge && <Chip tone="neutral">{badge}</Chip>}
+      </button>
+      {open && children}
+    </AdminSurface>
+  );
+}
+
 function SettingsTab() {
   const [settings, setSettings] = useState<PlatformSettingsDTO | null>(null);
   const [draft, setDraft] = useState<PlatformSettingsDTO | null>(null);
@@ -91,7 +129,7 @@ function SettingsTab() {
   const save = async () => {
     setSaving(true); setError(null);
     try {
-      const r = await adminPlatformApi.updateSettings({ toggles: draft.toggles, maintenance: draft.maintenance, limits: draft.limits });
+      const r = await adminPlatformApi.updateSettings({ toggles: draft.toggles, maintenance: draft.maintenance, limits: draft.limits, windows: draft.windows });
       setSettings(r.settings); setDraft(structuredClone(r.settings));
       setSaved(true); window.setTimeout(() => setSaved(false), 2200);
     } catch (e) {
@@ -112,7 +150,7 @@ function SettingsTab() {
         <p style={{ margin: '-4px 0 10px', fontSize: 12.5, color: 'var(--text-2)' }}>
           Выключенная функция мгновенно перестаёт работать у всех пользователей (без перезапуска). Уже открытые комнаты продолжают синхронизацию видео.
         </p>
-        <AdminSurface>
+        <PlatformGroup title="WEB" hint="Сайт vellin.ru — доступ, комнаты, общение, контент" badge="13 функций">
           <GroupCaption>Доступ</GroupCaption>
           <ToggleRow label="Регистрация" hint="Новые пользователи могут создавать аккаунты" checked={T.registration} onChange={(v) => setT('registration', v)} />
           <ToggleRow label="Гостевой вход" hint="Вход без регистрации" checked={T.guests} onChange={(v) => setT('guests', v)} />
@@ -133,7 +171,17 @@ function SettingsTab() {
           <ToggleRow label="Загрузка файлов" hint="Аватары, изображения/голос/видео в ЛС" checked={T.uploads} onChange={(v) => setT('uploads', v)} />
           <ToggleRow label="Избранные фильмы" hint="Поиск и добавление любимых фильмов в профиль" checked={T.favorites} onChange={(v) => setT('favorites', v)} />
           <ToggleRow label="Push-уведомления" hint="Подписка на пуши и тестовая отправка" checked={T.push} onChange={(v) => setT('push', v)} />
-        </AdminSurface>
+        </PlatformGroup>
+
+        <div style={{ height: 10 }} />
+
+        <PlatformGroup
+          title="Windows"
+          hint="Десктоп-клиент: страница скачивания и кому она видна"
+          badge={draft.windows.downloadPage ? AUDIENCE_LABEL[draft.windows.audience] : 'выключено'}
+        >
+          <WindowsSettings value={draft.windows} onChange={(w) => setDraft({ ...draft, windows: w })} />
+        </PlatformGroup>
       </div>
 
       <div>
@@ -171,6 +219,73 @@ function SettingsTab() {
         </div>
       )}
     </div>
+  );
+}
+
+const AUDIENCE_LABEL: Record<WindowsAudienceKind, string> = {
+  everyone: 'всем',
+  admins: 'администраторам',
+  users: 'по списку ников',
+};
+
+/**
+ * Настройки Windows-клиента. Ники храним массивом, но редактируем строкой:
+ * иначе каждая запятая пересобирала бы значение поля и уводила курсор.
+ */
+function WindowsSettings({ value, onChange }: { value: PlatformWindows; onChange: (v: PlatformWindows) => void }) {
+  const [raw, setRaw] = useState(() => value.usernames.join(', '));
+
+  const setUsernames = (text: string) => {
+    setRaw(text);
+    const list = text.split(/[,\n]/).map((u) => u.trim()).filter(Boolean);
+    onChange({ ...value, usernames: [...new Set(list)] });
+  };
+
+  return (
+    <>
+      <ToggleRow
+        label="Страница скачивания"
+        hint="Раздел /download с установщиком. Выключено — страница отдаёт 404, а ссылки на неё исчезают из интерфейса"
+        checked={value.downloadPage}
+        onChange={(v) => onChange({ ...value, downloadPage: v })}
+      />
+      {value.downloadPage && (
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, borderBottom: '1px solid var(--line-1)' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-3)' }}>Кому доступна</span>
+            <div style={{ display: 'flex' }}>
+              <Select
+                value={value.audience}
+                onChange={(v) => onChange({ ...value, audience: v as WindowsAudienceKind })}
+                options={[['everyone', 'Всем'], ['admins', 'Только администраторам'], ['users', 'Определённым пользователям']]}
+              />
+            </div>
+          </label>
+
+          {value.audience === 'users' && (
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-3)' }}>Ники через запятую</span>
+              <textarea
+                value={raw}
+                rows={2}
+                placeholder="vellin, maksim, tester"
+                onChange={(e) => setUsernames(e.target.value)}
+                style={{ padding: '10px 12px', borderRadius: 'var(--r-md)', background: 'var(--bg-2)', color: 'var(--text-0)', border: '1px solid var(--line-2)', fontSize: 14, fontFamily: 'inherit', resize: 'vertical' }}
+              />
+              <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                {value.usernames.length === 0
+                  ? <span style={{ fontSize: 12.5, color: 'var(--text-3)' }}>Список пуст — страницу увидят только администраторы</span>
+                  : value.usernames.map((u) => <Chip key={u} tone="neutral">{u}</Chip>)}
+              </span>
+            </label>
+          )}
+
+          <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>
+            Администраторы видят страницу при любой аудитории. Автообновление уже установленных клиентов эти настройки не трогают, а прямая ссылка на файл установщика остаётся рабочей для того, кто её знает.
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
