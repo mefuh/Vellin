@@ -19,6 +19,27 @@ import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery';
 /** Примерный размер установщика — для ожиданий по трафику, не критично точный. */
 const INSTALLER_SIZE = '≈ 37 МБ';
 
+/**
+ * Ссылка для кнопки на сайте.
+ *
+ * В конфиге адрес установщика абсолютный — таким он нужен нативному клиенту,
+ * который обновляется без всякой страницы. Браузеру же абсолютный адрес вредит:
+ * `https://localhost:5173/...` из dev-конфига (или прод-домен, открытый по
+ * LAN-адресу) с другого компьютера не откроется. Поэтому, если файл лежит на
+ * нашей же раздаче, ведём кнопку на тот же origin, что и сама страница, и
+ * оставляем абсолютный адрес только для внешнего хостинга (CDN, зеркало).
+ */
+function downloadHref(url: string): string {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    const ownOrigin = parsed.origin === window.location.origin;
+    const ownPath = parsed.pathname.startsWith('/downloads/');
+    return ownOrigin || ownPath ? parsed.pathname + parsed.search : parsed.href;
+  } catch {
+    return url;
+  }
+}
+
 interface Feature {
   icon: IconName;
   title: string;
@@ -203,7 +224,7 @@ export function Download() {
 
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
               {release ? (
-                <a href={release.url} download style={{ textDecoration: 'none' }}>
+                <a href={downloadHref(release.url)} download style={{ textDecoration: 'none' }}>
                   <Button variant="primary" size="lg" icon="download">
                     Скачать для Windows
                   </Button>
@@ -528,7 +549,7 @@ export function Download() {
             </p>
           </div>
           {release ? (
-            <a href={release.url} download style={{ textDecoration: 'none' }}>
+            <a href={downloadHref(release.url)} download style={{ textDecoration: 'none' }}>
               <Button variant="primary" size="lg" icon="download">
                 Скачать Vellin {release.latestVersion}
               </Button>

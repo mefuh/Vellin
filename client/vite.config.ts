@@ -1,5 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { defineConfig } from 'vite';
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // Версия для UI берётся из client/package.json — единый источник, чтобы не
@@ -20,8 +22,44 @@ const httpsConfig =
     ? { key: readFileSync(devKey), cert: readFileSync(devCert) }
     : undefined;
 
+/**
+ * Раздача установщиков нативных клиентов на `/downloads/*` в dev — повторяет
+ * то, что в проде делает Caddy (bind-mount ./release/winapp → /srv/downloads).
+ * Без этого кнопка «Скачать» на /download в локальной сборке ведёт в никуда:
+ * dev-сервер отдал бы SPA-fallback или пустой ответ.
+ *
+ * Ищем файл сначала в release/winapp (куда кладут опубликованные сборки),
+ * затем в installer/dist — свежий результат installer/build.ps1, чтобы после
+ * локальной сборки ничего не копировать руками.
+ */
+function installerDownloads(): Plugin {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const dirs = [join(root, 'release', 'winapp'), join(root, 'installer', 'dist')];
+
+  return {
+    name: 'vellin-installer-downloads',
+    configureServer(server) {
+      server.middlewares.use('/downloads', (req, res, next) => {
+        // basename отсекает любые ../ — наружу каталогов не выходим.
+        const name = basename(decodeURIComponent((req.url ?? '').split('?')[0]));
+        if (!name) return next();
+        const file = dirs.map((d) => join(d, name)).find((p) => existsSync(p) && statSync(p).isFile());
+        if (!file) {
+          res.statusCode = 404;
+          res.end(`Установщик ${name} не найден. Положите его в release/winapp/.`);
+          return;
+        }
+        res.setHeader('content-type', 'application/octet-stream');
+        res.setHeader('content-length', statSync(file).size);
+        res.setHeader('content-disposition', `attachment; filename="${name}"`);
+        createReadStream(file).pipe(res);
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), installerDownloads()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
