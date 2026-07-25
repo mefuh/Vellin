@@ -9,7 +9,7 @@ import type {
 } from '@vellin/shared';
 import { adminPlatformApi } from '../../api/adminPlatform';
 import { ApiHttpError } from '../../api/client';
-import { Button, Chip, Icon } from '../../shared';
+import { Button, Chip, Icon, type IconName } from '../../shared';
 import { AdminPage, AdminSurface, AdminEmpty } from './components/AdminPage';
 import { ConfirmShell, DialogActions } from './AdminUsers';
 
@@ -75,10 +75,11 @@ function ToggleRow({ label, hint, checked, onChange, danger }: { label: string; 
  * Сворачиваемая группа настроек («WEB», «Windows»). Раскрытое состояние живёт
  * только в памяти вкладки — в разделе две-три группы, запоминать нечего.
  */
-function PlatformGroup({ title, hint, badge, children }: {
+function PlatformGroup({ title, hint, badge, icon, children }: {
   title: string;
   hint?: string;
   badge?: string;
+  icon: IconName;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -90,11 +91,22 @@ function PlatformGroup({ title, hint, badge, children }: {
         style={{
           width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px',
           background: 'var(--bg-2)', border: 'none', cursor: 'pointer', textAlign: 'left',
-          borderBottom: open ? '1px solid var(--line-1)' : 'none',
+          // Разделитель под шапкой появляется вместе с содержимым, а не рывком
+          // в момент клика — иначе линия «мигает» на пустом месте.
+          borderBottom: '1px solid transparent',
+          borderBottomColor: open ? 'var(--line-1)' : 'transparent',
+          transition: 'border-bottom-color 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
-        <span style={{ display: 'inline-flex', color: 'var(--text-2)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .16s' }}>
+        <span style={{ display: 'inline-flex', color: 'var(--text-3)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .16s' }}>
           <Icon name="chevron" size={16} />
+        </span>
+        <span style={{
+          width: 28, height: 28, borderRadius: 'var(--r-sm)', flexShrink: 0,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          background: 'var(--bg-3)', color: 'var(--text-1)', boxShadow: 'inset 0 0 0 1px var(--line-2)',
+        }}>
+          <Icon name={icon} size={15} />
         </span>
         <span style={{ flex: 1, minWidth: 0 }}>
           <span style={{ display: 'block', fontFamily: 'var(--font-mono)', fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-0)' }}>{title}</span>
@@ -102,7 +114,9 @@ function PlatformGroup({ title, hint, badge, children }: {
         </span>
         {badge && <Chip tone="neutral">{badge}</Chip>}
       </button>
-      {open && children}
+      <div className="platform-group-body" data-open={open} aria-hidden={!open}>
+        <div className="platform-group-inner">{children}</div>
+      </div>
     </AdminSurface>
   );
 }
@@ -150,7 +164,7 @@ function SettingsTab() {
         <p style={{ margin: '-4px 0 10px', fontSize: 12.5, color: 'var(--text-2)' }}>
           Выключенная функция мгновенно перестаёт работать у всех пользователей (без перезапуска). Уже открытые комнаты продолжают синхронизацию видео.
         </p>
-        <PlatformGroup title="WEB" hint="Сайт vellin.ru — доступ, комнаты, общение, контент" badge="13 функций">
+        <PlatformGroup title="WEB" icon="globe" hint="Сайт vellin.ru — доступ, комнаты, общение, контент" badge="13 функций">
           <GroupCaption>Доступ</GroupCaption>
           <ToggleRow label="Регистрация" hint="Новые пользователи могут создавать аккаунты" checked={T.registration} onChange={(v) => setT('registration', v)} />
           <ToggleRow label="Гостевой вход" hint="Вход без регистрации" checked={T.guests} onChange={(v) => setT('guests', v)} />
@@ -177,6 +191,7 @@ function SettingsTab() {
 
         <PlatformGroup
           title="Windows"
+          icon="windows"
           hint="Десктоп-клиент: страница скачивания и кому она видна"
           badge={draft.windows.downloadPage ? AUDIENCE_LABEL[draft.windows.audience] : 'выключено'}
         >
