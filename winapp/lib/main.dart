@@ -17,13 +17,11 @@ import 'state/update_controller.dart';
 import 'storage/session_store.dart';
 import 'theme/vellin_theme.dart';
 import 'runtime/update_checker.dart';
+import 'widgets/window_title_bar.dart';
 
-/// Размер маленького окна апдейтера (безрамочное, скруглённое — как у Discord).
+/// Размер маленького окна апдейтера (без нативного заголовка).
 /// Высота с запасом под двухстрочную подпись во время загрузки.
 const _updaterSize = Size(440, 360);
-
-/// Радиус скругления безрамочного окна апдейтера (крупнее системного ~8px).
-const _updaterRadius = 26.0;
 
 /// Размеры основного окна приложения.
 const _appSize = Size(1180, 760);
@@ -47,13 +45,13 @@ Future<void> main() async {
   update.check();
   auth.restore();
 
-  // Окно стартует маленьким и БЕЗ РАМКИ (заголовок/кнопки скрыты) — фаза
-  // апдейтера. Показываем его только когда готово, чтобы не мелькала рамка.
+  // Окно стартует маленьким и БЕЗ нативного заголовка (titleBarStyle.hidden) —
+  // фаза апдейтера. Непрозрачное: прозрачная подложка в release ненадёжна
+  // (окно рендерилось пустым). Показываем только когда готово, без мелькания.
   await windowManager.waitUntilReadyToShow(
     const WindowOptions(
       size: _updaterSize,
       center: true,
-      backgroundColor: Colors.transparent,
       titleBarStyle: TitleBarStyle.hidden,
       windowButtonVisibility: false,
     ),
@@ -61,10 +59,6 @@ Future<void> main() async {
       await windowManager.setResizable(false);
       await windowManager.setMaximizable(false);
       await windowManager.setMinimizable(false);
-      // Полностью убираем неклиентскую рамку (иначе сверху остаётся 1px кромка)
-      // и системную тень — оба дают артефакты на углах поверх ClipRRect.
-      await windowManager.setAsFrameless();
-      await windowManager.setHasShadow(false);
       await windowManager.show();
       await windowManager.focus();
     },
@@ -103,13 +97,16 @@ class _VellinAppState extends State<VellinApp> {
   /// Переключить окно в обычный режим (рамка + заголовок, ресайз, нормальный
   /// размер) — вызывается один раз при переходе из апдейтера в приложение.
   Future<void> _enterAppWindow() async {
+    // Окно приложения — БЕЗ нативного заголовка (свой титлбар), но ресайзное,
+    // с тенью и системным скруглением. Возвращаем рамку после безрамочного
+    // апдейтера (setAsFrameless) через titleBarStyle.hidden.
+    await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: false);
     await windowManager.setResizable(true);
     await windowManager.setMaximizable(true);
     await windowManager.setMinimizable(true);
-    await windowManager.setHasShadow(true); // обычному окну тень возвращаем
+    await windowManager.setHasShadow(true);
     await windowManager.setMinimumSize(_appMinSize);
     await windowManager.setSize(_appSize);
-    await windowManager.setTitleBarStyle(TitleBarStyle.normal, windowButtonVisibility: true);
     await windowManager.setTitle('Vellin');
     await windowManager.center();
   }
@@ -130,22 +127,23 @@ class _VellinAppState extends State<VellinApp> {
         debugShowCheckedModeBanner: false,
         theme: buildVellinTheme(),
         routerConfig: _router,
+        // Свой заголовок окна поверх всех экранов (нативный скрыт).
+        builder: (context, child) => Column(children: [
+          const WindowTitleBar(),
+          Expanded(child: child ?? const SizedBox.shrink()),
+        ]),
       );
     }
 
-    // Фаза апдейтера в маленьком безрамочном окне. Крупное скругление рисуем
-    // сами (ClipRRect): окно прозрачное, поэтому углы за радиусом — прозрачные
-    // и сглаженные (системный DWM даёт лишь ~8px).
+    // Фаза апдейтера в маленьком окне без нативного заголовка (углы скругляет
+    // система, DWM). Непрозрачное — надёжно в release.
     return MaterialApp(
       title: 'Vellin',
       debugShowCheckedModeBanner: false,
       theme: buildVellinTheme(),
-      home: ClipRRect(
-        borderRadius: BorderRadius.circular(_updaterRadius),
-        child: update.pending != null
-            ? UpdateScreen(info: update.pending!, onSkip: update.skip)
-            : const _CheckingScreen(),
-      ),
+      home: update.pending != null
+          ? UpdateScreen(info: update.pending!, onSkip: update.skip)
+          : const _CheckingScreen(),
     );
   }
 }

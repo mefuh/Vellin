@@ -33,12 +33,9 @@ bool FlutterWindow::OnCreate() {
   // границы, сохраняя тень.
   HWND hwnd = GetHandle();
   if (hwnd) {
+    // Снимаем тонкую системную линию-границу; углы скругляет DWM штатно.
     COLORREF border = DWMWA_COLOR_NONE;
     DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
-    // Квадратные углы окна: крупное скругление рисует Flutter (ClipRRect).
-    // Иначе системная дуга ~8px конфликтует с нашей 26px — артефакты на углах.
-    DWORD corner = DWMWCP_DONOTROUND;
-    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
   }
 
   RECT frame = GetClientArea();
