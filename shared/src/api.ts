@@ -22,6 +22,7 @@ import type {
   DmEligibility,
   PublicUser,
 } from './domain.js';
+import type { PlatformToggles, PlatformMaintenance, PlatformLimits } from './admin.js';
 
 // ── Auth ────────────────────────────────────────────────────────────────
 export interface RegisterRequest {
@@ -446,6 +447,88 @@ export interface AdminCloseRoomResponse {
   roomId: string;
   /** Сколько участников было выкинуто. */
   kicked: number;
+}
+
+// ── App config / discovery ────────────────────────────────────────────────
+
+/** Платформы клиента для версионного гейтинга и дискавери. */
+export type ClientPlatform = 'web' | 'windows' | 'macos' | 'ios' | 'android';
+
+/**
+ * Минимально поддерживаемая версия клиента по каждой платформе. Пустая строка
+ * ('') означает «гейтинг выключен» — любая версия допустима.
+ */
+export type MinClientVersions = Record<ClientPlatform, string>;
+
+/**
+ * Публичный конфиг сервиса (`GET /api/config`) — единая точка дискавери для
+ * нативных клиентов. Не требует авторизации. Отдаёт версию API, минимально
+ * поддерживаемые версии приложений (force-update), абсолютные базовые адреса
+ * (REST/WS/загрузки), актуальные фиче-тумблеры и режим push.
+ */
+export interface AppConfigResponse {
+  /** Версия серверного API (из package.json). */
+  version: string;
+  /** Минимальные версии клиентов для допуска (force-update). */
+  minVersions: MinClientVersions;
+  /** Абсолютные базовые адреса. Пустая строка — использовать origin запроса. */
+  endpoints: {
+    /** База REST API, напр. `https://vellin.ru/api`. */
+    apiBaseUrl: string;
+    /** База отдачи загруженных файлов (обычно совпадает с origin). */
+    uploadsBaseUrl: string;
+    /** WS-адрес комнат, напр. `wss://vellin.ru/ws`. */
+    wsRoomUrl: string;
+    /** WS-адрес пользовательского канала, напр. `wss://vellin.ru/ws/user`. */
+    wsUserUrl: string;
+  };
+  /** Актуальные тумблеры доступности функций (для скрытия недоступного UI). */
+  features: PlatformToggles;
+  /** Режим обслуживания — клиент показывает заглушку. */
+  maintenance: PlatformMaintenance;
+  /** Лимиты загрузок (МБ) — клиент валидирует до отправки. */
+  limits: PlatformLimits;
+  /** Push-слой: сейчас только web-push; vapidPublicKey=null → push выключен. */
+  push: {
+    mode: 'webpush';
+    vapidPublicKey: string | null;
+  };
+  /**
+   * Данные автообновления десктоп-клиентов. Для каждой платформы — последняя
+   * доступная версия и URL установщика; null — обновление не опубликовано.
+   * Клиент сравнивает latestVersion со своей и предлагает обновиться.
+   */
+  update: {
+    windows: DesktopUpdate | null;
+  };
+  /**
+   * Видна ли запросившему страница скачивания Windows-клиента. Сервер уже
+   * применил тумблер и аудиторию из админ-панели (учитывая Bearer-токен, если
+   * он был прислан), поэтому веб-клиенту остаётся только показать или
+   * полностью спрятать страницу и все ссылки на неё.
+   */
+  windowsDownloadVisible: boolean;
+}
+
+/** Публикация обновления десктоп-клиента: версия + URL установщика. */
+export interface DesktopUpdate {
+  latestVersion: string;
+  /** Абсолютный URL установщика (напр. https://vellin.ru/winapp/Vellin-Setup-1.2.0.exe). */
+  url: string;
+  /** Обязательное обновление — клиент не даёт продолжить без установки. */
+  mandatory: boolean;
+}
+
+/**
+ * Ответ при устаревшем клиенте (HTTP 426 Upgrade Required). Приложение по этому
+ * маркеру показывает экран принудительного обновления.
+ */
+export interface UpgradeRequiredResponse extends ApiError {
+  error: 'UpgradeRequired';
+  /** Минимальная требуемая версия для платформы клиента. */
+  minVersion: string;
+  /** Платформа, для которой сработал гейтинг. */
+  platform: ClientPlatform;
 }
 
 // ── Errors ──────────────────────────────────────────────────────────────

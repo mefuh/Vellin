@@ -15,6 +15,44 @@ const schema = z.object({
    * сервером; в Docker монтируется на volume, чтобы пережить рестарт.
    */
   UPLOADS_DIR: z.string().default('./uploads'),
+  /**
+   * Публичный базовый адрес сервиса (без завершающего слэша), напр.
+   * `https://vellin.ru`. Используется, чтобы отдавать АБСОЛЮТНЫЕ URL загруженных
+   * файлов (аватары, вложения ЛС) и адреса в `/api/config`. Нативным клиентам
+   * относительные пути `/api/uploads/...` не с чем резолвить — им нужен полный
+   * URL. Если не задан — сервер отдаёт относительные пути как раньше (браузер
+   * резолвит их по origin), поведение обратно-совместимо.
+   */
+  PUBLIC_BASE_URL: z
+    .string()
+    .url()
+    .optional()
+    .transform((v) => (v ? v.replace(/\/+$/, '') : undefined)),
+  /**
+   * Минимально поддерживаемые версии клиентов (semver, напр. `1.2.0`) по
+   * платформам — для принудительного обновления приложений (force-update).
+   * Клиент шлёт заголовки `X-App-Platform` + `X-App-Version`; если версия ниже
+   * минимальной для своей платформы, сервер отвечает 426 Upgrade Required.
+   * Пустое значение = гейтинг для платформы выключен. Веб по умолчанию не
+   * гейтится (браузер всегда грузит свежий бандл).
+   */
+  MIN_APP_VERSION_WEB: z.string().default(''),
+  MIN_APP_VERSION_WINDOWS: z.string().default(''),
+  MIN_APP_VERSION_MACOS: z.string().default(''),
+  MIN_APP_VERSION_IOS: z.string().default(''),
+  MIN_APP_VERSION_ANDROID: z.string().default(''),
+  /**
+   * Автообновление Windows-клиента: последняя опубликованная версия и URL
+   * установщика. Если обе заданы — `/api/config` отдаёт данные обновления, и
+   * клиент с версией ниже предлагает обновиться. WINAPP_UPDATE_MANDATORY='1'
+   * делает обновление обязательным (блокирующим).
+   */
+  WINAPP_LATEST_VERSION: z.string().default(''),
+  WINAPP_DOWNLOAD_URL: z.string().default(''),
+  WINAPP_UPDATE_MANDATORY: z
+    .string()
+    .default('0')
+    .transform((v) => v === '1' || v.toLowerCase() === 'true'),
   /** Optional JSON-encoded RTCIceServer[] appended to the default STUN. */
   ICE_SERVERS: z.string().optional(),
   /**

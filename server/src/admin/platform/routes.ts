@@ -47,6 +47,15 @@ const settingsSchema = z.object({
     dmVoiceMaxMb: z.number().int().min(1).max(100).optional(),
     dmVideoMaxMb: z.number().int().min(1).max(512).optional(),
   }).optional(),
+  windows: z.object({
+    downloadPage: z.boolean().optional(),
+    audience: z.enum(['everyone', 'admins', 'users']).optional(),
+    // Ники нормализуем здесь: обрезаем, выкидываем пустые и дубликаты — иначе
+    // список копится мусором, а сравнение при проверке доступа усложняется.
+    usernames: z.array(z.string().trim().min(1).max(60)).max(200)
+      .transform((list) => [...new Set(list.map((u) => u.trim()))])
+      .optional(),
+  }).optional(),
 }).refine((p) => Object.keys(p).length > 0, { message: 'Нужна хотя бы одна секция' });
 
 const flagSchema = z.object({

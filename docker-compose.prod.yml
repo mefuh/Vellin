@@ -59,6 +59,13 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@vellin.ru}
+      # Публикация Windows-клиента: из этих значений живут и страница
+      # /download на сайте, и автообновление самого приложения (/api/config →
+      # update.windows). Пусто → страница показывает «скоро», клиент не
+      # предлагает обновление.
+      WINAPP_LATEST_VERSION: ${WINAPP_LATEST_VERSION:-}
+      WINAPP_DOWNLOAD_URL: ${WINAPP_DOWNLOAD_URL:-}
+      WINAPP_UPDATE_MANDATORY: ${WINAPP_UPDATE_MANDATORY:-0}
     volumes:
       - uploads:/data/uploads
 
@@ -78,6 +85,10 @@ services:
     volumes:
       - caddy_data:/data
       - caddy_config:/config
+      # Установщики нативных клиентов — раздаются как /downloads/<файл>.
+      # Bind-mount, а не именованный том: положить новый .exe на сервер должно
+      # быть одной командой scp, без docker cp и пересборки образа.
+      - ./release/winapp:/srv/downloads:ro
 
 volumes:
   pgdata:

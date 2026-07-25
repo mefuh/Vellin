@@ -143,7 +143,31 @@ docker image prune -f
 
 Migrations apply on container start (Prisma `migrate deploy` is idempotent). Database survives because of the `pgdata` named volume.
 
-## 10. Backups
+## 10. Publishing the Windows client
+
+The download page (`https://vellin.ru/download`) and the in-app auto-updater
+both read the same source: `GET /api/config` → `update.windows`. Publishing a
+build is two steps — upload the installer, then point the env at it.
+
+```bash
+# 1. Build locally (see installer/README.md), then upload to the server.
+scp installer/dist/Vellin-Setup-0.1.0.exe vellin@vellin.ru:/opt/vellin/release/winapp/
+
+# 2. In /opt/vellin/.env.production
+WINAPP_LATEST_VERSION=0.1.0
+WINAPP_DOWNLOAD_URL=https://vellin.ru/downloads/Vellin-Setup-0.1.0.exe
+WINAPP_UPDATE_MANDATORY=0     # 1 — old builds refuse to run until updated
+
+# 3. Restart the server container (Caddy needs no rebuild — the directory is
+#    bind-mounted read-only at /srv/downloads).
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d server
+curl -sI https://vellin.ru/downloads/Vellin-Setup-0.1.0.exe   # 200, not text/html
+```
+
+Until both env vars are set the page stays in its honest "скоро" state and the
+app never offers an update.
+
+## 11. Backups
 
 Postgres lives in the `pgdata` volume. Daily dump:
 

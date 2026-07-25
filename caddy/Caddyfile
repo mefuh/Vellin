@@ -28,6 +28,17 @@
 		reverse_proxy server:3001
 	}
 
+	# Установщики нативных клиентов (Windows). Файлы лежат на хосте в
+	# ./release/winapp и монтируются в /srv/downloads (см. docker-compose.prod).
+	# Свой handle обязателен: иначе .exe провалился бы в SPA-fallback ниже и
+	# пользователь скачал бы index.html. Имя файла версионное — кэшируем навсегда.
+	handle /downloads/* {
+		root * /srv
+		header Cache-Control "public, max-age=31536000, immutable"
+		header Content-Disposition "attachment"
+		file_server
+	}
+
 	# Single-page app fallback. Anything that isn't /api or /ws falls through
 	# to the prebuilt client assets baked into the Caddy image.
 	handle {

@@ -876,3 +876,37 @@ input[type='date']::-webkit-datetime-edit {
   .admin-nav-item, .admin-nav-icon { transition: none; }
   .admin-nav-scroller { scroll-behavior: auto; }
 }
+
+/* ── Сворачиваемые группы настроек (Платформа → «Доступность функций») ──────
+   Раскрытие через grid-template-rows 0fr→1fr: высота едет сама, без замеров в
+   JS, поэтому анимация не ломается на любом содержимом группы. Контент всегда
+   в DOM (иначе нечего анимировать), но в свёрнутом виде получает
+   visibility: hidden с нулевой задержкой на закрытие — чтобы поля внутри не
+   ловили фокус табом. Кривая — та же ease-out, что у остальных появлений. */
+.platform-group-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease,
+    visibility 0s linear 0.28s;
+}
+.platform-group-body[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    grid-template-rows 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.22s ease 0.06s,
+    visibility 0s;
+}
+.platform-group-body > .platform-group-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .platform-group-body { transition: none; }
+}

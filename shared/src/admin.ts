@@ -524,10 +524,33 @@ export interface PlatformLimits {
   dmVideoMaxMb: number;
 }
 
+/**
+ * Кому доступна страница скачивания Windows-клиента:
+ * - `everyone` — всем посетителям;
+ * - `admins` — только администраторам;
+ * - `users` — перечисленным никам (плюс администраторам, чтобы не потерять
+ *   доступ к собственной странице).
+ */
+export type WindowsAudienceKind = 'everyone' | 'admins' | 'users';
+
+/** Настройки, относящиеся к Windows-клиенту (страница скачивания). */
+export interface PlatformWindows {
+  /**
+   * Страница /download существует. Выключено — маршрут отдаёт 404, а все
+   * ссылки на неё исчезают из интерфейса.
+   */
+  downloadPage: boolean;
+  /** Аудитория страницы, когда она включена. */
+  audience: WindowsAudienceKind;
+  /** Ники для `audience='users'` (сравнение без учёта регистра). */
+  usernames: string[];
+}
+
 export interface PlatformSettingsDTO {
   toggles: PlatformToggles;
   maintenance: PlatformMaintenance;
   limits: PlatformLimits;
+  windows: PlatformWindows;
 }
 
 export interface PlatformSettingsResponse {
@@ -538,6 +561,7 @@ export interface UpdatePlatformSettingsRequest {
   toggles?: Partial<PlatformToggles>;
   maintenance?: Partial<PlatformMaintenance>;
   limits?: Partial<PlatformLimits>;
+  windows?: Partial<PlatformWindows>;
 }
 
 // ── Feature flags ────────────────────────────────────────────────────────────

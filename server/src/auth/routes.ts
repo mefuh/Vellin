@@ -29,6 +29,7 @@ import { signSession, signUserTicket, type Principal } from './jwt.js';
 import { generateAvatarSeed, generateGuestId, generatePublicId } from '../utils/ids.js';
 import { requireAuth } from './middleware.js';
 import { isAdminEmail } from '../env.js';
+import { absoluteUrl } from '../utils/urls.js';
 import {
   assertGuestsEnabled,
   assertNotMaintenance,
@@ -145,7 +146,7 @@ function toAuthUser(u: DbUserCore): AuthUser {
     email: u.email,
     username: u.username,
     avatarSeed: u.avatarSeed,
-    avatarUrl: u.avatarUrl,
+    avatarUrl: absoluteUrl(u.avatarUrl),
     bio: u.bio,
     gender: (u.gender as Gender | null) ?? null,
     birthDate: u.birthDate ? u.birthDate.toISOString().slice(0, 10) : null,

@@ -4,6 +4,7 @@ import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Guest } from './pages/Guest';
+import { Download } from './pages/Download';
 import { Library } from './pages/Library';
 import { Profile } from './pages/Profile';
 import { Friends } from './pages/Friends';
@@ -81,6 +82,10 @@ export function App() {
             </PublicOnlyRoute>
           }
         />
+        {/* Страница десктоп-клиента — публичная и для вошедших тоже (кнопка
+            «Скачать» нужна и из библиотеки). /windows — короткий алиас. */}
+        <Route path="/download" element={<Download />} />
+        <Route path="/windows" element={<Navigate to="/download" replace />} />
         <Route
           path="/library"
           element={
