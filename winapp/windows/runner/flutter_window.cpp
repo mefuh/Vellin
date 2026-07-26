@@ -1,8 +1,22 @@
 #include "flutter_window.h"
 
+#include <dwmapi.h>
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
+#ifndef DWMWA_COLOR_NONE
+#define DWMWA_COLOR_NONE 0xFFFFFFFE
+#endif
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+#ifndef DWMWCP_DONOTROUND
+#define DWMWCP_DONOTROUND 1
+#endif
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -12,6 +26,16 @@ FlutterWindow::~FlutterWindow() {}
 bool FlutterWindow::OnCreate() {
   if (!Win32Window::OnCreate()) {
     return false;
+  }
+
+  // Убираем тонкую системную границу окна (Windows 11): у безрамочного окна
+  // апдейтера белая рамка выглядит инородно. DWMWA_COLOR_NONE убирает линию
+  // границы, сохраняя тень.
+  HWND hwnd = GetHandle();
+  if (hwnd) {
+    // Снимаем тонкую системную линию-границу; углы скругляет DWM штатно.
+    COLORREF border = DWMWA_COLOR_NONE;
+    DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
   }
 
   RECT frame = GetClientArea();
@@ -27,9 +51,12 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
-  flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
-  });
+  // Окно показывает window_manager (waitUntilReadyToShow) уже настроенным —
+  // маленьким и безрамочным. Авто-показ здесь убран, иначе на старте мелькнула
+  // бы стандартная рамка окна.
+  // flutter_controller_->engine()->SetNextFrameCallback([&]() {
+  //   this->Show();
+  // });
 
   // Flutter can complete the first frame before the "show window" callback is
   // registered. The following call ensures a frame is pending to ensure the
