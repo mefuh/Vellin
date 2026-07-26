@@ -1,29 +1,48 @@
 import 'dart:io';
-import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 import 'installer_engine.dart';
 import 'vellin_theme.dart';
+
+/// Размер безрамочного окна установщика (без заголовка/кнопок, скруглённое).
+const _installerSize = Size(520, 560);
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Тихая установка (для автообновления): без окна, только распаковка.
+  // Тихая установка (для автообновления): без окна — распаковать и запустить
+  // приложение (после автообновления оно перезапускается само).
   if (args.contains('--silent')) {
     final engine = InstallerEngine();
     await for (final _ in engine.install()) {}
+    await engine.launchApp();
     exit(0);
   }
 
+  await windowManager.ensureInitialized();
+  // Безрамочное окно (заголовок/кнопки скрыты), показываем настроенным —
+  // чтобы не мелькала стандартная рамка. Тот же подход, что у апдейтера.
+  await windowManager.waitUntilReadyToShow(
+    const WindowOptions(
+      size: _installerSize,
+      center: true,
+      backgroundColor: Colors.transparent,
+      titleBarStyle: TitleBarStyle.hidden,
+      windowButtonVisibility: false,
+    ),
+    () async {
+      await windowManager.setResizable(false);
+      await windowManager.setMaximizable(false);
+      await windowManager.setMinimizable(false);
+      // Полностью убираем неклиентскую рамку (иначе сверху остаётся 1px кромка).
+      await windowManager.setAsFrameless();
+      await windowManager.setHasShadow(false);
+      await windowManager.show();
+      await windowManager.focus();
+    },
+  );
+
   runApp(const InstallerApp());
-  doWhenWindowReady(() {
-    const win = Size(560, 460);
-    appWindow.minSize = win;
-    appWindow.maxSize = win;
-    appWindow.size = win;
-    appWindow.alignment = Alignment.center;
-    appWindow.title = 'Установка Vellin';
-    appWindow.show();
-  });
 }
 
 class InstallerApp extends StatelessWidget {
@@ -33,7 +52,12 @@ class InstallerApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: buildVellinTheme(),
-      home: const _InstallerScreen(),
+      // Крупное скругление рисуем сами: окно прозрачное, углы за радиусом —
+      // прозрачные и сглаженные (системный DWM даёт лишь ~8px).
+      home: ClipRRect(
+        borderRadius: BorderRadius.circular(26),
+        child: const _InstallerScreen(),
+      ),
     );
   }
 }
@@ -116,11 +140,13 @@ class _InstallerScreenState extends State<_InstallerScreen> {
   }
 
   Widget _titleBar() {
+    // Без заголовка и системных кнопок — только ненавязчивый крестик, чтобы
+    // установку можно было закрыть. Окно не перетаскивается (как у апдейтера).
     return SizedBox(
       height: 40,
       child: Row(children: [
-        Expanded(child: MoveWindow()),
-        _WinButton(icon: Icons.close, onTap: () => appWindow.close()),
+        const Spacer(),
+        _WinButton(icon: Icons.close, onTap: () => windowManager.close()),
       ]),
     );
   }
@@ -155,11 +181,11 @@ class _InstallerScreenState extends State<_InstallerScreen> {
           const Text('Установка завершена', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: VellinColors.text0)),
           const SizedBox(height: 18),
           Row(children: [
-            Expanded(child: _secondaryButton('Закрыть', () => appWindow.close())),
+            Expanded(child: _secondaryButton('Закрыть', () => windowManager.close())),
             const SizedBox(width: 10),
             Expanded(child: _primaryButton('Запустить', () async {
               await _engine.launchApp();
-              appWindow.close();
+              await windowManager.close();
             })),
           ]),
         ]);
