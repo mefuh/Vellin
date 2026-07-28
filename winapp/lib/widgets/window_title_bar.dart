@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import '../theme/vellin_theme.dart';
+import 'notifications_bell.dart';
 
 /// Собственный заголовок окна (нативный скрыт): бренд слева, перетаскивание за
 /// пустую область, свои кнопки свернуть/развернуть/закрыть — как в Discord/VS
@@ -64,6 +65,7 @@ class _WindowTitleBarState extends State<WindowTitleBar> with WindowListener {
               ),
             ),
           ),
+          const NotificationsBellButton(),
           _WinBtn(icon: Icons.remove, onTap: windowManager.minimize),
           _WinBtn(icon: _maximized ? Icons.filter_none : Icons.crop_square, onTap: _toggleMaximize, iconSize: _maximized ? 13 : 15),
           _WinBtn(icon: Icons.close, onTap: windowManager.close, danger: true),

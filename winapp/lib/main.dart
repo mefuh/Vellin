@@ -7,18 +7,22 @@ import 'api/auth_api.dart';
 import 'api/friends_api.dart';
 import 'api/catalog_api.dart';
 import 'api/dm_api.dart';
+import 'api/notifications_api.dart';
 import 'app_config.dart';
 import 'realtime/user_socket.dart';
 import 'router.dart';
 import 'state/auth_controller.dart';
 import 'state/friends_controller.dart';
 import 'state/dm_controller.dart';
+import 'state/notifications_controller.dart';
 import 'state/presence_controller.dart';
 import 'state/update_controller.dart';
 import 'storage/session_store.dart';
 import 'theme/vellin_theme.dart';
 import 'runtime/auth_window.dart';
+import 'runtime/desktop_notifier.dart';
 import 'runtime/updater_splash.dart';
+import 'widgets/notifications_bell.dart';
 import 'widgets/window_title_bar.dart';
 
 /// Размеры основного окна приложения.
@@ -35,9 +39,16 @@ Future<void> main() async {
   final friendsApi = FriendsApi(client);
   final catalogApi = CatalogApi(client);
   final dmApi = DmApi(client);
+  final notificationsApi = NotificationsApi(client);
   final socket = UserSocket(dmApi.realtimeTicket);
   final auth = AuthController(client, authApi, SessionStore());
   final update = UpdateController(client);
+
+  // Системные тосты Windows: инициализация не блокирует старт (при отказе
+  // остаётся колокольчик внутри приложения).
+  final notifier = DesktopNotifier();
+  final notifications = NotificationsController(notificationsApi, friendsApi, socket);
+  notifier.init().then((_) => notifications.onIncoming = notifier.show);
 
   // Старт: сценарий обновления и восстановление сессии идут параллельно.
   update.run();
@@ -76,6 +87,7 @@ Future<void> main() async {
         ChangeNotifierProvider<FriendsController>(create: (_) => FriendsController(friendsApi)),
         ChangeNotifierProvider<DmController>(create: (_) => DmController(dmApi, socket)),
         ChangeNotifierProvider<PresenceController>(create: (_) => PresenceController(socket)),
+        ChangeNotifierProvider<NotificationsController>.value(value: notifications),
         ChangeNotifierProvider<UpdateController>.value(value: update),
       ],
       child: const VellinApp(),
@@ -151,6 +163,12 @@ class _VellinAppState extends State<VellinApp> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (target == _Phase.auth) _enterAuthWindow();
         if (target == _Phase.app) _enterAppWindow();
+        // Уведомления живут всю сессию, а не пока открыт HomeShell: заход в
+        // профиль или настройки выходит за пределы оболочки, и привязка к её
+        // жизненному циклу рвала бы подписку и обнуляла список.
+        final notifications = context.read<NotificationsController>();
+        if (target == _Phase.app) notifications.start();
+        if (target == _Phase.auth) notifications.stop();
       });
     }
 
@@ -169,10 +187,15 @@ class _VellinAppState extends State<VellinApp> {
         debugShowCheckedModeBanner: false,
         theme: buildVellinTheme(),
         routerConfig: _router,
-        // Свой заголовок окна поверх всех экранов (нативный скрыт).
-        builder: (context, child) => Column(children: [
-          const WindowTitleBar(),
-          Expanded(child: child ?? const SizedBox.shrink()),
+        // Свой заголовок окна поверх всех экранов (нативный скрыт), а над ним —
+        // слой панели уведомлений: она выпадает из колокольчика в заголовке и
+        // должна перекрывать содержимое любого экрана.
+        builder: (context, child) => Stack(children: [
+          Column(children: [
+            const WindowTitleBar(),
+            Expanded(child: child ?? const SizedBox.shrink()),
+          ]),
+          const NotificationsPanelOverlay(),
         ]),
       );
     }
