@@ -45,17 +45,17 @@ class InstallerEngine {
     final exe = '$target\\vellin_winapp.exe';
 
     yield const InstallProgress(0.05, 'Подготовка…', 'Проверка окружения');
-    // Закрываем запущенное приложение (установка поверх / обновление).
-    try {
-      await Process.run('taskkill', ['/IM', 'vellin_winapp.exe', '/F']);
-    } catch (_) {}
+    // Закрываем запущенное приложение и ДОЖИДАЕМСЯ его смерти: taskkill
+    // возвращает управление раньше, чем процесс отпускает свои файлы, и
+    // следующее за этим удаление папки может надолго застрять на занятом exe.
+    await _stopRunningApp();
 
     final data = await rootBundle.load('assets/payload.zip');
     yield const InstallProgress(0.15, 'Распаковка…', 'Чтение пакета');
     final archive = ZipDecoder().decodeBytes(data.buffer.asUint8List());
 
     final directory = Directory(target);
-    if (await directory.exists()) await directory.delete(recursive: true);
+    await _clearDir(directory);
     await directory.create(recursive: true);
 
     final total = archive.isEmpty ? 1 : archive.length;
@@ -85,6 +85,41 @@ class InstallerEngine {
     await _registerUninstall(target, exe);
     await _writeUninstallScript(target);
     yield const InstallProgress(1.0, 'Готово', '');
+  }
+
+  /// Завершает приложение и ждёт, пока оно действительно исчезнет из списка
+  /// процессов, — иначе его файлы остаются занятыми.
+  Future<void> _stopRunningApp() async {
+    try {
+      await Process.run('taskkill', ['/IM', 'vellin_winapp.exe', '/F']);
+    } catch (_) {}
+    for (var i = 0; i < 40; i++) {
+      try {
+        final r = await Process.run('tasklist', ['/FI', 'IMAGENAME eq vellin_winapp.exe', '/NH']);
+        if (!'${r.stdout}'.contains('vellin_winapp')) return;
+      } catch (_) {
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+  }
+
+  /// Очищает папку установки с повторами: сразу после завершения приложения
+  /// Windows какое-то время держит его файлы, и удаление падает или зависает.
+  /// Лучше несколько раз попробовать и внятно сдаться, чем висеть без окна.
+  Future<void> _clearDir(Directory dir) async {
+    if (!await dir.exists()) return;
+    Object? last;
+    for (var i = 0; i < 20; i++) {
+      try {
+        await dir.delete(recursive: true);
+        return;
+      } catch (e) {
+        last = e;
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
+    }
+    throw Exception('Не удалось очистить папку установки: $last');
   }
 
   Future<void> _createShortcuts(String target, String exe, {required bool desktop}) async {
