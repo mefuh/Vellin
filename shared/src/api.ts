@@ -112,6 +112,53 @@ export interface RevokeOtherSessionsResponse {
   revoked: number;
 }
 
+// ── Вход по QR-коду (десктоп-клиент) ─────────────────────────────────────
+//
+// Десктоп-клиент просит заявку и показывает QR со ссылкой на сайт. Владелец
+// аккаунта открывает ссылку телефоном (камерой или сканером в «Устройствах»)
+// и подтверждает вход — клиент получает токен опросом.
+//
+// Секретов два намеренно: `requestId` попадает в QR и виден всем, кто увидел
+// экран, а забрать выданный токен можно только по `pollToken`, который знает
+// исключительно запросивший клиент.
+
+/** Ответ на запрос заявки: что показать в QR и чем опрашивать статус. */
+export interface QrLoginStartResponse {
+  /** Идентификатор заявки — он же зашит в ссылку QR. */
+  requestId: string;
+  /** Секрет для опроса статуса. Не показывать в QR. */
+  pollToken: string;
+  /** Адрес для QR: https://<сайт>/link/<requestId>. */
+  url: string;
+  /** Когда заявка сгорит (ISO). */
+  expiresAt: string;
+}
+
+export type QrLoginStatus = 'pending' | 'approved' | 'expired';
+
+/** Опрос статуса заявки клиентом. Токен отдаётся один раз, после — expired. */
+export interface QrLoginPollResponse {
+  status: QrLoginStatus;
+  /** Заполняются только при status === 'approved'. */
+  token?: string;
+  user?: AuthUser;
+}
+
+/** Данные заявки для страницы подтверждения на сайте. */
+export interface QrLoginRequestInfo {
+  requestId: string;
+  status: QrLoginStatus;
+  createdAt: string;
+  expiresAt: string;
+  /** Откуда пришла заявка — показываем владельцу перед подтверждением. */
+  ip: string | null;
+  userAgent: string | null;
+}
+
+export interface ApproveQrLoginResponse {
+  status: QrLoginStatus;
+}
+
 // ── Rooms ───────────────────────────────────────────────────────────────
 export interface CreateRoomRequest {
   name: string;
@@ -501,6 +548,13 @@ export interface AppConfigResponse {
   update: {
     windows: DesktopUpdate | null;
   };
+  /**
+   * Видна ли запросившему страница скачивания Windows-клиента. Сервер уже
+   * применил тумблер и аудиторию из админ-панели (учитывая Bearer-токен, если
+   * он был прислан), поэтому веб-клиенту остаётся только показать или
+   * полностью спрятать страницу и все ссылки на неё.
+   */
+  windowsDownloadVisible: boolean;
 }
 
 /** Публикация обновления десктоп-клиента: версия + URL установщика. */

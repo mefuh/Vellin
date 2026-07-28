@@ -43,3 +43,5 @@ __pycache__/
 
 # Кэш скилла impeccable
 **/.impeccable/
+release/winapp/*
+!release/winapp/README.md

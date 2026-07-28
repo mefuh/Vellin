@@ -3,9 +3,11 @@ import { Button, Chip, MountainPoster, VellinLogo } from '../shared';
 import { Icon } from '../shared/Icon';
 import { useAuthStore } from '../stores/authStore';
 import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery';
+import { useAppConfig } from '../hooks/useAppConfig';
 
 export function Landing() {
   const user = useAuthStore((s) => s.user);
+  const { config } = useAppConfig();
   const isMobile = useIsMobile();
   // On phones — collapse the demo-poster chips so they never wrap: the LIVE
   // chip drops to a bare count and the title chip is hidden.
@@ -35,6 +37,15 @@ export function Landing() {
       >
         <VellinLogo />
         <nav style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {/* Страницу скачивания можно выключить в админ-панели — тогда ссылки
+              на неё не должно быть нигде, включая шапку лендинга. */}
+          {config?.windowsDownloadVisible && (
+            <Link to="/download">
+              <Button variant="ghost" size="md" icon="download">
+                {isMobile ? 'Windows' : 'Для Windows'}
+              </Button>
+            </Link>
+          )}
           {user ? (
             <Link to="/library">
               <Button variant="primary" size="md" iconRight="arrow">

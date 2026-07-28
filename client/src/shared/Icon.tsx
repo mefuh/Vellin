@@ -13,7 +13,7 @@ export type IconName =
   | 'arrowDown' | 'flame' | 'waveform' | 'refresh' | 'hash'
   | 'userMinus' | 'userPlus' | 'gripVertical'
   | 'video' | 'videoOff' | 'phone' | 'phoneOff' | 'logout'
-  | 'cake' | 'mapPin' | 'cameraReverse';
+  | 'cake' | 'mapPin' | 'cameraReverse' | 'windows';
 
 interface IconProps {
   name: IconName;
@@ -319,6 +319,16 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M14.8 13.2a2.8 2.8 0 01-5.2 1.3" />
       <path d="M14.5 9.1l-.1 2.1 2.1.1" />
       <path d="M9.5 16.9l.1-2.1-2.1-.1" />
+    </>
+  ),
+  // Логотип Windows — четыре «стекла» с фирменным наклоном. Заливкой, а не
+  // обводкой: контурная версия в мелком размере читается как решётка.
+  windows: (
+    <>
+      <path d="M3 5.9l7.4-1.03v7.06H3V5.9z" fill="currentColor" stroke="none" />
+      <path d="M11.4 4.72L21 3.4v8.53h-9.6V4.72z" fill="currentColor" stroke="none" />
+      <path d="M3 12.93h7.4v7.06L3 18.96v-6.03z" fill="currentColor" stroke="none" />
+      <path d="M11.4 12.93H21v8.53l-9.6-1.32v-7.21z" fill="currentColor" stroke="none" />
     </>
   ),
 };

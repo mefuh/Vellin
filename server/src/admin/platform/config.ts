@@ -3,6 +3,7 @@ import type {
   PlatformMaintenance,
   PlatformSettingsDTO,
   PlatformToggles,
+  PlatformWindows,
   UpdatePlatformSettingsRequest,
 } from '@vellin/shared';
 import { prisma } from '../../db/prisma.js';
@@ -31,6 +32,7 @@ const DEFAULT_LIMITS: PlatformLimits = {
   dmVoiceMaxMb: 25,
   dmVideoMaxMb: 128,
 };
+const DEFAULT_WINDOWS: PlatformWindows = { downloadPage: true, audience: 'everyone', usernames: [] };
 
 // Настройки хранятся тремя JSON-строками (ключи-секции) и кэшируются в памяти.
 let cache: PlatformSettingsDTO | null = null;
@@ -47,12 +49,13 @@ function parse<T>(json: string | undefined, fallback: T): T {
 /** Полные настройки платформы (с дефолтами). Кэшируется до инвалидации. */
 export async function getSettings(): Promise<PlatformSettingsDTO> {
   if (cache) return cache;
-  const rows = await prisma.platformSetting.findMany({ where: { key: { in: ['toggles', 'maintenance', 'limits'] } } });
+  const rows = await prisma.platformSetting.findMany({ where: { key: { in: ['toggles', 'maintenance', 'limits', 'windows'] } } });
   const byKey = new Map(rows.map((r) => [r.key, r.valueJson]));
   cache = {
     toggles: parse(byKey.get('toggles'), DEFAULT_TOGGLES),
     maintenance: parse(byKey.get('maintenance'), DEFAULT_MAINTENANCE),
     limits: parse(byKey.get('limits'), DEFAULT_LIMITS),
+    windows: parse(byKey.get('windows'), DEFAULT_WINDOWS),
   };
   return cache;
 }
@@ -72,6 +75,7 @@ export async function updateSettings(
     toggles: { ...current.toggles, ...(patch.toggles ?? {}) },
     maintenance: { ...current.maintenance, ...(patch.maintenance ?? {}) },
     limits: { ...current.limits, ...(patch.limits ?? {}) },
+    windows: { ...current.windows, ...(patch.windows ?? {}) },
   };
   const write = async (key: string, value: unknown): Promise<void> => {
     const valueJson = JSON.stringify(value);
@@ -85,6 +89,7 @@ export async function updateSettings(
     patch.toggles ? write('toggles', next.toggles) : Promise.resolve(),
     patch.maintenance ? write('maintenance', next.maintenance) : Promise.resolve(),
     patch.limits ? write('limits', next.limits) : Promise.resolve(),
+    patch.windows ? write('windows', next.windows) : Promise.resolve(),
   ]);
   invalidateSettings();
   return next;

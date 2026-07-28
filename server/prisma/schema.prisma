@@ -47,6 +47,8 @@ model User {
   messages     Message[]
   memberships  Membership[]
   sessions     Session[]
+  /// Заявки на вход по QR, подтверждённые этим пользователем.
+  deviceLogins DeviceLoginRequest[]
 
   friendRequestsSent     Friendship[]   @relation("FriendRequester")
   friendRequestsReceived Friendship[]   @relation("FriendAddressee")
@@ -498,6 +500,31 @@ model Session {
   lastSeenAt DateTime @default(now())
 
   @@index([userId])
+}
+
+/// Заявка на вход по QR-коду с десктоп-клиента.
+///
+/// `id` попадает в QR и виден любому, кто увидел экран, поэтому забрать
+/// выданный токен можно только зная `pollTokenHash` — секрет, который есть
+/// лишь у запросившего клиента. Заявка живёт минуты и удаляется после выдачи.
+model DeviceLoginRequest {
+  id            String    @id @default(cuid())
+  /// SHA-256 от секрета опроса (сам секрет в БД не храним).
+  pollTokenHash String    @unique
+  /// pending | approved | expired
+  status        String    @default("pending")
+  userId        String?
+  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Выданный JWT — отдаётся клиенту один раз, после чего заявка удаляется.
+  token         String?
+  ip            String?
+  userAgent     String?
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  approvedAt    DateTime?
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Room {

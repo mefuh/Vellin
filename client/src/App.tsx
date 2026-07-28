@@ -4,6 +4,8 @@ import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Guest } from './pages/Guest';
+import { Download } from './pages/Download';
+import { LinkDevice } from './pages/LinkDevice';
 import { Library } from './pages/Library';
 import { Profile } from './pages/Profile';
 import { Friends } from './pages/Friends';
@@ -81,6 +83,16 @@ export function App() {
             </PublicOnlyRoute>
           }
         />
+        {/* Страница десктоп-клиента — публичная и для вошедших тоже (кнопка
+            «Скачать» нужна и из библиотеки). /windows — короткий алиас. */}
+        <Route path="/download" element={<Download />} />
+        <Route path="/windows" element={<Navigate to="/download" replace />} />
+
+        {/* Подтверждение входа десктоп-клиента по QR. Публичный маршрут: страница
+
+            сама просит войти, если аккаунт на телефоне ещё не авторизован. */}
+
+        <Route path="/link/:requestId" element={<LinkDevice />} />
         <Route
           path="/library"
           element={
