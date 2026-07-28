@@ -97,7 +97,9 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
     window_class.hInstance = GetModuleHandle(nullptr);
     window_class.hIcon =
         LoadIcon(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
-    window_class.hbrBackground = 0;
+    // Фон окна — цвет сплэша (#0B0908), а не системный белый: при любой
+    // перерисовке до/между кадрами Flutter окно остаётся тёмным и не мигает.
+    window_class.hbrBackground = CreateSolidBrush(RGB(0x0B, 0x09, 0x08));
     window_class.lpszMenuName = nullptr;
     window_class.lpfnWndProc = Win32Window::WndProc;
     RegisterClass(&window_class);
