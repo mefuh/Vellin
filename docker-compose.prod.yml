@@ -63,6 +63,9 @@ services:
       # /download на сайте, и автообновление самого приложения (/api/config →
       # update.windows). Пусто → страница показывает «скоро», клиент не
       # предлагает обновление.
+      # Абсолютная база для ссылок наружу: адрес в QR-коде входа и URL
+      # загруженных файлов для нативных клиентов, у которых нет origin.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://${DOMAIN}}
       WINAPP_LATEST_VERSION: ${WINAPP_LATEST_VERSION:-}
       WINAPP_DOWNLOAD_URL: ${WINAPP_DOWNLOAD_URL:-}
       WINAPP_UPDATE_MANDATORY: ${WINAPP_UPDATE_MANDATORY:-0}
