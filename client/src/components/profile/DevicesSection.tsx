@@ -6,6 +6,8 @@ import { profileApi } from '../../api/profile';
 import { ApiHttpError } from '../../api/client';
 import { useAuthStore } from '../../stores/authStore';
 import { Card, StatusLine } from './ProfilePrimitives';
+import { QrScannerModal } from './QrScannerModal';
+import { useAppConfig } from '../../hooks/useAppConfig';
 
 function formatDate(iso: string): string {
   try {
@@ -82,6 +84,10 @@ export function DevicesSection() {
   };
 
   const hasOthers = (sessions ?? []).some((s) => !s.current);
+  const [scanning, setScanning] = useState(false);
+  // Тумблер WINDOWS в админ-панели: выключен — кнопки и упоминаний о ней нет.
+  const { config } = useAppConfig();
+  const qrLoginEnabled = config?.windowsQrLoginEnabled ?? false;
 
   return (
     <Card title="Активные входы" desc="Где открыт ваш аккаунт прямо сейчас. Не узнаёте вход — завершите сессию." contained={false}>
@@ -93,7 +99,60 @@ export function DevicesSection() {
       )}
       <StatusLine error={error} />
 
+      {scanning && qrLoginEnabled && (
+        <QrScannerModal
+          onClose={() => setScanning(false)}
+          onApproved={() => {
+            void load();
+          }}
+        />
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Вход в десктоп-клиент по QR. Геометрия — как у карточек устройств
+            ниже, чтобы кнопка читалась частью того же списка. */}
+        {qrLoginEnabled && (
+        <button
+          type="button"
+          onClick={() => setScanning(true)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 16,
+            width: '100%',
+            padding: '18px 22px',
+            borderRadius: 18,
+            background: 'var(--bg-1)',
+            border: '1px dashed var(--line-2)',
+            color: 'var(--text-0)',
+            cursor: 'pointer',
+            textAlign: 'left',
+            font: 'inherit',
+          }}
+        >
+          <span
+            style={{
+              flex: 'none',
+              width: 44,
+              height: 44,
+              borderRadius: 13,
+              display: 'grid',
+              placeItems: 'center',
+              background: 'var(--bg-2)',
+              color: 'var(--text-2)',
+            }}
+          >
+            <Icon name="plus" size={18} />
+          </span>
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+            <span style={{ fontWeight: 600, fontSize: 15 }}>Добавить устройство по QR</span>
+            <span style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.5 }}>
+              Отсканируйте код из окна входа приложения на компьютере
+            </span>
+          </span>
+        </button>
+        )}
+
         {sessions?.map((s) => (
           <div
             key={s.id}

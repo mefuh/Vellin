@@ -55,14 +55,8 @@ class _WindowTitleBarState extends State<WindowTitleBar> with WindowListener {
               child: Padding(
                 padding: const EdgeInsets.only(left: 12),
                 child: Row(children: [
-                  Container(
-                    width: 18,
-                    height: 18,
-                    decoration: BoxDecoration(color: VellinColors.accent, borderRadius: BorderRadius.circular(5)),
-                    alignment: Alignment.center,
-                    child: const Text('V',
-                        style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800, height: 1)),
-                  ),
+                  Image.asset('assets/vellin_icon.png',
+                      width: 18, height: 18, filterQuality: FilterQuality.high),
                   const SizedBox(width: 8),
                   const Text('Vellin',
                       style: TextStyle(color: VellinColors.text2, fontSize: 12.5, fontWeight: FontWeight.w600)),

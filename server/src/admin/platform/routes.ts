@@ -49,6 +49,7 @@ const settingsSchema = z.object({
   }).optional(),
   windows: z.object({
     downloadPage: z.boolean().optional(),
+    qrLogin: z.boolean().optional(),
     audience: z.enum(['everyone', 'admins', 'users']).optional(),
     // Ники нормализуем здесь: обрезаем, выкидываем пустые и дубликаты — иначе
     // список копится мусором, а сравнение при проверке доступа усложняется.

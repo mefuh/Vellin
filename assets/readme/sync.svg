@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="512" viewBox="0 0 1200 512"
+     role="img" aria-labelledby="sync-title sync-desc">
+  <title id="sync-title">Как Vellin держит участников в одной позиции видео</title>
+  <desc id="sync-desc">Три шага: клиент шлёт намерение play, pause, seek или смену URL; сервер — источник истины, хранит positionSec, anchorServerTs, status и lastEventSeq под мьютексом комнаты; клиенты применяют video_apply с номером seq и video_sync каждые пять секунд. Позиция считается как positionSec плюс разница текущего времени и якоря. Дрейф меньше 0,4 секунды игнорируется, от 0,4 до 2 секунд правится скоростью воспроизведения 0,94 или 1,06, от 2 секунд делается жёсткий seek.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5a504a"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="512" rx="26" fill="#0a0807"/>
+  <rect x="0.5" y="0.5" width="1199" height="511" rx="25.5" fill="none" stroke="#221c19"/>
+
+  <g font-family="'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif">
+    <text x="64" y="60" font-family="ui-monospace, SFMono-Regular, 'Cascadia Mono', Menlo, Consolas, monospace"
+          font-size="19" letter-spacing="2.5" fill="#8a7f78">ПРОТОКОЛ СИНХРОНИЗАЦИИ</text>
+
+    <g transform="translate(64 90)">
+      <rect width="296" height="196" rx="16" fill="#14100e" stroke="#2b2421"/>
+      <text x="24" y="42" font-size="19" fill="#8a7f78">01</text>
+      <text x="24" y="74" font-size="23" font-weight="600" fill="#f6f1ed">Клиент шлёт намерение</text>
+      <g font-family="ui-monospace, SFMono-Regular, 'Cascadia Mono', Menlo, Consolas, monospace"
+         font-size="19" fill="#c8bdb5">
+        <text x="24" y="112">video_play</text>
+        <text x="24" y="140">video_pause</text>
+        <text x="24" y="168">video_seek</text>
+      </g>
+    </g>
+    <line x1="368" y1="188" x2="398" y2="188" stroke="#5a504a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <g transform="translate(404 90)">
+      <rect width="360" height="196" rx="16" fill="#14100e" stroke="#4a1a12"/>
+      <text x="24" y="42" font-size="19" fill="#e8462a">02</text>
+      <text x="24" y="74" font-size="23" font-weight="600" fill="#f6f1ed">Сервер — источник истины</text>
+      <g font-family="ui-monospace, SFMono-Regular, 'Cascadia Mono', Menlo, Consolas, monospace"
+         font-size="19" fill="#c8bdb5">
+        <text x="24" y="112">positionSec · anchorServerTs</text>
+        <text x="24" y="140">status · lastEventSeq</text>
+        <text x="24" y="168" fill="#8a7f78">roomMutex: video:&lt;roomId&gt;</text>
+      </g>
+    </g>
+    <line x1="772" y1="188" x2="802" y2="188" stroke="#5a504a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <g transform="translate(808 90)">
+      <rect width="328" height="196" rx="16" fill="#14100e" stroke="#2b2421"/>
+      <text x="24" y="42" font-size="19" fill="#8a7f78">03</text>
+      <text x="24" y="74" font-size="23" font-weight="600" fill="#f6f1ed">Все применяют</text>
+      <g font-family="ui-monospace, SFMono-Regular, 'Cascadia Mono', Menlo, Consolas, monospace"
+         font-size="19" fill="#c8bdb5">
+        <text x="24" y="112">video_apply · seq</text>
+        <text x="24" y="140">video_sync · 5 с</text>
+        <text x="24" y="168">clockOffset · ping/pong</text>
+      </g>
+    </g>
+
+    <g transform="translate(64 312)">
+      <rect width="1072" height="58" rx="14" fill="#1a1614" stroke="#2b2421"/>
+      <rect width="4" height="58" rx="2" fill="#d1271b"/>
+      <text x="28" y="36" font-family="ui-monospace, SFMono-Regular, 'Cascadia Mono', Menlo, Consolas, monospace"
+            font-size="21" fill="#f6f1ed">позиция = positionSec + (now − anchorServerTs) / 1000</text>
+      <text x="1044" y="36" font-size="20" fill="#8a7f78" text-anchor="end">при status = playing</text>
+    </g>
+
+    <text x="64" y="410" font-size="20" fill="#8a7f78">Коррекция дрейфа на клиенте</text>
+
+    <g transform="translate(64 424)" font-size="20">
+      <g>
+        <rect width="300" height="46" rx="12" fill="#14100e" stroke="#2b2421"/>
+        <rect width="4" height="46" rx="2" fill="#4ade80"/>
+        <text x="24" y="29" fill="#c8bdb5">&lt; 0,4 с — игнорируем</text>
+      </g>
+      <g transform="translate(316 0)">
+        <rect width="420" height="46" rx="12" fill="#14100e" stroke="#2b2421"/>
+        <rect width="4" height="46" rx="2" fill="#facc15"/>
+        <text x="24" y="29" fill="#c8bdb5">0,4–2 с — playbackRate 0,94 / 1,06</text>
+      </g>
+      <g transform="translate(752 0)">
+        <rect width="320" height="46" rx="12" fill="#14100e" stroke="#2b2421"/>
+        <rect width="4" height="46" rx="2" fill="#e8462a"/>
+        <text x="24" y="29" fill="#c8bdb5">≥ 2 с — жёсткий seek</text>
+      </g>
+    </g>
+  </g>
+</svg>

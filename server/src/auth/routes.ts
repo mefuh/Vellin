@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type {
+  ApproveQrLoginResponse,
   AuthResponse,
   AuthUser,
   ChangeEmailRequest,
@@ -11,6 +13,10 @@ import type {
   LoginRequest,
   MeResponse,
   PrivacyResponse,
+  QrLoginPollResponse,
+  QrLoginRequestInfo,
+  QrLoginStartResponse,
+  QrLoginStatus,
   ProfileMutationResponse,
   RealtimeTicketResponse,
   RegisterRequest,
@@ -26,13 +32,14 @@ import { parsePrivacy, serializePrivacy } from '../privacy/privacy.js';
 import { userHub } from '../realtime/UserHub.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { signSession, signUserTicket, type Principal } from './jwt.js';
-import { generateAvatarSeed, generateGuestId, generatePublicId } from '../utils/ids.js';
+import { generateAvatarSeed, generateGuestId, generateInviteToken, generatePublicId } from '../utils/ids.js';
 import { requireAuth } from './middleware.js';
 import { isAdminEmail } from '../env.js';
 import { absoluteUrl } from '../utils/urls.js';
 import {
   assertGuestsEnabled,
   assertNotMaintenance,
+  assertQrLoginEnabled,
   assertRegistrationEnabled,
   assertUploadsEnabled,
 } from '../admin/platform/gate.js';
@@ -562,5 +569,142 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       where: { userId: principal.userId, ...(principal.sid ? { id: { not: principal.sid } } : {}) },
     });
     reply.send({ revoked: result.count } satisfies RevokeOtherSessionsResponse);
+  });
+
+  // ── Вход по QR-коду (десктоп-клиент) ────────────────────────────────────
+  //
+  // Клиент просит заявку и рисует QR со ссылкой /link/<requestId>. Владелец
+  // открывает ссылку телефоном и подтверждает — клиент забирает токен опросом.
+  // `requestId` виден всем, кто увидел экран, поэтому забрать токен можно
+  // только по `pollToken`, который знает лишь запросивший клиент.
+
+  /** Заявка живёт недолго: подтвердить вход нужно здесь и сейчас. */
+  const QR_TTL_MS = 3 * 60 * 1000;
+  const qrHash = (v: string) => createHash('sha256').update(v).digest('hex');
+
+  app.post('/auth/qr/start', {
+    config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+    handler: async (req, reply) => {
+      await assertQrLoginEnabled();
+      await assertNotMaintenance(false);
+      // Попутно подчищаем протухшие заявки — отдельный планировщик не нужен.
+      await prisma.deviceLoginRequest.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+
+      const pollToken = generateInviteToken();
+      const expiresAt = new Date(Date.now() + QR_TTL_MS);
+      const request = await prisma.deviceLoginRequest.create({
+        data: {
+          pollTokenHash: qrHash(pollToken),
+          expiresAt,
+          ip: req.ip || null,
+          userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
+        },
+      });
+      reply.send({
+        requestId: request.id,
+        pollToken,
+        url: absoluteUrl(`/link/${request.id}`),
+        expiresAt: expiresAt.toISOString(),
+      } satisfies QrLoginStartResponse);
+    },
+  });
+
+  app.get('/auth/qr/poll', {
+    // Клиент опрашивает раз в 2 секунды, заявка живёт 3 минуты.
+    config: { rateLimit: { max: 120, timeWindow: '1 minute' } },
+    handler: async (req, reply) => {
+      await assertQrLoginEnabled();
+      const { token } = req.query as { token?: string };
+      if (!token) {
+        deny(reply, 400, 'BadRequest', 'Не передан токен опроса');
+        return;
+      }
+      const request = await prisma.deviceLoginRequest.findUnique({
+        where: { pollTokenHash: qrHash(token) },
+      });
+      if (!request || request.expiresAt < new Date()) {
+        reply.send({ status: 'expired' } satisfies QrLoginPollResponse);
+        return;
+      }
+      if (request.status !== 'approved' || !request.token || !request.userId) {
+        reply.send({ status: 'pending' } satisfies QrLoginPollResponse);
+        return;
+      }
+      const user = await prisma.user.findUnique({ where: { id: request.userId } });
+      if (!user) {
+        reply.send({ status: 'expired' } satisfies QrLoginPollResponse);
+        return;
+      }
+      // Токен отдаём ровно один раз — заявка сразу удаляется.
+      await prisma.deviceLoginRequest.delete({ where: { id: request.id } });
+      reply.send({
+        status: 'approved',
+        token: request.token,
+        user: toAuthUser(user),
+      } satisfies QrLoginPollResponse);
+    },
+  });
+
+  /** Данные заявки для страницы подтверждения — что за устройство просит вход. */
+  app.get('/auth/qr/:id', { preHandler: requireAuth }, async (req, reply) => {
+    const principal = requireUser(req, reply);
+    if (!principal) return;
+    await assertQrLoginEnabled();
+    const { id } = req.params as { id: string };
+    const request = await prisma.deviceLoginRequest.findUnique({ where: { id } });
+    if (!request) {
+      deny(reply, 404, 'NotFound', 'Заявка не найдена');
+      return;
+    }
+    const expired = request.expiresAt < new Date();
+    reply.send({
+      requestId: request.id,
+      status: expired ? 'expired' : (request.status as QrLoginStatus),
+      createdAt: request.createdAt.toISOString(),
+      expiresAt: request.expiresAt.toISOString(),
+      ip: request.ip,
+      userAgent: request.userAgent,
+    } satisfies QrLoginRequestInfo);
+  });
+
+  app.post('/auth/qr/:id/approve', {
+    preHandler: requireAuth,
+    config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+    handler: async (req, reply) => {
+      await assertQrLoginEnabled();
+      const principal = requireUser(req, reply);
+      if (!principal) return;
+      const { id } = req.params as { id: string };
+
+      const request = await prisma.deviceLoginRequest.findUnique({ where: { id } });
+      if (!request || request.status !== 'pending' || request.expiresAt < new Date()) {
+        deny(reply, 404, 'NotFound', 'Заявка не найдена или устарела');
+        return;
+      }
+      const user = await prisma.user.findUnique({ where: { id: principal.userId } });
+      if (!user) {
+        deny(reply, 404, 'NotFound', 'Пользователь не найден');
+        return;
+      }
+      if (user.isBlocked) {
+        deny(reply, 403, 'Forbidden', 'Ваш аккаунт заблокирован');
+        return;
+      }
+      await assertNotMaintenance(!!user.adminRoleId || isAdminEmail(user.email));
+
+      const session = await createSession(user.id, req);
+      // Сессия должна представлять входящий компьютер, а не телефон, с
+      // которого подтвердили: подменяем на данные из заявки.
+      await prisma.session.update({
+        where: { id: session.id },
+        data: { ip: request.ip, userAgent: request.userAgent },
+      });
+      const token = signSession(app, buildPrincipal(user, session.id));
+      await prisma.deviceLoginRequest.update({
+        where: { id },
+        data: { status: 'approved', userId: user.id, token, approvedAt: new Date() },
+      });
+      reply.send({ status: 'approved' } satisfies ApproveQrLoginResponse);
+    },
   });
 }

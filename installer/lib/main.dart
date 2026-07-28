@@ -1,17 +1,19 @@
 import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
-import 'installer_engine.dart';
-import 'vellin_theme.dart';
 
-/// Размер безрамочного окна установщика (без заголовка/кнопок, скруглённое).
-const _installerSize = Size(520, 560);
+import 'installer_engine.dart';
+import 'installer_ui.dart';
+import 'vellin_theme.dart';
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Тихая установка (для автообновления): без окна — распаковать и запустить
-  // приложение (после автообновления оно перезапускается само).
+  // приложение. Автозапуск не трогаем (null), чтобы не сбросить выбор
+  // пользователя, сделанный при первой установке.
   if (args.contains('--silent')) {
     final engine = InstallerEngine();
     await for (final _ in engine.install()) {}
@@ -24,7 +26,7 @@ void main(List<String> args) async {
   // чтобы не мелькала стандартная рамка. Тот же подход, что у апдейтера.
   await windowManager.waitUntilReadyToShow(
     const WindowOptions(
-      size: _installerSize,
+      size: kInstallerSize,
       center: true,
       backgroundColor: Colors.transparent,
       titleBarStyle: TitleBarStyle.hidden,
@@ -41,6 +43,8 @@ void main(List<String> args) async {
       await windowManager.focus();
     },
   );
+  // Вёрстка рассчитана на точные 720×500 клиентской области.
+  await fitInstallerClientSize();
 
   runApp(const InstallerApp());
 }
@@ -62,8 +66,6 @@ class InstallerApp extends StatelessWidget {
   }
 }
 
-enum _Stage { idle, installing, done, error }
-
 class _InstallerScreen extends StatefulWidget {
   const _InstallerScreen();
   @override
@@ -72,174 +74,105 @@ class _InstallerScreen extends StatefulWidget {
 
 class _InstallerScreenState extends State<_InstallerScreen> {
   final _engine = InstallerEngine();
-  _Stage _stage = _Stage.idle;
-  double _progress = 0;
-  String _status = '';
+  final _pathCtrl = TextEditingController(text: InstallerEngine.defaultTargetDir);
 
-  Future<void> _install() async {
+  InstallStep _step = InstallStep.welcome;
+  double _progress = 0;
+  String _status = 'Установка Vellin…';
+  String _detail = '';
+  String _error = '';
+  String _diskFree = '';
+  String _installedTo = InstallerEngine.defaultTargetDir;
+  bool _fadingOut = false;
+
+  @override
+  void dispose() {
+    _pathCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Свободное место считаем в фоне — диалог не должен ждать PowerShell.
+    InstallerEngine.freeSpace(InstallerEngine.defaultTargetDir).then((v) {
+      if (mounted && v.isNotEmpty) setState(() => _diskFree = v);
+    });
+  }
+
+  Future<void> _install(String path, InstallOptions options) async {
     setState(() {
-      _stage = _Stage.installing;
+      _installedTo = path.isEmpty ? InstallerEngine.defaultTargetDir : path;
+      _step = InstallStep.installing;
       _progress = 0;
+      _detail = '';
+      _error = '';
     });
     try {
-      await for (final p in _engine.install()) {
-        if (mounted) {
-          setState(() {
-            _progress = p.fraction;
-            _status = p.status;
-          });
-        }
+      await for (final p in _engine.install(
+        dir: _installedTo,
+        desktopShortcut: options.shortcut,
+        autostart: options.autostart,
+      )) {
+        if (!mounted) return;
+        setState(() {
+          _progress = p.fraction;
+          _status = p.status;
+          _detail = p.detail;
+        });
       }
-      if (mounted) setState(() => _stage = _Stage.done);
+      if (mounted) setState(() => _step = InstallStep.done);
     } catch (e) {
       if (mounted) {
         setState(() {
-          _stage = _Stage.error;
-          _status = '$e';
+          _step = InstallStep.error;
+          _error = 'Не удалось записать файлы в $_installedTo. '
+              'Проверьте права доступа и попробуйте снова.';
         });
       }
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: VellinColors.bg0,
-      body: Column(children: [
-        _titleBar(),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(40, 8, 40, 32),
-            child: Column(
-              children: [
-                const SizedBox(height: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: const [BoxShadow(color: VellinColors.accentGlow, blurRadius: 40, spreadRadius: -6)],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: Image.asset('assets/vellin_icon.png', width: 84, height: 84),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Text('Vellin для Windows',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: VellinColors.text0, letterSpacing: -0.4)),
-                const SizedBox(height: 6),
-                const Text('Совместный просмотр видео в реальном времени',
-                    textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, color: VellinColors.text2)),
-                const Spacer(),
-                _body(),
-              ],
-            ),
-          ),
-        ),
-      ]),
-    );
+  Future<void> _launch() async {
+    await _engine.launchApp(dir: _installedTo);
+    setState(() => _fadingOut = true);
+    await Future<void>.delayed(kInstallerFadeOut + const Duration(milliseconds: 20));
+    exit(0);
   }
 
-  Widget _titleBar() {
-    // Без заголовка и системных кнопок — только ненавязчивый крестик, чтобы
-    // установку можно было закрыть. Окно не перетаскивается (как у апдейтера).
-    return SizedBox(
-      height: 40,
-      child: Row(children: [
-        const Spacer(),
-        _WinButton(icon: Icons.close, onTap: () => windowManager.close()),
-      ]),
-    );
-  }
-
-  Widget _body() {
-    switch (_stage) {
-      case _Stage.idle:
-        return Column(children: [
-          Text('Приложение будет установлено в\n${InstallerEngine.targetDir}',
-              textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, color: VellinColors.text3, height: 1.4)),
-          const SizedBox(height: 18),
-          _primaryButton('Установить', _install),
-        ]);
-      case _Stage.installing:
-        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              value: _progress > 0 ? _progress : null,
-              minHeight: 6,
-              backgroundColor: VellinColors.bg3,
-              color: VellinColors.accentHi,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(_status, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12.5, color: VellinColors.text2)),
-        ]);
-      case _Stage.done:
-        return Column(children: [
-          const Icon(Icons.check_circle, color: VellinColors.ok, size: 30),
-          const SizedBox(height: 8),
-          const Text('Установка завершена', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: VellinColors.text0)),
-          const SizedBox(height: 18),
-          Row(children: [
-            Expanded(child: _secondaryButton('Закрыть', () => windowManager.close())),
-            const SizedBox(width: 10),
-            Expanded(child: _primaryButton('Запустить', () async {
-              await _engine.launchApp();
-              await windowManager.close();
-            })),
-          ]),
-        ]);
-      case _Stage.error:
-        return Column(children: [
-          const Icon(Icons.error_outline, color: VellinColors.accentHi, size: 28),
-          const SizedBox(height: 8),
-          Text('Не удалось установить\n$_status',
-              textAlign: TextAlign.center, style: const TextStyle(fontSize: 12.5, color: VellinColors.text2)),
-          const SizedBox(height: 16),
-          _primaryButton('Повторить', _install),
-        ]);
+  Future<void> _browse(String current) async {
+    final dir = await FilePicker.platform.getDirectoryPath(initialDirectory: current);
+    if (dir != null && mounted) {
+      // Пользователь выбирает родительскую папку — ставим в неё подпапку Vellin.
+      final target = dir.endsWith('\\Vellin') ? dir : '$dir\\Vellin';
+      _pathCtrl.text = target;
+      final free = await InstallerEngine.freeSpace(target);
+      if (mounted && free.isNotEmpty) setState(() => _diskFree = free);
     }
   }
 
-  Widget _primaryButton(String label, VoidCallback onTap) => SizedBox(
-        height: 46,
-        width: double.infinity,
-        child: FilledButton(
-          onPressed: onTap,
-          style: FilledButton.styleFrom(
-            backgroundColor: VellinColors.accent,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(VellinRadius.md)),
-            textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-          ),
-          child: Text(label),
-        ),
-      );
-
-  Widget _secondaryButton(String label, VoidCallback onTap) => SizedBox(
-        height: 46,
-        child: FilledButton(
-          onPressed: onTap,
-          style: FilledButton.styleFrom(
-            backgroundColor: VellinColors.bg3,
-            foregroundColor: VellinColors.text0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(VellinRadius.md)),
-            textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-          ),
-          child: Text(label),
-        ),
-      );
-}
-
-class _WinButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  const _WinButton({required this.icon, required this.onTap});
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: SizedBox(width: 46, height: 40, child: Icon(icon, size: 18, color: VellinColors.text2)),
+    return ColoredBox(
+      color: VellinColors.bg0,
+      child: VellinInstallerUi(
+        step: _step,
+        version: installerAppVersion,
+        pathController: _pathCtrl,
+        progress: _progress,
+        status: _status,
+        detail: _detail,
+        errorText: _error,
+        diskFree: _diskFree,
+        fadingOut: _fadingOut,
+        onStep: (s) => setState(() => _step = s),
+        onBrowse: _browse,
+        onInstall: _install,
+        onLaunch: _launch,
+        onCancel: () => exit(0),
+        onClose: () => exit(0),
+        onRetry: () => setState(() => _step = InstallStep.options),
+      ),
     );
   }
 }

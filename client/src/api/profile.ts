@@ -1,4 +1,6 @@
 import type {
+  ApproveQrLoginResponse,
+  QrLoginRequestInfo,
   ChangeEmailRequest,
   ChangeEmailResponse,
   ChangePasswordRequest,
@@ -29,4 +31,9 @@ export const profileApi = {
     apiFetch<RevokeSessionResponse>(`/auth/sessions/${id}`, { method: 'DELETE' }),
   revokeOtherSessions: () =>
     apiFetch<RevokeOtherSessionsResponse>('/auth/sessions', { method: 'DELETE' }),
+
+  // Вход по QR: сайт подтверждает заявку, созданную десктоп-клиентом.
+  qrLoginRequest: (id: string) => apiFetch<QrLoginRequestInfo>(`/auth/qr/${encodeURIComponent(id)}`),
+  approveQrLogin: (id: string) =>
+    apiFetch<ApproveQrLoginResponse>(`/auth/qr/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
 };

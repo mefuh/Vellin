@@ -32,7 +32,7 @@ const DEFAULT_LIMITS: PlatformLimits = {
   dmVoiceMaxMb: 25,
   dmVideoMaxMb: 128,
 };
-const DEFAULT_WINDOWS: PlatformWindows = { downloadPage: true, audience: 'everyone', usernames: [] };
+const DEFAULT_WINDOWS: PlatformWindows = { downloadPage: true, qrLogin: true, audience: 'everyone', usernames: [] };
 
 // Настройки хранятся тремя JSON-строками (ключи-секции) и кэшируются в памяти.
 let cache: PlatformSettingsDTO | null = null;

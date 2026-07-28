@@ -7,6 +7,7 @@ import 'api/auth_api.dart';
 import 'api/friends_api.dart';
 import 'api/catalog_api.dart';
 import 'api/dm_api.dart';
+import 'app_config.dart';
 import 'realtime/user_socket.dart';
 import 'router.dart';
 import 'state/auth_controller.dart';
@@ -16,12 +17,9 @@ import 'state/presence_controller.dart';
 import 'state/update_controller.dart';
 import 'storage/session_store.dart';
 import 'theme/vellin_theme.dart';
-import 'runtime/update_checker.dart';
+import 'runtime/auth_window.dart';
+import 'runtime/updater_splash.dart';
 import 'widgets/window_title_bar.dart';
-
-/// Размер маленького окна апдейтера (без нативного заголовка).
-/// Высота с запасом под двухстрочную подпись во время загрузки.
-const _updaterSize = Size(440, 360);
 
 /// Размеры основного окна приложения.
 const _appSize = Size(1180, 760);
@@ -41,8 +39,8 @@ Future<void> main() async {
   final auth = AuthController(client, authApi, SessionStore());
   final update = UpdateController(client);
 
-  // Старт: проверка обновления и восстановление сессии идут параллельно.
-  update.check();
+  // Старт: сценарий обновления и восстановление сессии идут параллельно.
+  update.run();
   auth.restore();
 
   // Окно стартует маленьким и БЕЗ нативного заголовка (titleBarStyle.hidden) —
@@ -50,8 +48,9 @@ Future<void> main() async {
   // (окно рендерилось пустым). Показываем только когда готово, без мелькания.
   await windowManager.waitUntilReadyToShow(
     const WindowOptions(
-      size: _updaterSize,
+      size: kSplashSize,
       center: true,
+      backgroundColor: kSplashBackground,
       titleBarStyle: TitleBarStyle.hidden,
       windowButtonVisibility: false,
     ),
@@ -59,10 +58,12 @@ Future<void> main() async {
       await windowManager.setResizable(false);
       await windowManager.setMaximizable(false);
       await windowManager.setMinimizable(false);
-      await windowManager.show();
-      await windowManager.focus();
+      // Окно здесь НЕ показываем: до runApp у Flutter нет ни одного кадра, и
+      // пустое окно на мгновение мелькает белым. Показ — после первого кадра.
     },
   );
+  // Содержимое сплэша рассчитано на точные 520×340 клиентской области.
+  await fitSplashClientSize();
 
   runApp(
     MultiProvider(
@@ -80,6 +81,13 @@ Future<void> main() async {
       child: const VellinApp(),
     ),
   );
+
+  // Первый кадр отрисован — только теперь показываем окно, чтобы старт был
+  // сразу со сплэшем, без белой вспышки пустого окна.
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
 }
 
 /// Двухфазный корень: сначала маленькое безрамочное окно апдейтера (проверка /
@@ -90,9 +98,13 @@ class VellinApp extends StatefulWidget {
   State<VellinApp> createState() => _VellinAppState();
 }
 
+/// Фазы окна: апдейтер → вход → приложение. Каждая живёт в своём окне —
+/// маленьком безрамочном для первых двух и обычном для третьей.
+enum _Phase { updater, auth, app }
+
 class _VellinAppState extends State<VellinApp> {
   late final _router = buildRouter(context.read<AuthController>());
-  bool _enteredApp = false;
+  _Phase _phase = _Phase.updater;
 
   /// Переключить окно в обычный режим (рамка + заголовок, ресайз, нормальный
   /// размер) — вызывается один раз при переходе из апдейтера в приложение.
@@ -111,17 +123,47 @@ class _VellinAppState extends State<VellinApp> {
     await windowManager.center();
   }
 
+  /// Окно входа — того же семейства, что апдейтер: маленькое, без ресайза.
+  /// Сюда же возвращаемся после выхода из аккаунта, поэтому снимаем всё, что
+  /// включало окно приложения (разворот, изменение размера).
+  Future<void> _enterAuthWindow() async {
+    if (await windowManager.isMaximized()) await windowManager.unmaximize();
+    await windowManager.setResizable(false);
+    await windowManager.setMaximizable(false);
+    // Снимаем минимум окна приложения: он больше окна входа и не дал бы
+    // ужаться. Ставим до смены размера, иначе окно дёрнется дважды.
+    await windowManager.setMinimumSize(const Size(200, 200));
+    await applyAuthWindowSize();
+  }
+
   @override
   Widget build(BuildContext context) {
     final update = context.watch<UpdateController>();
+    final auth = context.watch<AuthController>();
 
-    // Проверка завершена и обновления нет (или отложено) — уходим в приложение.
-    if (!_enteredApp && update.ready && update.pending == null) {
-      _enteredApp = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _enterAppWindow());
+    // Апдейтер отработал: дальше либо вход, либо сразу приложение.
+    final target = !update.done
+        ? _Phase.updater
+        : (auth.ready && !auth.authenticated ? _Phase.auth : _Phase.app);
+
+    if (target != _phase) {
+      _phase = target;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (target == _Phase.auth) _enterAuthWindow();
+        if (target == _Phase.app) _enterAppWindow();
+      });
     }
 
-    if (_enteredApp) {
+    if (_phase == _Phase.auth) {
+      return MaterialApp(
+        title: 'Vellin',
+        debugShowCheckedModeBanner: false,
+        theme: buildVellinTheme(),
+        home: AuthWindow(auth: auth, authApi: context.read<AuthApi>()),
+      );
+    }
+
+    if (_phase == _Phase.app) {
       return MaterialApp.router(
         title: 'Vellin',
         debugShowCheckedModeBanner: false,
@@ -141,40 +183,13 @@ class _VellinAppState extends State<VellinApp> {
       title: 'Vellin',
       debugShowCheckedModeBanner: false,
       theme: buildVellinTheme(),
-      home: update.pending != null
-          ? UpdateScreen(info: update.pending!, onSkip: update.skip)
-          : const _CheckingScreen(),
-    );
-  }
-}
-
-/// Экран «проверка обновлений» в маленьком окне апдейтера.
-class _CheckingScreen extends StatelessWidget {
-  const _CheckingScreen();
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: VellinColors.bg0,
-      body: Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(color: VellinColors.accent, borderRadius: BorderRadius.circular(16)),
-            alignment: Alignment.center,
-            child: const Text('V',
-                style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w800, height: 1)),
-          ),
-          const SizedBox(height: 22),
-          const SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(strokeWidth: 2.4, color: VellinColors.accentHi),
-          ),
-          const SizedBox(height: 16),
-          const Text('Проверка обновлений…',
-              style: TextStyle(color: VellinColors.text2, fontSize: 13)),
-        ]),
+      home: VellinUpdaterSplash(
+        phase: update.phase,
+        progress: update.progress,
+        fadingOut: update.fadingOut,
+        version: AppConfig.appVersion,
+        onIntroDone: update.introDone,
+        onRetry: update.retry,
       ),
     );
   }

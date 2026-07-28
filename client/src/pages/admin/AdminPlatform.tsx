@@ -192,7 +192,7 @@ function SettingsTab() {
         <PlatformGroup
           title="Windows"
           icon="windows"
-          hint="Десктоп-клиент: страница скачивания и кому она видна"
+          hint="Десктоп-клиент: страница скачивания, кому она видна и вход по QR-коду"
           badge={draft.windows.downloadPage ? AUDIENCE_LABEL[draft.windows.audience] : 'выключено'}
         >
           <WindowsSettings value={draft.windows} onChange={(w) => setDraft({ ...draft, windows: w })} />
@@ -300,6 +300,13 @@ function WindowsSettings({ value, onChange }: { value: PlatformWindows; onChange
           </div>
         </div>
       )}
+
+      <ToggleRow
+        label="Добавление устройства по QR"
+        hint="Кнопка и сканер в разделе «Устройства». Выключено — кнопка исчезает, а вход по QR-коду перестаёт работать и на сервере"
+        checked={value.qrLogin}
+        onChange={(v) => onChange({ ...value, qrLogin: v })}
+      />
     </>
   );
 }

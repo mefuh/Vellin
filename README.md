@@ -1,175 +1,174 @@
-# Vellin
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%"
+       alt="Vellin — комната, ссылка на видео, и все смотрят одно и то же кадр в кадр. Карточка комнаты: четыре участника на одной позиции 00:42:17, дрейф меньше 0,4 секунды">
+</p>
 
-Платформа для совместного просмотра видео в реальном времени. Комнаты, чат, синхронизация плеера, реакции, гостевой режим, плейлист, права участников.
+Создаёте комнату, вставляете ссылку на видео — и все, кто вошёл, видят один и тот же кадр в одну и ту же секунду. Не «примерно вместе», а с точностью до долей секунды: позицию держит сервер, клиенты только подстраиваются под неё.
 
-## Стек
+Работает в браузере и нативным приложением на Windows. Гостю хватит invite-ссылки — ни регистрации, ни установки.
 
-- **Frontend**: React 18 + TypeScript + Vite + Zustand + React Router + WebSocket
-- **Backend**: Node.js 20 + TypeScript + Fastify + `@fastify/websocket` + `@fastify/jwt`
-- **БД**: PostgreSQL 16 + Prisma 5
-- **Медиа**: hls.js (HLS), shaka-player (DASH), webtorrent (magnet/torrent), `yt-dlp` (серверный экстрактор)
-- **Дизайн**: токены и компоненты перенесены из `design/` (inline styles + CSS-переменные)
+**[vellin.ru](https://vellin.ru)** · веб + клиент для Windows · v0.27.0
 
-## Источники видео
+## Что внутри
 
-Сервер резолвит любую пользовательскую ссылку в реальный media-stream и кэширует результат в Postgres. Поддержано: прямые `mp4/webm`, HLS `m3u8`, DASH `mpd`, magnet/`.torrent`, плюс всё, что умеет распознавать `yt-dlp` (YouTube, RuTube, Vimeo, VK Video, ~1000 других сайтов). Воспроизведение — только через нативный `<video>`, никаких iframe-плееров.
+| | |
+|---|---|
+| **Синхронный плеер** | `play`, `pause`, `seek` и смена видео применяются у всех участников; расхождение правится автоматически |
+| **Любая ссылка** | прямые `mp4`/`webm`, HLS `m3u8`, DASH `mpd`, magnet и `.torrent`, плюс всё, что понимает `yt-dlp`: YouTube, RuTube, Vimeo, VK Video и ещё около тысячи сайтов |
+| **Плейлист** | очередь видео в комнате — добавить, переставить, включить следующее |
+| **Чат и реакции** | живой чат и эмодзи поверх плеера |
+| **Голосовые звонки** | WebRTC P2P-mesh прямо в комнате, поверх просмотра |
+| **Гостевой вход** | по invite-ссылке, без аккаунта; гости не попадают в базу |
+| **Права участников** | хост раздаёт управление плеером и плейлистом, может исключить из комнаты |
+| **Друзья и личные сообщения** | текст, картинки, голосовые, видеокружки, статусы «онлайн» и «был в сети» |
+| **Push-уведомления** | Web Push с шаблонами, очередью отправки и настройками на пользователя |
+| **Админ-панель** | роли и права, аудит действий, модерация, аналитика, feature-флаги |
 
-Монорепо на npm workspaces: `shared/` (общие типы), `server/`, `client/`.
+Видео играет в нативном `<video>` — никаких встроенных iframe-плееров, поэтому плеер один и тот же для всех источников.
 
-## Структура
+## Как держится синхрон
 
+<p align="center">
+  <img src="./assets/readme/sync.svg" width="100%"
+       alt="Три шага синхронизации: клиент шлёт намерение, сервер как источник истины хранит positionSec, anchorServerTs, status и lastEventSeq под мьютексом комнаты, клиенты применяют video_apply и video_sync каждые 5 секунд. Дрейф до 0,4 секунды игнорируется, до 2 секунд правится скоростью воспроизведения, дальше — жёсткий seek">
+</p>
+
+Клиент никогда не решает сам. Нажатие на паузу — это *намерение*, которое уходит на сервер; на экране оно появляется только когда вернулось решение сервера.
+
+1. Сервер хранит состояние комнаты: `positionSec`, `anchorServerTs`, `status`, `lastEventSeq`.
+2. Любая мутация проходит через мьютекс комнаты — параллельные события выстраиваются в одну очередь, счётчик `seq` и якорь остаются согласованными.
+3. Каждое изменение рассылается как `video_apply` с номером `seq`; раз в 5 секунд уходит `video_sync` — heartbeat для коррекции дрейфа.
+4. Клиент считает поправку на сеть через медиану ping/pong-замеров и решает, догонять ли позицию мягко (скоростью воспроизведения) или жёстким `seek`.
+5. При обрыве связи — переподключение с экспоненциальной паузой от 250 мс до 5 с; `welcome` возвращает актуальное состояние.
+
+Состояние комнаты пишется в базу раз в 15 секунд, так что после перезапуска сервера просмотр продолжается с той же позиции.
+
+## Быстрый старт
+
+Нужны Node.js 20+, Docker (для Postgres) и `yt-dlp` в `PATH`.
+
+```bash
+npm run setup
 ```
-Vellin/
-├── design/                # исходный визуальный макет (не трогаем)
-├── shared/                # workspace package @vellin/shared
-├── server/                # Fastify API + WebSocket
-├── client/                # Vite + React приложение
-├── docker-compose.yml
-├── package.json           # workspaces корень
-└── tsconfig.base.json
+
+Одна команда поднимает Postgres в Docker, ставит зависимости, генерирует `server/.env` со случайным `JWT_SECRET`, собирает `@vellin/shared`, накатывает миграции и запускает dev-режим. Скрипт идемпотентный — повторный запуск ничего не перезатирает. Дальше открывайте **http://localhost:5173**.
+
+Без `yt-dlp` всё тоже запустится, но останутся только прямые ссылки и magnet — YouTube и остальные сайты резолвит именно он:
+
+```bash
+winget install yt-dlp.yt-dlp   # Windows
+brew install yt-dlp            # macOS
+pip install yt-dlp             # Linux
 ```
 
-## Деплой в продакшен
-
-См. [DEPLOY.md](DEPLOY.md): пошаговая инструкция для Ubuntu VPS с Caddy + Let's Encrypt (домен, SSH-хардеринг, Docker, env, миграции, бэкапы).
-
-## Быстрый старт через Docker
+<details>
+<summary><b>Вариант через Docker целиком</b></summary>
 
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
 
-После запуска:
-- Frontend: http://localhost:8080
-- Backend: http://localhost:3001
-- Postgres: localhost:5432 (vellin/vellin)
+Фронтенд — http://localhost:8080, бэкенд — http://localhost:3001, Postgres — `localhost:5432` (`vellin`/`vellin`).
 
-## Локальная разработка (без Docker для приложения)
+</details>
 
-Требования: Node.js 20+, Docker (для Postgres) или свой PostgreSQL 16, `yt-dlp` в `$PATH`.
-
-`yt-dlp` нужен серверу, чтобы вытаскивать стримы из YouTube/RuTube/Vimeo/VK и десятков других сайтов. Без него будут работать только прямые ссылки на `mp4/webm/m3u8/mpd` и magnet'ы. Установка:
-
-- Windows: `winget install yt-dlp.yt-dlp`
-- macOS: `brew install yt-dlp`
-- Linux: `pip install yt-dlp` или системный пакет
-
-### Автоматически (одна команда)
+<details>
+<summary><b>Вариант по шагам, без setup-скрипта</b></summary>
 
 ```bash
-npm run setup
+docker compose up -d postgres        # 1. база
+npm install                          # 2. зависимости всех воркспейсов
+cp server/.env.example server/.env   # 3. env; JWT_SECRET — минимум 32 символа
+npm run build:shared                 # 4. обязательно до первого старта
+npm run db:migrate                   # 5. миграции + Prisma client
+npm run dev                          # 6. shared + server + client параллельно
 ```
 
-Скрипт [`scripts/setup.mjs`](scripts/setup.mjs) сам поднимает Postgres в Docker, ставит зависимости, создаёт `server/.env` со случайным `JWT_SECRET`, собирает `@vellin/shared`, накатывает миграции и запускает `npm run dev`. Идемпотентен — можно запускать повторно, ничего не перезатирает. Остановить — `Ctrl+C`.
+</details>
 
-### Вручную (по шагам)
+<details>
+<summary><b>Проверить, что синхрон действительно работает</b></summary>
 
-```bash
-# 1. Postgres (можно поднять отдельно через docker compose up postgres)
-docker compose up -d postgres
+1. `docker compose up --build`, дождаться `Vellin server started`.
+2. Открыть http://localhost:8080 в двух браузерах (второй — в приватном окне).
+3. В первом зарегистрироваться, во втором войти гостем.
+4. Из первого создать комнату с любым видео, например `https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4`.
+5. Скопировать invite-ссылку, открыть во втором браузере, войти.
+6. Play в первом — оба клиента стартуют синхронно. Pause во втором — оба встают.
+7. Отправить сообщение и реакцию — приходят мгновенно.
+8. DevTools → Network → Offline на 5 секунд и обратно — клиент переподключается сам и догоняет позицию.
 
-# 2. Установить зависимости (корень — npm workspaces)
-npm install
+</details>
 
-# 3. Серверный .env
-cp server/.env.example server/.env
-# отредактируйте JWT_SECRET (минимум 32 символа)
+## Архитектура
 
-# 4. Собрать shared-пакет (обязательно перед первым стартом)
-npm run build:shared
+<p align="center">
+  <img src="./assets/readme/architecture.svg" width="100%"
+       alt="Веб-клиент на React 18 и Windows-клиент на Flutter ходят по REST и WebSocket в сервер Fastify 5, который держит комнаты, чат, плейлист, звонки, друзей, личные сообщения, push и админ-панель; ниже PostgreSQL 16 с Prisma 5 и медиа-резолвер для mp4, HLS, DASH, magnet и yt-dlp">
+</p>
 
-# 5. Применить миграции и сгенерировать Prisma client
-npm run db:migrate
-
-# 6. Запустить dev (shared + server + client параллельно)
-npm run dev
+```
+Vellin/
+├── shared/      # @vellin/shared — типы WS-протокола, REST и домена
+├── server/      # Fastify: API, WebSocket, Prisma, медиа-резолвер, push, админка
+├── client/      # React + Vite: веб-приложение
+├── winapp/      # Flutter: нативный клиент для Windows
+├── installer/   # установщик и апдейтер Windows-клиента
+├── design/      # исходный визуальный макет — источник дизайн-токенов
+├── docs/        # контракты и планы (админ-панель v2)
+├── caddy/       # обратный прокси для продакшена
+└── scripts/     # setup.mjs и утилиты
 ```
 
-Откройте http://localhost:5173.
+Монорепо на npm workspaces. `shared/` — единственный источник правды для протокола: и сервер, и оба клиента импортируют одни и те же типы, поэтому рассинхрон контрактов невозможен по построению. Любое изменение WS-сообщений или REST-схем начинается там.
 
-## REST API (префикс `/api`)
+## API
 
-| Метод | Путь | Описание | Auth |
-|------|------|----------|------|
-| POST | `/auth/register` | Регистрация (email, username, password ≥ 8) | — |
-| POST | `/auth/login` | Логин email + password | — |
-| POST | `/auth/guest` | Получить гостевой JWT (без БД) | — |
-| GET | `/auth/me` | Текущий пользователь | JWT |
-| POST | `/rooms` | Создать комнату | JWT (не гость) |
-| GET | `/rooms` | Мои + публичные комнаты | JWT |
-| GET | `/rooms/:slug` | Информация о комнате | JWT |
-| POST | `/rooms/join` | Получить wsTicket (пароль/invite) | JWT |
-| POST | `/rooms/:id/video` | Сменить URL видео | JWT, host |
-| POST | `/rooms/resolve` | Резолвнуть медиа-URL (для re-resolve по истечении TTL) | JWT |
-| POST | `/rooms/:id/invites` | Создать invite-ссылку | JWT, host |
-| GET | `/rooms/:id/messages` | История чата | JWT |
+Полная клиентская поверхность API описана OpenAPI-спекой и живёт в самом приложении:
 
-## WebSocket `/ws?ticket=<wsTicket>`
+- Swagger UI — `/api/docs`
+- спека — `/api/openapi.json`
 
-Соединение требует короткоживущий wsTicket (60 сек), получаемый через `POST /rooms/join`. Это позволяет не передавать долгоживущий JWT в URL.
+Группы маршрутов: `/auth`, `/rooms`, `/friends`, `/dm`, `/titles`, `/push`, `/geo`, `/config`, `/admin/*`.
 
-**Client → Server**: `hello`, `chat_message`, `video_play`, `video_pause`, `video_seek`, `video_set_url`, `reaction`, `pong`, `sync_request`.
+Два WebSocket-канала:
 
-**Server → Client**: `welcome`, `user_join`, `user_leave`, `chat_message`, `video_apply`, `video_sync`, `video_set_url`, `reaction`, `room_state_update`, `ping`, `error`.
+| Канал | Назначение |
+|---|---|
+| `/ws?ticket=<wsTicket>` | комната: видео, чат, плейлист, реакции, права, голосовые звонки |
+| `/ws/user` | пользователь: presence, уведомления, личные сообщения |
 
-Все типы — в `shared/src/protocol.ts`. Сервер authoritative — клиент только эмитит намерения и подчиняется `apply`/`sync`.
+Комнатный сокет требует короткоживущий тикет (60 секунд), который выдаёт `POST /rooms/join`. Так долгоживущий JWT не попадает в URL — единственный способ аутентифицировать WebSocket-рукопожатие. Все типы сообщений — в [`shared/src/protocol.ts`](shared/src/protocol.ts).
 
-## Видео-синхронизация
+## Клиент для Windows
 
-1. Сервер хранит `RoomVideoState`: `{ positionSec, anchorServerTs, status, lastEventSeq }`.
-2. Эффективная позиция при `status='playing'` = `positionSec + (now - anchorServerTs) / 1000`.
-3. Любая мутация (`play`/`pause`/`seek`) обновляет anchor и инкрементит `seq`, сразу транслируется как `video_apply`.
-4. Каждые 5 сек — `video_sync` (heartbeat) для drift correction.
-5. Клиент держит EWMA clockOffset через ping/pong и компенсирует сетевую задержку при seek.
-6. Drift correction:
-   - `< 0.4с` — игнор (jitter порог);
-   - `0.4–2с` — мягкая коррекция `playbackRate=0.94/1.06`;
-   - `≥ 2с` — hard seek.
-7. Reconnect — exponential backoff (250ms → 5s), `welcome` восстанавливает состояние.
+`winapp/` — нативное приложение на Flutter, без WebView и HTML-рантайма. Собирается через `flutter build windows`, ставится собственным установщиком из `installer/`, обновляется через версионный гейтинг: клиент шлёт `X-App-Platform` и `X-App-Version`, сервер отвечает `426`, если версия ниже минимальной. Подробности — в [winapp/README.md](winapp/README.md).
 
 ## Безопасность
 
-- bcrypt cost=12 для паролей пользователей и комнат
-- JWT в `Authorization: Bearer`, 30-дневная сессия
-- WS rate-limit — token bucket 20 msg/sec на сокет (burst 30)
-- REST rate-limit — 100 req/min глобально, 5–10/min на `/auth/*`
-- CORS allowlist (`CORS_ORIGIN`)
-- helmet headers
-- Per-room async-mutex предотвращает гонки на видео-стейте
-- Гости не сохраняются в БД (ephemeral JWT)
-- Сообщения чата ограничены 2000 символов, рендерятся как plain text
-
-## Smoke-тест
-
-1. `docker compose up --build` → дождаться `Vellin server started`.
-2. Открыть http://localhost:8080 в двух браузерах (incognito для второго).
-3. В первом — Регистрация, во втором — Гость.
-4. Из первого создать комнату (можно с URL `https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4`).
-5. Скопировать invite-ссылку → открыть во втором браузере → войти.
-6. Play в первом — оба клиента стартуют синхронно (drift < 500ms).
-7. Pause во втором — оба паузятся.
-8. Отправить сообщение и эмодзи-реакцию — приходит мгновенно.
-9. Network → Offline на 5 сек → Online — клиент авто-восстанавливается, видео догоняет.
-10. `npx prisma studio` (внутри `server/`) — проверить `User`, `Room`, `Message`; в `User` гостей нет.
-
-## Расширения, включённые в MVP
-
-- Reconnection logic (exponential backoff + clockOffset recovery)
-- Invite-ссылки (`/rooms/:id/invites`) — обходят пароль приватной комнаты
-- Emoji-реакции (overlay поверх плеера)
+- bcrypt (cost 12) для паролей пользователей и комнат
+- JWT в `Authorization: Bearer`, сессия 30 дней; отдельный 60-секундный тикет для WebSocket
+- rate-limit: 100 req/min глобально, 5–10/min на `/auth/*`, token bucket 20 msg/s на сокет
+- CORS-allowlist, helmet-заголовки, лимит тела запроса 256 КБ
+- мьютекс на комнату против гонок в видео-состоянии
+- гости не сохраняются в базу, сообщения чата — plain text с лимитом 2000 символов
 
 ## Скрипты
 
 ```bash
-npm run dev          # все три воркспейса параллельно
+npm run dev          # shared + server + client параллельно
 npm run dev:server   # только сервер
 npm run dev:client   # только клиент
 npm run build        # сборка shared → server → client
 npm run db:migrate   # prisma migrate dev
-npm run db:studio    # prisma studio (GUI)
+npm run db:studio    # prisma studio
 ```
 
-## Лицензия
+## Деплой
 
-Internal MVP.
+[DEPLOY.md](DEPLOY.md) — пошаговая инструкция для Ubuntu-VPS: домен, SSH-хардеринг, Docker, Caddy с Let's Encrypt, env, миграции, бэкапы.
+
+## Статус
+
+Публичная бета. Автотестов в репозитории нет — проверка ручная, рецепт выше. Лицензия не опубликована: код закрыт для повторного использования.

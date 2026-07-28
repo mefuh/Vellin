@@ -1,1 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#d1271b"/><path d="M9 10l5 12h4l5-12h-3.5l-3.5 9-3.5-9H9z" fill="#fff"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+ <defs><linearGradient id="bgr" x1="0.15" y1="0" x2="0.85" y2="1"><stop offset="0" stop-color="#ff6146"></stop><stop offset="0.46" stop-color="#e0342a"></stop><stop offset="1" stop-color="#c02318"></stop></linearGradient></defs>
+ <rect width="512" height="512" rx="114" fill="url(#bgr)"></rect>
+ <g transform="translate(133,133) scale(2.46)">
+<defs>
+  <linearGradient id="bvr" x1="0.05" y1="0" x2="0.85" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.22"></stop><stop offset="0.45" stop-color="#fff" stop-opacity="0.02"></stop><stop offset="1" stop-color="#000" stop-opacity="0.14"></stop></linearGradient>
+  <linearGradient id="bdr" x1="0" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.16"></stop><stop offset="1" stop-color="#fff" stop-opacity="0.02"></stop></linearGradient>
+  <filter id="fr" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="1.1"></feGaussianBlur></filter>
+  <clipPath id="cr"><path d="M6.8,4 H23.5 Q26,4 27.1,6.5 L48.8,55.2 Q50,58.8 51.2,55.2 L72.9,6.5 Q74,4 76.5,4 H93.2 Q96,4 94.75,6.5 L50.85,94.3 Q50,96.8 49.15,94.3 L5.25,6.5 Q4,4 6.8,4 Z"></path></clipPath>
+ </defs>
+ <g clip-path="url(#cr)">
+  <path d="M6.8,4 H23.5 Q26,4 27.1,6.5 L48.8,55.2 Q50,58.8 51.2,55.2 L72.9,6.5 Q74,4 76.5,4 H93.2 Q96,4 94.75,6.5 L50.85,94.3 Q50,96.8 49.15,94.3 L5.25,6.5 Q4,4 6.8,4 Z" fill="#f7f6f4"></path>
+  <path d="M75.8,0 H-30 V130 H18.1 Z" fill="#000" opacity="0.21" filter="url(#fr)" transform="translate(1.1,1.5)"></path>
+  <path d="M75.8,0 H-30 V130 H18.1 Z" fill="#f7f6f4"></path>
+  <path d="M75.8,0 H-30 V130 H18.1 Z" fill="url(#bdr)"></path>
+  <path d="M75.8,0 H-30 V130 H18.1 Z" fill="none" stroke="#fff" stroke-opacity="0.45" stroke-width="0.7"></path>
+  <path d="M6.8,4 H23.5 Q26,4 27.1,6.5 L48.8,55.2 Q50,58.8 51.2,55.2 L72.9,6.5 Q74,4 76.5,4 H93.2 Q96,4 94.75,6.5 L50.85,94.3 Q50,96.8 49.15,94.3 L5.25,6.5 Q4,4 6.8,4 Z" fill="url(#bvr)"></path>
+ </g>
+ </g>
+</svg>
