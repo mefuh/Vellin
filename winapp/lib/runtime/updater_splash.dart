@@ -231,7 +231,7 @@ class _VellinUpdaterSplashState extends State<VellinUpdaterSplash> with TickerPr
           type: MaterialType.transparency,
           child: DragToMoveArea(
             child: CustomPaint(
-              painter: const _BackdropPainter(),
+              painter: const VellinBackdropPainter(),
               child: Stack(
                 children: [
                   _buildGlow(),
@@ -305,7 +305,7 @@ class _VellinUpdaterSplashState extends State<VellinUpdaterSplash> with TickerPr
               child: AnimatedBuilder(
                 animation: Listenable.merge([_intro, _hg, _sand, _morph]),
                 builder: (context, _) => CustomPaint(
-                  painter: _MarkPainter(
+                  painter: VellinMarkPainter(
                     introMs: _intro.value * _introTotalMs,
                     morph: Curves.easeOut.transform(_morph.value),
                     hg: _hg.value,
@@ -491,12 +491,12 @@ class _VellinUpdaterSplashState extends State<VellinUpdaterSplash> with TickerPr
   }
 }
 
-/// Фон окна: тёплая эллиптическая засветка сверху, мягкое затемнение к нижнему
+/// Фон окна семейства Vellin (апдейтер, авторизация): тёплая эллиптическая засветка сверху, мягкое затемнение к нижнему
 /// краю и тонкая рамка — как `radial-gradient(130% 105% at 50% 30%)` плюс
 /// внутренняя тень в макете. Радиал именно эллиптический: круговой градиент
 /// Flutter гасит углы заметно быстрее и картинка выходит темнее эталона.
-class _BackdropPainter extends CustomPainter {
-  const _BackdropPainter();
+class VellinBackdropPainter extends CustomPainter {
+  const VellinBackdropPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -544,7 +544,7 @@ class _BackdropPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_BackdropPainter old) => false;
+  bool shouldRepaint(VellinBackdropPainter old) => false;
 }
 
 /// Горизонтальный клип от центра: [inset] — доля ширины с каждой стороны.
@@ -604,10 +604,12 @@ class _RetryButtonState extends State<_RetryButton> {
 
 // --- отрисовка знака -------------------------------------------------------
 
-/// Рисует знак Vellin: отрисовку контура, вспышку, объёмный знак и цикл
+/// Рисует знак Vellin. Переиспользуется окном авторизации: с introMs больше
+/// длительности интро и нулевыми фазами даёт готовый объёмный знак.
+/// Отрисовка контура, вспышку, объёмный знак и цикл
 /// ожидания (V мутирует в песочные часы).
-class _MarkPainter extends CustomPainter {
-  _MarkPainter({required this.introMs, required this.morph, required this.hg, required this.sand});
+class VellinMarkPainter extends CustomPainter {
+  VellinMarkPainter({required this.introMs, required this.morph, required this.hg, required this.sand});
 
   /// Время от старта интро, мс.
   final double introMs;
@@ -894,6 +896,6 @@ class _MarkPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_MarkPainter old) =>
+  bool shouldRepaint(VellinMarkPainter old) =>
       old.introMs != introMs || old.morph != morph || old.hg != hg || old.sand != sand;
 }

@@ -56,8 +56,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     await _dm?.stop();
     await _presence?.stop();
     if (!context.mounted) return;
+    // Никуда не переходим: вход живёт в отдельном окне, и сброс сессии сам
+    // переключает приложение обратно на него (см. фазы в main.dart).
     await context.read<AuthController>().logout();
-    if (context.mounted) context.go('/login');
   }
 
   @override

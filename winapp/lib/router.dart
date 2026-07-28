@@ -3,8 +3,6 @@ import 'package:go_router/go_router.dart';
 import 'app_config.dart';
 import 'state/auth_controller.dart';
 import 'theme/vellin_theme.dart';
-import 'screens/login_screen.dart';
-import 'screens/register_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/self_profile_screen.dart';
 import 'screens/friends_screen.dart';
@@ -26,8 +24,6 @@ GoRouter buildRouter(AuthController auth) {
     routes: [
       GoRoute(path: '/splash', builder: (_, _) => const _SplashScreen()),
       GoRoute(path: '/upgrade', builder: (_, _) => _UpgradeScreen(minVersion: auth.upgradeMinVersion ?? '')),
-      GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
-      GoRoute(path: '/register', builder: (_, _) => const RegisterScreen()),
       GoRoute(
         path: '/u/:publicId',
         builder: (_, state) => PublicProfileScreen(publicId: state.pathParameters['publicId']!),
@@ -46,10 +42,11 @@ GoRouter buildRouter(AuthController auth) {
       final loc = state.matchedLocation;
       if (auth.upgradeMinVersion != null) return loc == '/upgrade' ? null : '/upgrade';
       if (!auth.ready) return loc == '/splash' ? null : '/splash';
-      final authed = auth.authenticated;
-      final onAuthPage = loc == '/login' || loc == '/register';
-      if (authed) return onAuthPage || loc == '/splash' ? '/messages' : null;
-      return onAuthPage ? null : '/login';
+      // Вход живёт в отдельном окне (runtime/auth_window.dart): экранов входа
+      // и регистрации внутри приложения нет, роутер работает только для уже
+      // авторизованного пользователя.
+      if (!auth.authenticated) return loc == '/splash' ? null : '/splash';
+      return loc == '/splash' ? '/messages' : null;
     },
   );
 }

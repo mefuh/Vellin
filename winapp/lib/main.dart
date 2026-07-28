@@ -17,6 +17,7 @@ import 'state/presence_controller.dart';
 import 'state/update_controller.dart';
 import 'storage/session_store.dart';
 import 'theme/vellin_theme.dart';
+import 'runtime/auth_window.dart';
 import 'runtime/updater_splash.dart';
 import 'widgets/window_title_bar.dart';
 
@@ -97,9 +98,13 @@ class VellinApp extends StatefulWidget {
   State<VellinApp> createState() => _VellinAppState();
 }
 
+/// Фазы окна: апдейтер → вход → приложение. Каждая живёт в своём окне —
+/// маленьком безрамочном для первых двух и обычном для третьей.
+enum _Phase { updater, auth, app }
+
 class _VellinAppState extends State<VellinApp> {
   late final _router = buildRouter(context.read<AuthController>());
-  bool _enteredApp = false;
+  _Phase _phase = _Phase.updater;
 
   /// Переключить окно в обычный режим (рамка + заголовок, ресайз, нормальный
   /// размер) — вызывается один раз при переходе из апдейтера в приложение.
@@ -118,17 +123,47 @@ class _VellinAppState extends State<VellinApp> {
     await windowManager.center();
   }
 
+  /// Окно входа — того же семейства, что апдейтер: маленькое, без ресайза.
+  /// Сюда же возвращаемся после выхода из аккаунта, поэтому снимаем всё, что
+  /// включало окно приложения (разворот, изменение размера).
+  Future<void> _enterAuthWindow() async {
+    if (await windowManager.isMaximized()) await windowManager.unmaximize();
+    await windowManager.setResizable(false);
+    await windowManager.setMaximizable(false);
+    // Снимаем минимум окна приложения: он больше окна входа и не дал бы
+    // ужаться. Ставим до смены размера, иначе окно дёрнется дважды.
+    await windowManager.setMinimumSize(const Size(200, 200));
+    await applyAuthWindowSize();
+  }
+
   @override
   Widget build(BuildContext context) {
     final update = context.watch<UpdateController>();
+    final auth = context.watch<AuthController>();
 
-    // Сценарий апдейтера отработал (обновления нет) — уходим в приложение.
-    if (!_enteredApp && update.done) {
-      _enteredApp = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _enterAppWindow());
+    // Апдейтер отработал: дальше либо вход, либо сразу приложение.
+    final target = !update.done
+        ? _Phase.updater
+        : (auth.ready && !auth.authenticated ? _Phase.auth : _Phase.app);
+
+    if (target != _phase) {
+      _phase = target;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (target == _Phase.auth) _enterAuthWindow();
+        if (target == _Phase.app) _enterAppWindow();
+      });
     }
 
-    if (_enteredApp) {
+    if (_phase == _Phase.auth) {
+      return MaterialApp(
+        title: 'Vellin',
+        debugShowCheckedModeBanner: false,
+        theme: buildVellinTheme(),
+        home: AuthWindow(auth: auth, authApi: context.read<AuthApi>()),
+      );
+    }
+
+    if (_phase == _Phase.app) {
       return MaterialApp.router(
         title: 'Vellin',
         debugShowCheckedModeBanner: false,
