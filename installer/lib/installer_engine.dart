@@ -3,7 +3,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 /// Версия устанавливаемого приложения (держать в синхроне с winapp/pubspec).
-const installerAppVersion = '0.2.0';
+const installerAppVersion = '0.3.0';
 
 /// Шаг установки: доля прогресса 0..1, статусная строка и текущий файл.
 class InstallProgress {

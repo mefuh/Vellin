@@ -26,7 +26,7 @@ class AppConfig {
   static const String platform = 'windows';
 
   /// Версия приложения (заголовок X-App-Version). Синхронно с pubspec version.
-  static const String appVersion = '0.2.0';
+  static const String appVersion = '0.3.0';
 
   /// Приводит URL медиа (аватар) к загружаемому виду. Абсолютный — как есть;
   /// относительный `/api/uploads/...` (когда PUBLIC_BASE_URL не задан на сервере)
