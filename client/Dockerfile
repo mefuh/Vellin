@@ -4,7 +4,11 @@ COPY package.json package-lock.json* ./
 COPY shared/package.json ./shared/
 COPY server/package.json ./server/
 COPY client/package.json ./client/
-RUN npm install --omit=optional --ignore-scripts
+# Опциональные зависимости не пропускаем: платформенный бинарник rollup
+# (@rollup/rollup-linux-x64-musl) объявлен именно опциональным, и без него
+# vite build падает. Раньше это не проявлялось только потому, что слой
+# node_modules приходил из кэша сборки.
+RUN npm install --ignore-scripts
 
 FROM node:20-alpine AS build
 WORKDIR /app
