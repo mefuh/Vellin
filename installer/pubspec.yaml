@@ -39,6 +39,8 @@ dependencies:
   window_manager: ^0.5.2
   # Распаковка встроенного payload.zip (чистый Dart).
   archive: ^3.6.1
+  # Системный диалог выбора папки установки («Обзор…»).
+  file_picker: ^8.1.6
 
 dev_dependencies:
   flutter_test:

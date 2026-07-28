@@ -97,6 +97,11 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # Брендовый знак Vellin (тёмная плитка) — используется в заголовке окна.
+  # Это тот же файл, из которого flutter_launcher_icons генерит .ico.
+  assets:
+    - assets/vellin_icon.png
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg
