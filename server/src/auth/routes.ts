@@ -39,6 +39,7 @@ import { absoluteUrl } from '../utils/urls.js';
 import {
   assertGuestsEnabled,
   assertNotMaintenance,
+  assertQrLoginEnabled,
   assertRegistrationEnabled,
   assertUploadsEnabled,
 } from '../admin/platform/gate.js';
@@ -584,6 +585,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post('/auth/qr/start', {
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     handler: async (req, reply) => {
+      await assertQrLoginEnabled();
       await assertNotMaintenance(false);
       // Попутно подчищаем протухшие заявки — отдельный планировщик не нужен.
       await prisma.deviceLoginRequest.deleteMany({ where: { expiresAt: { lt: new Date() } } });
@@ -611,6 +613,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     // Клиент опрашивает раз в 2 секунды, заявка живёт 3 минуты.
     config: { rateLimit: { max: 120, timeWindow: '1 minute' } },
     handler: async (req, reply) => {
+      await assertQrLoginEnabled();
       const { token } = req.query as { token?: string };
       if (!token) {
         deny(reply, 400, 'BadRequest', 'Не передан токен опроса');
@@ -646,6 +649,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get('/auth/qr/:id', { preHandler: requireAuth }, async (req, reply) => {
     const principal = requireUser(req, reply);
     if (!principal) return;
+    await assertQrLoginEnabled();
     const { id } = req.params as { id: string };
     const request = await prisma.deviceLoginRequest.findUnique({ where: { id } });
     if (!request) {
@@ -667,6 +671,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     preHandler: requireAuth,
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     handler: async (req, reply) => {
+      await assertQrLoginEnabled();
       const principal = requireUser(req, reply);
       if (!principal) return;
       const { id } = req.params as { id: string };

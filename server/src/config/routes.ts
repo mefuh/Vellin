@@ -101,6 +101,7 @@ export async function configRoutes(app: FastifyInstance): Promise<void> {
       push: { mode: 'webpush', vapidPublicKey: vapid },
       update: { windows: windowsUpdate() },
       windowsDownloadVisible: await isWindowsDownloadVisible(settings.windows, principal),
+      windowsQrLoginEnabled: settings.windows.qrLogin,
     };
     return response;
   });

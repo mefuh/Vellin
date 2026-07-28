@@ -535,6 +535,8 @@ export interface AppConfigResponse {
   maintenance: PlatformMaintenance;
   /** Лимиты загрузок (МБ) — клиент валидирует до отправки. */
   limits: PlatformLimits;
+  /** Доступно ли добавление устройства по QR (тумблер WINDOWS в админке). */
+  windowsQrLoginEnabled: boolean;
   /** Push-слой: сейчас только web-push; vapidPublicKey=null → push выключен. */
   push: {
     mode: 'webpush';
