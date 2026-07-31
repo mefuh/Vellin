@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { CallMember } from '@vellin/shared';
 import { useAuthStore } from '../../stores/authStore';
 import { useDmCallStore } from '../../stores/dmCallStore';
@@ -7,6 +8,7 @@ import { dmCallSignalBus, dmCallSpeakingBus } from '../../ws/dmCallBuses';
 import { RemoteAudioMixer } from '../room/RemoteAudioMixer';
 import { IncomingCallModal } from './IncomingCallModal';
 import { DmCallOverlay } from './DmCallOverlay';
+import { DmCallMiniBar } from './DmCallMiniBar';
 import { startRingtone } from '../../utils/sound';
 
 /**
@@ -51,16 +53,35 @@ export function DmCallProvider(): React.ReactElement | null {
     [callId, send],
   );
 
+  // Собеседник перезашёл (перезагрузил страницу, вернулся после обрыва) — его
+  // соединение сменилось, а наше соединение с ним стало мёртвым. Убираем его из
+  // участников на один тик: хук закроет старое соединение и создаст новое.
+  const peerConnId = call
+    ? call.callerId === myUserId
+      ? call.calleeConnId
+      : call.callerConnId
+    : null;
+  const prevPeerConnRef = useRef<string | null>(null);
+  const [peerDropped, setPeerDropped] = useState(false);
+  useEffect(() => {
+    const prev = prevPeerConnRef.current;
+    prevPeerConnRef.current = peerConnId;
+    if (!prev || !peerConnId || prev === peerConnId) return;
+    setPeerDropped(true);
+    const t = window.setTimeout(() => setPeerDropped(false), 80);
+    return () => window.clearTimeout(t);
+  }, [peerConnId]);
+
   // Хук открывает соединения по списку участников: в личном звонке их всегда
   // двое, и только пока разговор идёт.
   const members = useMemo<CallMember[]>(() => {
-    if (!active || !myUserId || !peerId || !call) return [];
+    if (!active || !myUserId || !peerId || !call || peerDropped) return [];
     const joinedAt = Date.parse(call.answeredAt ?? call.createdAt) || Date.now();
     return [
       { userId: myUserId, ...(call.media[myUserId] ?? { audio: true, video: false }), joinedAt },
       { userId: peerId, ...(call.media[peerId] ?? { audio: true, video: false }), joinedAt },
     ];
-  }, [active, myUserId, peerId, call]);
+  }, [active, myUserId, peerId, call, peerDropped]);
 
   const onLocalMedia = useCallback(() => {
     // Своё состояние микрофона и камеры уже уходит на сервер через транспорт,
@@ -111,6 +132,18 @@ export function DmCallProvider(): React.ReactElement | null {
     return startRingtone();
   }, [incoming]);
 
+  // Комната во время звонка недоступна. Сервер откажет в любом случае (409 на
+  // вход и отказ при подключении), но лучше не пускать на страницу вовсе, чем
+  // показывать ошибку после перехода.
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!call || call.phase === 'ended') return;
+    if (!location.pathname.startsWith('/room/')) return;
+    navigate('/library', { replace: true });
+    useDmCallStore.setState({ error: 'Завершите звонок, чтобы войти в комнату' });
+  }, [call, location.pathname, navigate]);
+
   if (!myUserId) return null;
 
   return (
@@ -118,7 +151,46 @@ export function DmCallProvider(): React.ReactElement | null {
       {/* Звук вне экранов звонка — продолжает играть при сворачивании. */}
       <RemoteAudioMixer streams={callApi.remoteStreams} />
       {incoming && <IncomingCallModal />}
-      {active && uiMode === 'expanded' && peer && <DmCallOverlay api={callApi} />}
+      {/* Экран нужен и во время дозвона, а не только в разговоре. */}
+      {isMine && peer && uiMode === 'expanded' && <DmCallOverlay api={callApi} />}
+      {isMine && peer && uiMode === 'minimized' && <DmCallMiniBar api={callApi} />}
+      <DmCallToast />
     </>
+  );
+}
+
+/** Сообщение о неудавшемся звонке: «занят», «нет в сети», запрет и прочее. */
+function DmCallToast(): React.ReactElement | null {
+  const error = useDmCallStore((s) => s.error);
+  const clearError = useDmCallStore((s) => s.clearError);
+
+  useEffect(() => {
+    if (!error) return;
+    const t = window.setTimeout(clearError, 5000);
+    return () => window.clearTimeout(t);
+  }, [error, clearError]);
+
+  if (!error) return null;
+  return (
+    <div
+      role="status"
+      style={{
+        position: 'fixed',
+        top: 'calc(16px + env(safe-area-inset-top, 0px))',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 1400,
+        padding: '10px 16px',
+        borderRadius: 999,
+        background: 'var(--bg-2)',
+        border: '1px solid var(--line-2)',
+        boxShadow: 'var(--shadow-3)',
+        color: 'var(--text-0)',
+        fontSize: 13.5,
+        maxWidth: 'calc(100vw - 32px)',
+      }}
+    >
+      {error}
+    </div>
   );
 }

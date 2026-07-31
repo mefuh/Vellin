@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '../../shared';
 import { Icon } from '../../shared/Icon';
 import { useDmCallStore } from '../../stores/dmCallStore';
@@ -42,6 +42,9 @@ export function DmCallOverlay({ api }: { api: UseCallApi }): React.ReactElement 
 
   const speaking = api.speaking.has(peer.id);
   const micOn = call.media[peer.id]?.audio !== false;
+  const peerVideoOn = call.media[peer.id]?.video === true;
+  const myVideoOn = api.myStream?.getVideoTracks()[0]?.enabled === true;
+  const peerStream = api.remoteStreams.get(peer.id) ?? null;
 
   return (
     <div
@@ -82,18 +85,29 @@ export function DmCallOverlay({ api }: { api: UseCallApi }): React.ReactElement 
         <Icon name="chevronD" size={18} />
       </button>
 
-      <Avatar
-        name={peer.username}
-        seed={peer.avatarSeed}
-        src={peer.avatarUrl}
-        size={148}
-        style={
-          speaking
-            ? { boxShadow: '0 0 0 4px var(--accent), 0 0 32px var(--accent-glow)' }
-            : undefined
-        }
-      />
+      {peerVideoOn && peerStream ? (
+        <VideoTile stream={peerStream} label={peer.username} />
+      ) : (
+        <Avatar
+          name={peer.username}
+          seed={peer.avatarSeed}
+          src={peer.avatarUrl}
+          size={148}
+          style={
+            speaking
+              ? { boxShadow: '0 0 0 4px var(--accent), 0 0 32px var(--accent-glow)' }
+              : undefined
+          }
+        />
+      )}
       <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-0)' }}>{peer.username}</div>
+
+      {/* Своё видео — в углу, зеркально, как во всех видеозвонках. */}
+      {myVideoOn && api.myStream && (
+        <div style={{ position: 'absolute', right: 20, bottom: 20, width: 180, aspectRatio: '4 / 3' }}>
+          <VideoTile stream={api.myStream} label="Вы" muted mirrored />
+        </div>
+      )}
       <div style={{ fontSize: 14, color: 'var(--text-2)', minHeight: 20 }}>
         {ringing ? 'Дозвон…' : formatDuration(answeredAt)}
         {!ringing && !micOn && ' · микрофон выключен у собеседника'}
@@ -102,12 +116,62 @@ export function DmCallOverlay({ api }: { api: UseCallApi }): React.ReactElement 
       <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
         <ControlButton
           label={api.myStream?.getAudioTracks()[0]?.enabled === false ? 'Включить микрофон' : 'Выключить микрофон'}
-          icon="mic"
+          icon={api.myStream?.getAudioTracks()[0]?.enabled === false ? 'micOff' : 'mic'}
           onClick={api.toggleMic}
+        />
+        <ControlButton
+          label={myVideoOn ? 'Выключить камеру' : 'Включить камеру'}
+          icon={myVideoOn ? 'video' : 'videoOff'}
+          onClick={() => void api.toggleCamera()}
         />
         <ControlButton label="Завершить" icon="phoneOff" danger onClick={hangup} />
       </div>
     </div>
+  );
+}
+
+/** Кадр видео: собеседника во всю ширину либо своё в углу. */
+function VideoTile({
+  stream,
+  label,
+  muted,
+  mirrored,
+}: {
+  stream: MediaStream;
+  label: string;
+  muted?: boolean;
+  mirrored?: boolean;
+}) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (el.srcObject !== stream) el.srcObject = stream;
+    // Автозапуск может не сработать без жеста — тогда кадр просто замрёт,
+    // звук при этом идёт через общий микшер и не страдает.
+    void el.play().catch(() => {});
+  }, [stream]);
+
+  return (
+    <video
+      ref={ref}
+      autoPlay
+      playsInline
+      muted={muted}
+      aria-label={label}
+      style={{
+        width: '100%',
+        maxWidth: mirrored ? undefined : 'min(720px, 82vw)',
+        maxHeight: mirrored ? undefined : '52vh',
+        height: mirrored ? '100%' : undefined,
+        objectFit: 'cover',
+        borderRadius: 'var(--r-lg)',
+        background: 'var(--bg-2)',
+        border: '1px solid var(--line-2)',
+        transform: mirrored ? 'scaleX(-1)' : undefined,
+      }}
+    />
   );
 }
 
@@ -118,7 +182,7 @@ function ControlButton({
   danger,
 }: {
   label: string;
-  icon: 'mic' | 'phoneOff';
+  icon: 'mic' | 'micOff' | 'video' | 'videoOff' | 'phoneOff';
   onClick: () => void;
   danger?: boolean;
 }) {
