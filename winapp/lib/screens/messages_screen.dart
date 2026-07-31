@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 import '../app_config.dart';
 import '../models/dm.dart';
+import '../runtime/media_gate.dart';
 import '../state/auth_controller.dart';
 import '../state/dm_controller.dart';
 import '../state/presence_controller.dart';
@@ -227,7 +228,13 @@ class _ChatPaneState extends State<_ChatPane> {
   }
 
   Future<void> _startRecord() async {
+    // Микрофон монопольный: во время звонка запись отняла бы у него звук.
+    if (!MediaGate.instance.beginRecording(_cancelRecord)) {
+      _snack('Идёт звонок — записать голосовое нельзя');
+      return;
+    }
     if (!await _rec.hasPermission()) {
+      MediaGate.instance.endRecording();
       if (mounted) _snack('Нет доступа к микрофону');
       return;
     }
@@ -247,9 +254,11 @@ class _ChatPaneState extends State<_ChatPane> {
 
   Future<void> _stopRecordAndSend() async {
     final path = await _rec.stop();
+    MediaGate.instance.endRecording();
     _recTimer?.cancel();
     await _ampSub?.cancel();
     final seconds = _recSeconds;
+    if (!mounted) return;
     setState(() => _recording = false);
     widget.dm.sendRecordingSignal(false, 'voice');
     if (path == null || seconds < 1) return; // слишком коротко — отбрасываем
@@ -262,10 +271,14 @@ class _ChatPaneState extends State<_ChatPane> {
     }
   }
 
+  /// Отмена записи — по кнопке пользователя либо принудительно, когда
+  /// устройства забирает звонок (см. MediaGate).
   Future<void> _cancelRecord() async {
     await _rec.stop();
+    MediaGate.instance.endRecording();
     _recTimer?.cancel();
     await _ampSub?.cancel();
+    if (!mounted) return;
     setState(() => _recording = false);
     widget.dm.sendRecordingSignal(false, 'voice');
     if (_recPath != null) {
@@ -309,6 +322,11 @@ class _ChatPaneState extends State<_ChatPane> {
   }
 
   Future<void> _recordCircle() async {
+    // Камеру и микрофон во время звонка держит он — записать кружок нечем.
+    if (MediaGate.instance.callHoldsDevices) {
+      _snack('Идёт звонок — записать кружок нельзя');
+      return;
+    }
     widget.dm.sendRecordingSignal(true, 'video'); // «записывает видео»
     CircleRecording? rec;
     try {

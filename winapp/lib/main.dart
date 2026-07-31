@@ -102,7 +102,8 @@ Future<void> main(List<String> args) async {
         ChangeNotifierProvider<DmController>(create: (_) => DmController(dmApi, socket)),
         ChangeNotifierProvider<PresenceController>(create: (_) => PresenceController(socket)),
         ChangeNotifierProvider<NotificationsController>.value(value: notifications),
-        ChangeNotifierProvider<CallController>(create: (_) => CallController(socket)),
+        // Тостер нужен звонкам: при неактивном окне входящий приходит им.
+        ChangeNotifierProvider<CallController>(create: (_) => CallController(socket, toasts)),
         Provider<ToastHost>.value(value: toasts),
         ChangeNotifierProvider<UpdateController>.value(value: update),
       ],

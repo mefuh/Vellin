@@ -188,7 +188,10 @@ class _CallScreenState extends State<_CallScreen> {
                   style: const TextStyle(color: VellinColors.text0, fontSize: 24, fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               Text(
-                snapshot.isRinging ? 'Дозвон…' : _elapsed(snapshot.answeredAt),
+                snapshot.isRinging
+                    ? 'Дозвон…'
+                    : '${_elapsed(snapshot.answeredAt)}'
+                        '${call.peerMicEnabled ? '' : ' · микрофон выключен у собеседника'}',
                 style: const TextStyle(color: VellinColors.text2, fontSize: 14),
               ),
               const SizedBox(height: 26),

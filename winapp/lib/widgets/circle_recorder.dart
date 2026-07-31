@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import '../runtime/media_gate.dart';
 import '../theme/vellin_theme.dart';
 
 /// Результат записи кружка: путь к файлу + длительность в секундах.
@@ -37,6 +38,12 @@ class _CircleRecorderDialogState extends State<_CircleRecorderDialog> {
   }
 
   Future<void> _init() async {
+    // Камера и микрофон монопольны: пока идёт звонок, кружок записать нечем, а
+    // начавшийся звонок закрывает это окно сам.
+    if (!MediaGate.instance.beginRecording(_closeForCall)) {
+      setState(() => _error = 'Идёт звонок');
+      return;
+    }
     try {
       final cams = await availableCameras();
       if (cams.isEmpty) {
@@ -52,9 +59,20 @@ class _CircleRecorderDialogState extends State<_CircleRecorderDialog> {
     }
   }
 
+  /// Звонок забрал устройства: запись бросаем, окно закрываем без результата.
+  Future<void> _closeForCall() async {
+    _timer?.cancel();
+    try {
+      if (_recording) await _cam?.stopVideoRecording();
+    } catch (_) {}
+    _recording = false;
+    if (mounted) Navigator.of(context).pop(null);
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
+    MediaGate.instance.endRecording();
     _cam?.dispose();
     super.dispose();
   }

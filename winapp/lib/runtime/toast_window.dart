@@ -76,13 +76,20 @@ class ToastData {
   final String? avatarUrl;
   final String avatarSeed;
 
+  /// 'message' — обычное уведомление, 'call' — входящий звонок с кнопками
+  /// ответа. Звонок ведёт себя иначе: показывается сразу и висит, пока звонят.
+  final String kind;
+
   const ToastData({
     required this.id,
     required this.title,
     required this.body,
     required this.avatarUrl,
     required this.avatarSeed,
+    this.kind = 'message',
   });
+
+  bool get isCall => kind == 'call';
 
   factory ToastData.fromJson(Map<String, dynamic> j) => ToastData(
         id: j['id'] as String? ?? '',
@@ -90,6 +97,7 @@ class ToastData {
         body: j['body'] as String? ?? '',
         avatarUrl: j['avatarUrl'] as String?,
         avatarSeed: j['avatarSeed'] as String? ?? '',
+        kind: j['kind'] as String? ?? 'message',
       );
 }
 
@@ -222,8 +230,16 @@ class _ToastAppState extends State<_ToastApp> with TickerProviderStateMixin {
         _enqueue(ToastData.fromJson(msg));
         break;
       case 'hide':
-        _queue.clear();
-        _dismiss();
+        // С идентификатором — снять конкретное уведомление (звонок отменили или
+        // на него ответили с другого устройства), без него — всё сразу.
+        final id = msg['id'] as String?;
+        if (id != null) {
+          _queue.removeWhere((t) => t.id == id);
+          if (_current?.id == id) _dismiss();
+        } else {
+          _queue.clear();
+          _dismiss();
+        }
         break;
       case 'quit':
         _exit();
@@ -250,6 +266,13 @@ class _ToastAppState extends State<_ToastApp> with TickerProviderStateMixin {
       _present(t);
       return;
     }
+    // Звонок ждать не может: пока сообщение дослуживает своё время, звонящий
+    // успеет положить трубку. Он вытесняет текущий тост немедленно.
+    if (t.isCall) {
+      _queue.removeWhere((q) => q.isCall);
+      _present(t);
+      return;
+    }
     // Тост на экране один: новое встаёт в очередь и заменит текущий, но не
     // раньше, чем текущий провисит _minReadTime — иначе первое уведомление
     // мелькнёт, и его не успеют прочитать.
@@ -261,6 +284,8 @@ class _ToastAppState extends State<_ToastApp> with TickerProviderStateMixin {
   /// текущий уже провисел положенное, иначе — когда провисит.
   void _scheduleReplace() {
     if (_queue.isEmpty || _current == null || _leaving) return;
+    // Звонок на экране не сменяют сообщениями — они подождут.
+    if (_current!.isCall) return;
     final shownFor = DateTime.now().difference(_shownAt ?? DateTime.now());
     final left = _minReadTime - shownFor;
     _replaceTimer?.cancel();
@@ -303,9 +328,13 @@ class _ToastAppState extends State<_ToastApp> with TickerProviderStateMixin {
       // ходит в нативную часть и, попав в начало показа, съедал первые кадры.
       await windowManager.setAlwaysOnTop(true);
     }
-    _restartLifetime();
-    // Пока показывали этот тост, мог накопиться следующий.
-    _scheduleReplace();
+    // Звонок висит, пока звонят: снимет его сам звонок — ответом, отказом или
+    // командой от приложения. Уводить его по таймеру нельзя.
+    if (!t.isCall) {
+      _restartLifetime();
+      // Пока показывали этот тост, мог накопиться следующий.
+      _scheduleReplace();
+    }
   }
 
   void _restartLifetime() {
@@ -338,6 +367,13 @@ class _ToastAppState extends State<_ToastApp> with TickerProviderStateMixin {
   void _onCardTap(ToastData t) {
     _send({'event': 'click', 'id': t.id});
     _queue.clear();
+    _dismiss();
+  }
+
+  /// Ответ или отказ по звонку: решение уходит приложению, тост снимаем сами —
+  /// дальше разговор ведётся в главном окне.
+  void _onCallAction(ToastData t, String action) {
+    _send({'event': 'call', 'id': t.id, 'action': action});
     _dismiss();
   }
 
@@ -410,6 +446,7 @@ class _ToastAppState extends State<_ToastApp> with TickerProviderStateMixin {
                 progress: _anim,
                 onTap: () => _onCardTap(_current!),
                 onClose: _dismiss,
+                onCallAction: (action) => _onCallAction(_current!, action),
               ),
       ),
     );
@@ -425,11 +462,15 @@ class _ToastCard extends StatefulWidget {
   final Animation<double> progress;
   final VoidCallback onTap;
   final VoidCallback onClose;
+
+  /// 'accept' | 'decline' — только для тоста входящего звонка.
+  final void Function(String action) onCallAction;
   const _ToastCard({
     required this.data,
     required this.progress,
     required this.onTap,
     required this.onClose,
+    required this.onCallAction,
   });
 
   @override
@@ -441,6 +482,7 @@ class _ToastCardState extends State<_ToastCard> {
 
   @override
   Widget build(BuildContext context) {
+    final call = widget.data.isCall;
     final curve = CurvedAnimation(
       parent: widget.progress,
       curve: Curves.easeOutCubic,
@@ -500,11 +542,11 @@ class _ToastCardState extends State<_ToastCard> {
               // прижимался бы к верхнему краю.
               Positioned.fill(
                 child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 42, 12),
+                padding: EdgeInsets.fromLTRB(16, 12, call ? 12 : 42, 12),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    _ToastAvatar(data: widget.data, size: 54),
+                    _ToastAvatar(data: widget.data, size: call ? 46 : 54),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
@@ -521,26 +563,45 @@ class _ToastCardState extends State<_ToastCard> {
                           const SizedBox(height: 4),
                           Text(
                             widget.data.body,
-                            maxLines: 2,
+                            maxLines: call ? 1 : 2,
                             overflow: TextOverflow.ellipsis,
                             style: _t(size: 14, alpha: 0.72, height: 1.35),
                           ),
                         ],
                       ),
                     ),
+                    // Ответить и отклонить прямо из тоста: главное окно сейчас
+                    // не в фокусе, и поднимать его ради двух кнопок незачем.
+                    if (call) ...[
+                      const SizedBox(width: 8),
+                      _CallActionButton(
+                        icon: Icons.call_end,
+                        color: _accent,
+                        onTap: () => widget.onCallAction('decline'),
+                      ),
+                      const SizedBox(width: 8),
+                      _CallActionButton(
+                        icon: Icons.call,
+                        color: const Color(0xFF2E9E5B),
+                        onTap: () => widget.onCallAction('accept'),
+                      ),
+                    ],
                   ],
                 ),
                 ),
               ),
-              Positioned(top: 10, right: 10, child: _CloseButton(onTap: widget.onClose)),
+              // У звонка крестика нет: отказ — это кнопка, а не закрытие.
+              if (!call)
+                Positioned(top: 10, right: 10, child: _CloseButton(onTap: widget.onClose)),
               // Подпись семейства окон Vellin — тост должен читаться как «от
               // приложения», раз системной плашки с именем больше нет.
-              Positioned(
-                bottom: 10,
-                right: 12,
-                child: Text('VELLIN',
-                    style: _t(size: 8, weight: FontWeight.w600, alpha: 0.3, spacing: 2.2)),
-              ),
+              if (!call)
+                Positioned(
+                  bottom: 10,
+                  right: 12,
+                  child: Text('VELLIN',
+                      style: _t(size: 8, weight: FontWeight.w600, alpha: 0.3, spacing: 2.2)),
+                ),
             ]),
           ),
         ),
@@ -575,6 +636,44 @@ class _ToastAvatar extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: hasImage ? null : Text(initial, style: _t(size: size * 0.4, weight: FontWeight.w600)),
+    );
+  }
+}
+
+/// Круглая кнопка ответа или отказа в тосте входящего звонка.
+class _CallActionButton extends StatefulWidget {
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+  const _CallActionButton({required this.icon, required this.color, required this.onTap});
+  @override
+  State<_CallActionButton> createState() => _CallActionButtonState();
+}
+
+class _CallActionButtonState extends State<_CallActionButton> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        // Кнопка не должна заодно открывать приложение по клику на карточку.
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _hover ? widget.color : widget.color.withValues(alpha: 0.85),
+          ),
+          child: Icon(widget.icon, size: 18, color: _paper),
+        ),
+      ),
     );
   }
 }

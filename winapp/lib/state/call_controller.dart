@@ -6,6 +6,9 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../models/call.dart';
 import '../models/social.dart';
 import '../realtime/user_socket.dart';
+import '../runtime/call_tones.dart';
+import '../runtime/media_gate.dart';
+import '../runtime/toast_host.dart';
 import '../webrtc/dm_call_session.dart';
 
 /// Как показан звонок в окне.
@@ -18,7 +21,17 @@ enum CallUiMode { hidden, minimized, expanded }
 /// раздел «Сообщения» — звонок должен приходить из любого места приложения.
 class CallController extends ChangeNotifier {
   final UserSocket _socket;
-  CallController(this._socket);
+
+  /// Окно тостов: через него звонок доходит до пользователя, когда главное
+  /// окно свёрнуто или перекрыто.
+  final ToastHost _toasts;
+
+  CallController(this._socket, this._toasts) {
+    _toasts.onCallAction = _onToastAction;
+  }
+
+  /// Идентификатор звонка, показанного тостом, — его нужно будет снять.
+  String? _toastCallId;
 
   StreamSubscription<Map<String, dynamic>>? _sub;
   bool _started = false;
@@ -43,6 +56,10 @@ class CallController extends ChangeNotifier {
   bool _renderersReady = false;
 
   bool get hasRemoteVideo => remoteRenderer.srcObject != null && (call?.media[peerId]?.video ?? false);
+
+  /// Микрофон собеседника: выключенный он не слышен, и об этом надо сказать —
+  /// иначе тишина читается как обрыв связи.
+  bool get peerMicEnabled => call?.media[peerId]?.audio ?? true;
   String get peerId => call != null ? call!.peerIdFor(_myUserId) : '';
   bool get micEnabled => _session?.micEnabled ?? true;
   bool get cameraEnabled => _session?.videoEnabled ?? false;
@@ -84,6 +101,7 @@ class CallController extends ChangeNotifier {
     _started = false;
     await _sub?.cancel();
     _sub = null;
+    _stopRinging();
     await _teardownSession();
     call = null;
     peer = null;
@@ -95,6 +113,7 @@ class CallController extends ChangeNotifier {
   @override
   void dispose() {
     _sub?.cancel();
+    CallTones.instance.stop();
     _session?.dispose();
     localRenderer.dispose();
     remoteRenderer.dispose();
@@ -127,6 +146,8 @@ class CallController extends ChangeNotifier {
         _rtcConfig = _toRtcConfig(msg['rtc']);
         incoming = IncomingDmCall(snapshot, from);
         error = null;
+        CallTones.instance.startRingtone();
+        _showCallToast(snapshot, from);
         notifyListeners();
         break;
 
@@ -140,7 +161,19 @@ class CallController extends ChangeNotifier {
         break;
 
       case 'dmcall_media':
-        // Состояние собеседника придёт и снапшотом; здесь только перерисовка.
+        // Сервер шлёт переключение отдельно, без нового снимка, — состояние
+        // собеседника обновляем сами, иначе включённая камера не появится.
+        final from = msg['fromUserId'] as String?;
+        final current = call;
+        if (from != null && current != null && current.callId == msg['callId']) {
+          call = current.withMedia(
+            from,
+            DmCallMediaState(
+              audio: msg['audio'] as bool? ?? true,
+              video: msg['video'] as bool? ?? false,
+            ),
+          );
+        }
         notifyListeners();
         break;
 
@@ -150,6 +183,7 @@ class CallController extends ChangeNotifier {
         call = null;
         peer = null;
         uiMode = CallUiMode.hidden;
+        _stopRinging();
         _teardownSession();
         notifyListeners();
         break;
@@ -169,6 +203,7 @@ class CallController extends ChangeNotifier {
       peer = null;
       incoming = null;
       uiMode = CallUiMode.hidden;
+      _stopRinging();
       await _teardownSession();
       notifyListeners();
       return;
@@ -186,12 +221,21 @@ class CallController extends ChangeNotifier {
     if (!isMine) {
       incoming = null;
       uiMode = CallUiMode.hidden;
+      _stopRinging();
       await _teardownSession();
       notifyListeners();
       return;
     }
 
     if (uiMode == CallUiMode.hidden) uiMode = CallUiMode.expanded;
+
+    // Гудки — пока идёт дозвон, и только у звонящего: у принимающей стороны
+    // звонок уже отзвонил трелью.
+    if (snapshot.isRinging && snapshot.callerId == _myUserId) {
+      CallTones.instance.startRingback();
+    } else {
+      _stopRinging();
+    }
 
     if (snapshot.isActive) {
       final nextPeerConn =
@@ -224,11 +268,54 @@ class CallController extends ChangeNotifier {
     };
   }
 
+  // ── Тост входящего звонка и звуки ─────────────────────────────────────────
+
+  /// Показать звонок тостом, если главное окно не в фокусе. Иначе достаточно
+  /// экрана входящего — тост показан не будет, и снимать нечего.
+  Future<void> _showCallToast(DmCallSnapshot snapshot, PublicUser from) async {
+    final shown = await _toasts.showIncomingCall(
+      callId: snapshot.callId,
+      username: from.username,
+      video: snapshot.video,
+      avatarUrl: from.avatarUrl,
+      avatarSeed: from.avatarSeed,
+    );
+    if (shown) _toastCallId = snapshot.callId;
+  }
+
+  void _hideCallToast() {
+    final id = _toastCallId;
+    if (id == null) return;
+    _toastCallId = null;
+    _toasts.hideIncomingCall(id);
+  }
+
+  /// Ответ или отказ кнопкой прямо в тосте.
+  void _onToastAction(String callId, String action) {
+    _toastCallId = null; // тост уже снял себя сам
+    final inc = incoming;
+    if (inc == null || inc.call.callId != callId) return;
+    if (action == 'accept') {
+      accept(video: false);
+    } else {
+      decline();
+    }
+  }
+
+  /// Снять звук дозвона вместе с тостом: оба живут ровно пока звонят.
+  void _stopRinging() {
+    CallTones.instance.stop();
+    _hideCallToast();
+  }
+
   // ── Медиа ─────────────────────────────────────────────────────────────────
 
   Future<void> _startSession(DmCallSnapshot snapshot) async {
     final config = _rtcConfig;
     if (config == null) return;
+    // Микрофон и камера монопольны: если сейчас пишется голосовое или кружок,
+    // запись прерывается — иначе звонок остался бы без звука.
+    await MediaGate.instance.acquireForCall();
     await _ensureRenderers();
     final session = DmCallSession(
       myUserId: _myUserId,
@@ -260,6 +347,7 @@ class CallController extends ChangeNotifier {
     _session = null;
     await _releaseRenderers();
     await s?.dispose();
+    MediaGate.instance.releaseFromCall();
   }
 
   // ── Действия пользователя ─────────────────────────────────────────────────
@@ -278,6 +366,7 @@ class CallController extends ChangeNotifier {
     final inc = incoming;
     if (inc == null) return;
     incoming = null;
+    _stopRinging();
     notifyListeners();
     _socket.send({'t': 'dmcall_accept', 'callId': inc.call.callId, 'video': video});
   }
@@ -286,6 +375,7 @@ class CallController extends ChangeNotifier {
     final inc = incoming;
     if (inc == null) return;
     incoming = null;
+    _stopRinging();
     notifyListeners();
     _socket.send({'t': 'dmcall_decline', 'callId': inc.call.callId});
   }

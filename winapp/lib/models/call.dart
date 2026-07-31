@@ -70,6 +70,25 @@ class DmCallSnapshot {
     );
   }
 
+  /// Снимок с обновлённым состоянием микрофона/камеры одной стороны.
+  ///
+  /// Сервер шлёт переключение камеры отдельным сообщением, а не новым снимком,
+  /// поэтому состояние обновляет клиент — иначе включённая по ходу разговора
+  /// камера собеседника не появилась бы на экране.
+  DmCallSnapshot withMedia(String userId, DmCallMediaState state) => DmCallSnapshot(
+        callId: callId,
+        callerId: callerId,
+        calleeId: calleeId,
+        video: video,
+        phase: phase,
+        createdAt: createdAt,
+        answeredAt: answeredAt,
+        endReason: endReason,
+        callerConnId: callerConnId,
+        calleeConnId: calleeConnId,
+        media: {...media, userId: state},
+      );
+
   bool get isRinging => phase == 'ringing';
   bool get isActive => phase == 'active';
   bool get isEnded => phase == 'ended';

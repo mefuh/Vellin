@@ -26,6 +26,10 @@ class ToastHost {
   /// Показанные тосты — чтобы клик знал, куда вести.
   final _shown = <String, AppNotification>{};
 
+  /// Ответ или отказ по звонку из тоста: (callId, 'accept' | 'decline').
+  /// Подписывается контроллер звонков.
+  void Function(String callId, String action)? onCallAction;
+
   /// Показать уведомление, если главное окно сейчас не в фокусе: при активном
   /// окне пользователю достаточно колокольчика.
   Future<void> show(AppNotification n) async {
@@ -45,6 +49,40 @@ class ToastHost {
       'avatarSeed': n.actor?.avatarSeed ?? '',
     });
   }
+
+  /// Показать входящий звонок, когда главное окно не в фокусе: с кнопками
+  /// ответа и отказа, без автоскрытия. При активном окне ничего не показываем —
+  /// там уже есть полноэкранный входящий.
+  ///
+  /// Возвращает true, если тост показан: звонок нужно будет снять вручную.
+  Future<bool> showIncomingCall({
+    required String callId,
+    required String username,
+    required bool video,
+    String? avatarUrl,
+    String avatarSeed = '',
+  }) async {
+    try {
+      if (await windowManager.isFocused()) return false;
+    } catch (_) {
+      // Состояние окна неизвестно — звонок важнее, показываем.
+    }
+    if (!await _ensureToaster()) return false;
+    _send({
+      'cmd': 'show',
+      'kind': 'call',
+      'id': callId,
+      'title': username,
+      'body': video ? 'Входящий видеозвонок' : 'Входящий звонок',
+      'avatarUrl': AppConfig.mediaUrl(avatarUrl),
+      'avatarSeed': avatarSeed,
+    });
+    return true;
+  }
+
+  /// Снять тост звонка: ответили в главном окне, звонящий положил трубку или
+  /// ответили с другого устройства.
+  void hideIncomingCall(String callId) => _send({'cmd': 'hide', 'id': callId});
 
   /// Завершить тостер (выход из аккаунта, закрытие приложения).
   Future<void> stop() async {
@@ -134,6 +172,15 @@ class ToastHost {
       final n = _shown.remove(msg['id']);
       restoreWindow();
       if (n != null) openNotification(n);
+      return;
+    }
+    if (msg['event'] == 'call') {
+      final callId = msg['id'] as String?;
+      final action = msg['action'] as String?;
+      if (callId == null || action == null) return;
+      // Ответили — разговор идёт в главном окне, показываем его.
+      if (action == 'accept') restoreWindow();
+      onCallAction?.call(callId, action);
     }
   }
 
