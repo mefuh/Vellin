@@ -18,3 +18,11 @@ export function useCallContext(): UseCallApi {
   if (!v) throw new Error('useCallContext must be used within <CallProvider>');
   return v;
 }
+
+/**
+ * То же, но без исключения: общие детали звонка (например, микшер звука)
+ * переиспользуются вне комнаты, где комнатного провайдера нет.
+ */
+export function useCallContextOptional(): UseCallApi | null {
+  return useContext(CallContext);
+}

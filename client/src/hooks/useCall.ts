@@ -1,14 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
-  C2S,
   CallMember,
   CallSignalPayload,
   IceCandidatePayload,
   RtcConfig,
 } from '@vellin/shared';
-import { callSignalBus } from '../ws/callSignalBus';
-import { callSpeakingBus } from '../ws/callSpeakingBus';
-import { useRoomStore } from '../stores/roomStore';
 import { useCallSettingsStore } from '../stores/callSettingsStore';
 import type { WSConnectionState } from '../ws/WSClient';
 import { setupAudioPipeline, type AudioPipeline } from './audioPipeline';
@@ -30,13 +26,40 @@ import { isIOS } from '../utils/platform';
 export type CallState = 'idle' | 'connecting' | 'in';
 export type PermissionError = 'denied' | 'no-mic' | null;
 
+/**
+ * Как хук общается с сервером. Комната шлёт свои `C2S`, личные звонки — свои
+ * сообщения пользовательского канала; механика согласования одна и та же,
+ * поэтому она знает только эти пять действий.
+ */
+export interface CallTransport {
+  join(wantVideo: boolean): void;
+  leave(): void;
+  signal(toUserId: string, payload: CallSignalPayload): void;
+  media(audio: boolean, video: boolean): void;
+  speaking(speaking: boolean): void;
+}
+
+/** Шина входящих сигналов — своя у комнаты и у каждого личного звонка. */
+export interface CallSignalBus {
+  on(listener: (fromUserId: string, payload: CallSignalPayload) => void): () => void;
+}
+
+/** Шина индикаторов речи. */
+export interface CallSpeakingBus {
+  on(listener: (userId: string, speaking: boolean) => void): () => void;
+}
+
 export interface UseCallOpts {
   myUserId: string | null;
   myUserKind: 'user' | 'guest' | null;
   rtcConfig: RtcConfig | null;
   callMembers: CallMember[];
   wsState: WSConnectionState;
-  send: (msg: C2S) => boolean;
+  transport: CallTransport;
+  signalBus: CallSignalBus;
+  speakingBus: CallSpeakingBus;
+  /** Своё состояние микрофона/камеры — куда его класть, решает вызывающий. */
+  onLocalMedia: (media: { audio: boolean; video: boolean }) => void;
 }
 
 export interface UseCallApi {
@@ -110,7 +133,17 @@ const SPEAKING_THRESHOLD = 0.04;
 const SPEAKING_LINGER_MS = 350;
 
 export function useCall(opts: UseCallOpts): UseCallApi {
-  const { myUserId, myUserKind, rtcConfig, callMembers, wsState, send } = opts;
+  const {
+    myUserId,
+    myUserKind,
+    rtcConfig,
+    callMembers,
+    wsState,
+    transport,
+    signalBus,
+    speakingBus,
+    onLocalMedia,
+  } = opts;
 
   const [state, setState] = useState<CallState>('idle');
   const [permissionError, setPermissionError] = useState<PermissionError>(null);
@@ -150,9 +183,9 @@ export function useCall(opts: UseCallOpts): UseCallApi {
 
   const sendSignal = useCallback(
     (toUserId: string, payload: CallSignalPayload): void => {
-      send({ t: 'call_signal', toUserId, payload, clientTs: Date.now() });
+      transport.signal(toUserId, payload);
     },
-    [send],
+    [transport],
   );
 
   const broadcastMyMedia = useCallback((): void => {
@@ -161,9 +194,9 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     const stream = localStreamRef.current;
     const audio = micOnRef.current;
     const video = !!stream?.getVideoTracks()[0]?.enabled;
-    useRoomStore.getState().setMyMedia({ audio, video });
-    send({ t: 'call_media', audio, video, clientTs: Date.now() });
-  }, [send]);
+    onLocalMedia({ audio, video });
+    transport.media(audio, video);
+  }, [transport, onLocalMedia]);
 
   // ── Speaker detection ───────────────────────────────────────────────────
 
@@ -259,7 +292,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       // speaking (analyser is post-mute, but cheap guard).
       if (selfActive !== prevSelfSpeakingRef.current) {
         prevSelfSpeakingRef.current = selfActive;
-        send({ t: 'call_speaking', speaking: selfActive, clientTs: Date.now() });
+        transport.speaking(selfActive);
       }
 
       rafRef.current = window.requestAnimationFrame(tick);
@@ -270,12 +303,12 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       if (rafRef.current != null) window.cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [state, myUserId, send]);
+  }, [state, myUserId, transport]);
 
   // Remote speaker indicators come over WS via `callSpeakingBus`. Merge them
   // into the same `speaking` set the local analyser writes to.
   useEffect(() => {
-    return callSpeakingBus.on((peerUserId, speaking) => {
+    return speakingBus.on((peerUserId, speaking) => {
       if (peerUserId === myUserId) return; // self managed by local analyser
       setSpeaking((prev) => {
         const has = prev.has(peerUserId);
@@ -441,7 +474,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   // ── Incoming signal handling ────────────────────────────────────────────
 
   useEffect(() => {
-    const off = callSignalBus.on(async (fromUserId, payload) => {
+    const off = signalBus.on(async (fromUserId, payload) => {
       if (stateRef.current !== 'in') return;
       let rec = pcsRef.current.get(fromUserId);
       if (!rec) {
@@ -529,9 +562,9 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       // Old PCs are stale — start fresh and re-join.
       closeAllPeers();
       const wantVideo = !!localStreamRef.current?.getVideoTracks()[0]?.enabled;
-      send({ t: 'call_join', wantVideo, clientTs: Date.now() });
+      transport.join(wantVideo);
     }
-  }, [wsState, send, closeAllPeers]);
+  }, [wsState, transport, closeAllPeers]);
 
   // ── Outbound video sync (camera ⊕ mirror pipeline) ─────────────────────
   // Single source of truth for what video track every PC + outbound stream
@@ -693,16 +726,16 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       // ourselves; the snapshot watcher uses outbound's tracks to build PCs.
       await syncOutboundVideo();
 
-      useRoomStore.getState().setMyMedia({ audio: false, video: withVideo });
-      send({ t: 'call_join', wantVideo: withVideo, clientTs: Date.now() });
+      onLocalMedia({ audio: false, video: withVideo });
+      transport.join(withVideo);
       setState('in');
     },
-    [myUserId, myUserKind, send, attachAnalyser, ensureAudioCtx, syncOutboundVideo],
+    [myUserId, myUserKind, transport, onLocalMedia, attachAnalyser, ensureAudioCtx, syncOutboundVideo],
   );
 
   const leave = useCallback<UseCallApi['leave']>(() => {
     if (stateRef.current === 'idle') return;
-    send({ t: 'call_leave', clientTs: Date.now() });
+    transport.leave();
     closeAllPeers();
     pipelineRef.current?.teardown();
     pipelineRef.current = null;
@@ -721,9 +754,9 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     setMyStream(null);
     setRemoteStreams(new Map());
     setSpeaking(new Set());
-    useRoomStore.getState().setMyMedia({ audio: false, video: false });
+    onLocalMedia({ audio: false, video: false });
     setState('idle');
-  }, [send, closeAllPeers, detachAnalyser]);
+  }, [transport, onLocalMedia, closeAllPeers, detachAnalyser]);
 
   const toggleMic = useCallback<UseCallApi['toggleMic']>(() => {
     const next = !micOnRef.current;
