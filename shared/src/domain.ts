@@ -576,7 +576,18 @@ export interface DmConversation {
   /** Собеседник. */
   peer: PublicUser;
   /** Последнее сообщение в диалоге (для превью), либо null — диалог пуст. */
-  lastMessage: { body: string; senderId: string; createdAt: string; hasImage: boolean; hasVoice: boolean; hasVideo: boolean; hasRoomInvite: boolean } | null;
+  lastMessage: {
+    body: string;
+    senderId: string;
+    createdAt: string;
+    hasImage: boolean;
+    hasVoice: boolean;
+    hasVideo: boolean;
+    hasRoomInvite: boolean;
+    /** Последним был звонок — у него пустой текст, превью строится отдельно. */
+    hasCall: boolean;
+    callOutcome?: 'completed' | 'missed' | 'declined' | 'cancelled' | 'failed';
+  } | null;
   /** Сколько у меня непрочитанных в этом диалоге. */
   unreadCount: number;
   /**

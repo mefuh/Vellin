@@ -115,6 +115,8 @@ function bumpConversation(
     // при создании (processing), маркер не должен ждать готового файла.
     hasVideo: !!message.videoStatus,
     hasRoomInvite: !!message.inviteRoomId,
+    hasCall: !!message.callId,
+    ...(message.callOutcome ? { callOutcome: message.callOutcome } : {}),
   };
   if (idx === -1) {
     return [

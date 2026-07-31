@@ -178,6 +178,7 @@ function SettingsTab() {
 
           <GroupCaption>Общение</GroupCaption>
           <ToggleRow label="Личные сообщения" hint="Переписка в личных диалогах" checked={T.directMessages} onChange={(v) => setT('directMessages', v)} />
+          <ToggleRow label="Звонки в личных сообщениях" hint="Звонки один на один на сайте и в клиенте для Windows" checked={T.dmCalls} onChange={(v) => setT('dmCalls', v)} />
           <ToggleRow label="Друзья" hint="Отправка и приём заявок в друзья" checked={T.friends} onChange={(v) => setT('friends', v)} />
           <ToggleRow label="Приглашения в комнаты" hint="Ссылки-приглашения и зов друзей в комнату" checked={T.invites} onChange={(v) => setT('invites', v)} />
 
