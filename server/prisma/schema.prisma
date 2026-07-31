@@ -481,11 +481,22 @@ model DirectMessage {
   inviteToken      String?
   /// 'pending' | 'accepted' | 'declined' | 'expired'. Null — не приглашение.
   inviteStatus     String?
+  /// Запись о звонке: id сессии звонка. Null — обычное сообщение.
+  /// Отправителем записи всегда числится звонящий, поэтому направление
+  /// («исходящий»/«входящий») выводится из senderId без отдельного поля.
+  callId           String?
+  /// 'audio' | 'video'. Null — не запись о звонке.
+  callKind         String?
+  /// 'completed' | 'missed' | 'declined' | 'cancelled' | 'failed'.
+  callOutcome      String?
+  /// Длительность разговора в секундах; 0 у несостоявшихся звонков.
+  callDurationSec  Int?
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])
   @@index([videoStatus])
   @@index([conversationId, inviteRoomId, inviteStatus])
+  @@index([callId])
 }
 
 /// Серверная запись о входе (устройство/браузер). JWT пользователя несёт
