@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useCallContext } from '../../hooks/CallContext';
+import { useCallContextOptional } from '../../hooks/CallContext';
 import { useCallSettingsStore } from '../../stores/callSettingsStore';
 
 /**
@@ -8,8 +8,11 @@ import { useCallSettingsStore } from '../../stores/callSettingsStore';
  * overlay, or neither). Mount once at the Room.tsx level. Per-peer playback
  * volume comes from `callSettingsStore` and is applied live to each element.
  */
-export function RemoteAudioMixer() {
-  const { remoteStreams } = useCallContext();
+export function RemoteAudioMixer({ streams }: { streams?: Map<string, MediaStream> } = {}) {
+  // Комната берёт потоки из своего контекста; звонок в личных сообщениях живёт
+  // выше роутера и передаёт их напрямую.
+  const ctx = useCallContextOptional();
+  const remoteStreams = streams ?? ctx?.remoteStreams ?? new Map<string, MediaStream>();
   return (
     <div aria-hidden style={{ display: 'none' }}>
       {[...remoteStreams.entries()].map(([userId, stream]) => (

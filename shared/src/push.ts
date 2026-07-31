@@ -8,6 +8,7 @@
 /** Ключ шаблона/типа push-уведомления. Расширяется без правки существующего кода. */
 export type PushNotificationType =
   | 'direct_message'
+  | 'dm_call_missed'
   | 'friend_request'
   | 'friend_accepted'
   | 'room_invite'
@@ -19,6 +20,7 @@ export type PushNotificationType =
 /** Категория для пользовательских настроек (один тумблер может покрывать тип). */
 export type PushCategory =
   | 'direct_messages'
+  | 'calls'
   | 'friend_requests'
   | 'friend_accepted'
   | 'room_invites'
@@ -30,6 +32,7 @@ export type PushCategory =
 /** Тип → категория настроек. Новый тип добавляется одной строкой. */
 export const PUSH_TYPE_CATEGORY: Record<PushNotificationType, PushCategory> = {
   direct_message: 'direct_messages',
+  dm_call_missed: 'calls',
   friend_request: 'friend_requests',
   friend_accepted: 'friend_accepted',
   room_invite: 'room_invites',
@@ -42,6 +45,7 @@ export const PUSH_TYPE_CATEGORY: Record<PushNotificationType, PushCategory> = {
 /** Полный список категорий с человекочитаемыми подписями (для страницы настроек). */
 export const PUSH_CATEGORIES: { id: PushCategory; label: string; hint: string }[] = [
   { id: 'direct_messages', label: 'Личные сообщения', hint: 'Новые сообщения в диалогах' },
+  { id: 'calls', label: 'Звонки', hint: 'Пропущенные звонки в личных сообщениях' },
   { id: 'friend_requests', label: 'Заявки в друзья', hint: 'Когда вам отправили заявку' },
   { id: 'friend_accepted', label: 'Принятие заявки', hint: 'Когда вашу заявку приняли' },
   { id: 'room_invites', label: 'Приглашения в комнаты', hint: 'Когда вас зовут смотреть' },

@@ -46,10 +46,15 @@ import { roomMutex } from '../utils/async-mutex.js';
 import { getOrCreateMembership } from '../rooms/membership.js';
 import { getEffectivePermissions } from '../rooms/permissions.js';
 import { getRtcConfig } from '../env.js';
+import { dispatchDmCall, isDmCallMessage, isDmCallSignalMessage } from './userCallDispatch.js';
+import { dmCallHub, toSnapshot } from '../calls/DmCallHub.js';
 
 // 32 KB — leaves comfortable headroom for SDP offers with bundled codecs
 // (typical 8–12 KB; some Chromium builds clear 16 KB).
 const MAX_MESSAGE_BYTES = 32 * 1024;
+
+/** Тот же потолок для пользовательского канала — там теперь тоже ходит SDP. */
+const MAX_USER_MESSAGE_BYTES = 64 * 1024;
 
 export async function registerWebSocket(app: FastifyInstance): Promise<void> {
   // ── Пользовательский realtime-канал (личные уведомления + presence) ─────
@@ -98,15 +103,32 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       if (socket.readyState === socket.OPEN) conn.send({ t: 'ping', serverTs: Date.now() });
     }, 30000);
 
+    // Корзины на соединение: сигналинг звонка бурстовый, управление — нет.
+    const signalBucket = new TokenBucket(120, 60);
+    const controlBucket = new TokenBucket(20, 10);
+
     // Слушатели навешиваем СИНХРОННО, до любого await — иначе сообщение,
     // присланное сразу после open (watch_presence), теряется (ws роняет события
     // без слушателя). Входящие: подписка на присутствие + keep-alive (pong).
     socket.on('message', (raw) => {
       incWsEvent();
+      // Потолок и корзины появились вместе со звонками: до них канал принимал
+      // только короткие команды, а теперь через него идёт SDP чужого клиента.
+      const rawStr = raw.toString();
+      if (rawStr.length > MAX_USER_MESSAGE_BYTES) return;
       let msg: unknown;
       try {
-        msg = JSON.parse(raw.toString());
+        msg = JSON.parse(rawStr);
       } catch {
+        return;
+      }
+      const kind = (msg as { t?: unknown }).t;
+      if (isDmCallMessage(kind)) {
+        // Трикл-ICE идёт пачками по 20–40 сообщений за пару секунд, поэтому
+        // сигналингу отдельная щедрая корзина, а управлению — строгая.
+        const ok = isDmCallSignalMessage(kind) ? signalBucket.consume() : controlBucket.consume();
+        if (!ok) return;
+        dispatchDmCall(principal.userId, conn.id, msg as Record<string, unknown>);
         return;
       }
       const m = msg as {
@@ -209,10 +231,16 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       ]);
       conn.send({
         t: 'hello',
+        connId: conn.id,
         notifications: snapshot.notifications,
         unreadCount: snapshot.unreadCount,
         presence,
         dmUnreadTotal: dmUnread,
+        // Идущий разговор — чтобы вернуться в него после перезагрузки страницы.
+        activeCall: (() => {
+          const s = dmCallHub.activeCallOf(principal.userId);
+          return s ? toSnapshot(s) : null;
+        })(),
         serverTs: Date.now(),
       });
     } catch (err) {
@@ -275,6 +303,17 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         socket.close(4403, 'blocked');
         return;
       }
+    }
+
+    // Звонок в ЛС и комната несовместимы. Проверка именно здесь закрывает
+    // окно между выдачей тикета и подключением: за это время можно было успеть
+    // начать звонок, и REST-гейт бы его не увидел.
+    if (
+      ticketPayload.principal.kind === 'user' &&
+      dmCallHub.isBusy(ticketPayload.principal.userId)
+    ) {
+      socket.close(4423, 'call in progress');
+      return;
     }
 
     const runtime = await ensureRoomRuntime(room);

@@ -39,6 +39,7 @@ import { absoluteUrl } from '../utils/urls.js';
 import {
   assertGuestsEnabled,
   assertNotMaintenance,
+  assertQrLoginEnabled,
   assertRegistrationEnabled,
   assertUploadsEnabled,
 } from '../admin/platform/gate.js';
@@ -119,6 +120,9 @@ const privacyRuleSchema = z.object({
   allow: z.array(z.string().max(64)).max(200),
   deny: z.array(z.string().max(64)).max(200),
 });
+// `calls` — новая категория, поэтому необязательна: клиент, загруженный до её
+// появления, шлёт объект без неё, и он должен сохраняться, а не падать в 400.
+// Отсутствующую категорию дополняет parsePrivacy дефолтом.
 const updatePrivacySchema = z.object({
   privacy: z.object({
     online: privacyRuleSchema,
@@ -126,8 +130,9 @@ const updatePrivacySchema = z.object({
     personalInfo: privacyRuleSchema,
     favorites: privacyRuleSchema,
     messages: privacyRuleSchema,
+    calls: privacyRuleSchema.optional(),
   }),
-}) satisfies z.ZodType<UpdatePrivacyRequest>;
+});
 
 interface DbUserCore {
   id: string;
@@ -406,7 +411,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const principal = requireUser(req, reply);
     if (!principal) return;
     const body = updatePrivacySchema.parse(req.body);
-    const json = serializePrivacy(body.privacy);
+    // Накладываем присланное на сохранённое: клиент, не знающий о новой
+    // категории, не должен сбрасывать её настройку своим сохранением.
+    const saved = await prisma.user.findUnique({
+      where: { id: principal.userId },
+      select: { privacyJson: true },
+    });
+    const json = serializePrivacy({ ...parsePrivacy(saved?.privacyJson), ...body.privacy });
     await prisma.user.update({ where: { id: principal.userId }, data: { privacyJson: json } });
     // Онлайн-статус мог стать видимым/скрытым для части людей — переразошлём
     // гейтнутый презенс, чтобы изменения применились без перезахода.
@@ -584,6 +595,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post('/auth/qr/start', {
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     handler: async (req, reply) => {
+      await assertQrLoginEnabled();
       await assertNotMaintenance(false);
       // Попутно подчищаем протухшие заявки — отдельный планировщик не нужен.
       await prisma.deviceLoginRequest.deleteMany({ where: { expiresAt: { lt: new Date() } } });
@@ -611,6 +623,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     // Клиент опрашивает раз в 2 секунды, заявка живёт 3 минуты.
     config: { rateLimit: { max: 120, timeWindow: '1 minute' } },
     handler: async (req, reply) => {
+      await assertQrLoginEnabled();
       const { token } = req.query as { token?: string };
       if (!token) {
         deny(reply, 400, 'BadRequest', 'Не передан токен опроса');
@@ -646,6 +659,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get('/auth/qr/:id', { preHandler: requireAuth }, async (req, reply) => {
     const principal = requireUser(req, reply);
     if (!principal) return;
+    await assertQrLoginEnabled();
     const { id } = req.params as { id: string };
     const request = await prisma.deviceLoginRequest.findUnique({ where: { id } });
     if (!request) {
@@ -667,6 +681,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     preHandler: requireAuth,
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     handler: async (req, reply) => {
+      await assertQrLoginEnabled();
       const principal = requireUser(req, reply);
       if (!principal) return;
       const { id } = req.params as { id: string };

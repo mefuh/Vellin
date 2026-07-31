@@ -7,6 +7,7 @@ import { ApiHttpError } from '../../api/client';
 import { useAuthStore } from '../../stores/authStore';
 import { Card, StatusLine } from './ProfilePrimitives';
 import { QrScannerModal } from './QrScannerModal';
+import { useAppConfig } from '../../hooks/useAppConfig';
 
 function formatDate(iso: string): string {
   try {
@@ -84,6 +85,9 @@ export function DevicesSection() {
 
   const hasOthers = (sessions ?? []).some((s) => !s.current);
   const [scanning, setScanning] = useState(false);
+  // Тумблер WINDOWS в админ-панели: выключен — кнопки и упоминаний о ней нет.
+  const { config } = useAppConfig();
+  const qrLoginEnabled = config?.windowsQrLoginEnabled ?? false;
 
   return (
     <Card title="Активные входы" desc="Где открыт ваш аккаунт прямо сейчас. Не узнаёте вход — завершите сессию." contained={false}>
@@ -95,7 +99,7 @@ export function DevicesSection() {
       )}
       <StatusLine error={error} />
 
-      {scanning && (
+      {scanning && qrLoginEnabled && (
         <QrScannerModal
           onClose={() => setScanning(false)}
           onApproved={() => {
@@ -107,6 +111,7 @@ export function DevicesSection() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* Вход в десктоп-клиент по QR. Геометрия — как у карточек устройств
             ниже, чтобы кнопка читалась частью того же списка. */}
+        {qrLoginEnabled && (
         <button
           type="button"
           onClick={() => setScanning(true)}
@@ -146,6 +151,7 @@ export function DevicesSection() {
             </span>
           </span>
         </button>
+        )}
 
         {sessions?.map((s) => (
           <div

@@ -178,6 +178,7 @@ function SettingsTab() {
 
           <GroupCaption>Общение</GroupCaption>
           <ToggleRow label="Личные сообщения" hint="Переписка в личных диалогах" checked={T.directMessages} onChange={(v) => setT('directMessages', v)} />
+          <ToggleRow label="Звонки в личных сообщениях" hint="Звонки один на один на сайте и в клиенте для Windows" checked={T.dmCalls} onChange={(v) => setT('dmCalls', v)} />
           <ToggleRow label="Друзья" hint="Отправка и приём заявок в друзья" checked={T.friends} onChange={(v) => setT('friends', v)} />
           <ToggleRow label="Приглашения в комнаты" hint="Ссылки-приглашения и зов друзей в комнату" checked={T.invites} onChange={(v) => setT('invites', v)} />
 
@@ -192,7 +193,7 @@ function SettingsTab() {
         <PlatformGroup
           title="Windows"
           icon="windows"
-          hint="Десктоп-клиент: страница скачивания и кому она видна"
+          hint="Десктоп-клиент: страница скачивания, кому она видна и вход по QR-коду"
           badge={draft.windows.downloadPage ? AUDIENCE_LABEL[draft.windows.audience] : 'выключено'}
         >
           <WindowsSettings value={draft.windows} onChange={(w) => setDraft({ ...draft, windows: w })} />
@@ -300,6 +301,13 @@ function WindowsSettings({ value, onChange }: { value: PlatformWindows; onChange
           </div>
         </div>
       )}
+
+      <ToggleRow
+        label="Добавление устройства по QR"
+        hint="Кнопка и сканер в разделе «Устройства». Выключено — кнопка исчезает, а вход по QR-коду перестаёт работать и на сервере"
+        checked={value.qrLogin}
+        onChange={(v) => onChange({ ...value, qrLogin: v })}
+      />
     </>
   );
 }

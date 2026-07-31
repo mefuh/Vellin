@@ -43,6 +43,7 @@ import { ensureDmVoiceDir } from './dm/voice.js';
 import { ensureDmVideoDir, MAX_DM_VIDEO_BYTES } from './dm/videoNote.js';
 import { setVideoNoteBroadcaster, startVideoTranscodeWorker } from './dm/videoTranscode.js';
 import { broadcastVideoNoteUpdate, syncRoomInviteCards } from './dm/realtime.js';
+import { initDmCalls } from './calls/realtime.js';
 import { registerWebSocket } from './ws/server.js';
 import { userHub } from './realtime/UserHub.js';
 import { getAcceptedFriendIds } from './friends/service.js';
@@ -257,6 +258,10 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Живая синхронизация карточек-приглашений в ЛС при смене видео в комнате (DI).
   userHub.setRoomVideoChangedHook(syncRoomInviteCards);
+
+  // Звонки в ЛС: рассылка состояния, запись о звонке в переписку и реакция на
+  // закрытие вкладки, которая вела разговор (DI, чтобы не связывать модули).
+  initDmCalls();
 
   return app;
 }

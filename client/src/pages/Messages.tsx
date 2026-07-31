@@ -14,6 +14,7 @@ import type { DmConversation, PublicUser } from '@vellin/shared';
 import { Avatar, Button, Icon, type IconName } from '../shared';
 import { useAuthStore } from '../stores/authStore';
 import { useDmStore, type ClientDm, type ThreadState } from '../stores/dmStore';
+import { useDmCallStore } from '../stores/dmCallStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { usePresence } from '../hooks/usePresence';
@@ -376,7 +377,11 @@ function ConversationRow({
         ? 'video'
         : last?.hasRoomInvite
           ? 'film'
-          : null;
+          : last?.hasCall
+            ? last.callOutcome === 'missed' || last.callOutcome === 'failed'
+              ? 'phoneOff'
+              : 'phone'
+            : null;
   const previewText = last
     ? last.hasImage
       ? last.body || 'Фото'
@@ -386,7 +391,11 @@ function ConversationRow({
           ? 'Видеосообщение'
           : last.hasRoomInvite
             ? 'Приглашение в комнату'
-            : last.body
+            : last.hasCall
+              ? last.callOutcome === 'missed'
+                ? 'Пропущенный звонок'
+                : 'Звонок'
+              : last.body
     : '';
   const prefix = mine ? 'Вы: ' : '';
 
@@ -896,7 +905,8 @@ function ChatPane({ publicId, myId }: { publicId: string; myId: string }) {
         </Link>
       )}
       <div style={{ display: 'flex', gap: 6, flexShrink: 0, justifySelf: isMobile ? 'end' : undefined }}>
-        <HeaderActionButton icon="phone" label="Позвонить" />
+        <CallButton peerId={peer?.id ?? null} video={false} icon="phone" label="Позвонить" />
+        <CallButton peerId={peer?.id ?? null} video icon="video" label="Видеозвонок" />
       </div>
     </>
   );
@@ -1326,6 +1336,10 @@ const MessageRow = memo(function MessageRow({
           if (m.inviteRoomId) {
             return <RoomInviteCard m={m} mine={mine} fresh={fresh} clock={fmtTime(m.createdAt)} status={status} />;
           }
+          // Запись о звонке — строка со значком, а не обычное сообщение.
+          if (m.callId) {
+            return <CallRecordBubble m={m} mine={mine} clock={fmtTime(m.createdAt)} />;
+          }
           // Видео-«кружок» — самодостаточный круглый бабл (без прямоугольной подложки).
           if (m.videoStatus) {
             return <VideoMessageBubble m={m} clock={fmtTime(m.createdAt)} status={status} />;
@@ -1436,113 +1450,112 @@ function TypingDots() {
   );
 }
 
+/** «5:32» из секунд. */
+function callDuration(sec: number | undefined): string {
+  const total = Math.max(0, sec ?? 0);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
 /**
- * Круглая кнопка действия в шапке чата (звонок). Телефония ещё не реализована —
- * по тапу вместо звонка показывает всплывающую подсказку «в разработке» с той
- * же пружинной анимацией появления/исчезания, что у пузыря данных собеседника
- * (см. AnimatedStatusBubble/useSpringValue): растягивается-«перетекает» к
- * полному размеру с лёгким пружинением, схлопывается так же мягко, а не
- * мгновенным show/hide. Скрывается сама через паузу или по тапу мимо.
+ * Запись о состоявшемся звонке в переписке. Отправителем записи всегда числится
+ * звонящий, поэтому «исходящий» и «входящий» выводятся из того, моё ли это
+ * сообщение, без отдельного поля.
  */
-function HeaderActionButton({ icon, label }: { icon: IconName; label: string }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLSpanElement>(null);
-  const tipRef = useRef<HTMLDivElement>(null);
+function CallRecordBubble({ m, mine, clock }: { m: ClientDm; mine: boolean; clock: string }) {
+  const missed = m.callOutcome === 'missed';
+  const failed = m.callOutcome === 'failed';
+  const completed = m.callOutcome === 'completed';
+  const video = m.callKind === 'video';
 
-  useSpringValue(open ? 1 : 0, (v) => {
-    const el = tipRef.current;
-    if (!el) return;
-    el.style.opacity = String(v);
-    // Растёт от чуть уменьшенного (не из scale(0) — ничто не появляется из
-    // ничего), transform-origin — угол у самой кнопки-триггера.
-    el.style.transform = `scale(${0.82 + v * 0.18})`;
-  });
+  const title = missed
+    ? mine
+      ? 'Не дозвонились'
+      : 'Пропущенный звонок'
+    : m.callOutcome === 'declined'
+      ? mine
+        ? 'Звонок отклонён'
+        : 'Вы отклонили звонок'
+      : m.callOutcome === 'cancelled'
+        ? mine
+          ? 'Вы отменили звонок'
+          : 'Отменённый звонок'
+        : failed
+          ? 'Звонок не состоялся'
+          : video
+            ? 'Видеозвонок'
+            : 'Звонок';
 
-  // Авто-скрытие через паузу.
-  useEffect(() => {
-    if (!open) return;
-    const t = window.setTimeout(() => setOpen(false), 2600);
-    return () => window.clearTimeout(t);
-  }, [open]);
-
-  // Тап мимо — скрыть сразу.
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent): void => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [open]);
+  // Пропущенный выделяем цветом: это единственный случай, требующий внимания.
+  const accent = missed && !mine ? 'var(--accent)' : 'var(--text-2)';
 
   return (
-    <span ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label={`${label} — в разработке`}
-        className="dm-press"
-        style={{
-          width: 37,
-          height: 37,
-          flexShrink: 0,
-          borderRadius: 999,
-          border: '1px solid var(--line-1)',
-          background: 'var(--bg-3)',
-          color: 'var(--text-0)',
-          display: 'grid',
-          placeItems: 'center',
-          cursor: 'pointer',
-          opacity: 0.65,
-        }}
-      >
-        <Icon name={icon} size={18} />
-      </button>
-      <div
-        ref={tipRef}
-        role="status"
-        aria-hidden={!open}
-        style={{
-          position: 'absolute',
-          top: '100%',
-          right: 0,
-          marginTop: 10,
-          transformOrigin: 'top right',
-          opacity: 0,
-          pointerEvents: 'none',
-          zIndex: 20,
-          background: 'var(--bg-4)',
-          border: '1px solid var(--line-2)',
-          // Полная пилюля. Стрелка ниже сдвинута дальше от угла (right: 24, а
-          // не 13) — иначе при таком радиусе она бы легла на закруглённый угол
-          // вместо прямого участка границы и выглядела бы срезанной.
-          borderRadius: 999,
-          padding: '10px 16px',
-          boxShadow: 'var(--shadow-2)',
-          fontSize: 13,
-          fontWeight: 500,
-          color: 'var(--text-0)',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {/* Стрелка-указатель на кнопку. */}
-        <span
-          aria-hidden
-          style={{
-            position: 'absolute',
-            top: -5,
-            right: 24,
-            width: 10,
-            height: 10,
-            background: 'var(--bg-4)',
-            borderLeft: '1px solid var(--line-2)',
-            borderTop: '1px solid var(--line-2)',
-            transform: 'rotate(45deg)',
-          }}
-        />
-        Звонки пока в разработке
-      </div>
-    </span>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '9px 14px',
+        borderRadius: 'var(--r-lg)',
+        background: 'var(--bg-2)',
+        border: '1px solid var(--line-1)',
+      }}
+    >
+      <span style={{ display: 'grid', placeItems: 'center', color: accent }}>
+        <Icon name={missed || failed ? 'phoneOff' : video ? 'video' : 'phone'} size={17} />
+      </span>
+      <span style={{ fontSize: 13.5, color: 'var(--text-0)' }}>
+        {title}
+        {completed && (
+          <span style={{ color: 'var(--text-3)' }}> · {callDuration(m.callDurationSec)}</span>
+        )}
+      </span>
+      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{clock}</span>
+    </div>
+  );
+}
+
+/**
+ * Кнопка звонка в шапке переписки. Пока звонок идёт, кнопки заблокированы: на
+ * сервере всё равно один звонок за раз, и лучше показать это сразу.
+ */
+function CallButton({
+  peerId,
+  video,
+  icon,
+  label,
+}: {
+  peerId: string | null;
+  video: boolean;
+  icon: IconName;
+  label: string;
+}) {
+  const invite = useDmCallStore((s) => s.invite);
+  const busy = useDmCallStore((s) => !!s.call || !!s.incoming);
+  const disabled = !peerId || busy;
+
+  return (
+    <button
+      type="button"
+      className="dm-press"
+      title={busy ? 'Вы уже в звонке' : label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => peerId && invite(peerId, video)}
+      style={{
+        display: 'grid',
+        placeItems: 'center',
+        width: 37,
+        height: 37,
+        borderRadius: 999,
+        border: '1px solid var(--line-1)',
+        background: 'var(--bg-3)',
+        color: 'var(--text-1)',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.45 : 1,
+      }}
+    >
+      <Icon name={icon} size={17} />
+    </button>
   );
 }
 

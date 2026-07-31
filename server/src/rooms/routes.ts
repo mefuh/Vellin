@@ -47,6 +47,7 @@ import { resolveWithCache } from '../media/resolveWithCache.js';
 import { ResolveError } from '../media/Resolver.js';
 import { assertRoomCreationEnabled, assertInvitesEnabled } from '../admin/platform/gate.js';
 import { logRoomEvent } from './events.js';
+import { dmCallHub } from '../calls/DmCallHub.js';
 
 /** Имя пользователя для журнала событий (best-effort, не блокирует ответ). */
 async function nameFor(userId: string): Promise<string | null> {
@@ -120,6 +121,15 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
       });
       return;
     }
+    // Создание комнаты равносильно входу в неё — тот же запрет во время звонка.
+    if (dmCallHub.isBusy(principal.userId)) {
+      reply.code(409).send({
+        error: 'CallInProgress',
+        message: 'Завершите звонок, чтобы создать комнату',
+        statusCode: 409,
+      });
+      return;
+    }
     if (body.isPrivate && !body.password) {
       reply.code(400).send({
         error: 'BadRequest',
@@ -159,6 +169,16 @@ export async function roomRoutes(app: FastifyInstance): Promise<void> {
   app.post('/rooms/join', async (req, reply) => {
     const body = joinRoomSchema.parse(req.body);
     const principal = req.principal!;
+    // Во время звонка в ЛС комнаты недоступны: разговор и совместный просмотр
+    // борются за микрофон, динамики и внимание. Дублируется отказом на WS.
+    if (principal.kind === 'user' && dmCallHub.isBusy(principal.userId)) {
+      reply.code(409).send({
+        error: 'CallInProgress',
+        message: 'Завершите звонок, чтобы войти в комнату',
+        statusCode: 409,
+      });
+      return;
+    }
     try {
       const room = await authorizeJoin(
         body.slug,

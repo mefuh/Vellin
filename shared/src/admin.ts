@@ -502,6 +502,8 @@ export interface PlatformToggles {
   playlists: boolean;
   // Общение
   directMessages: boolean;
+  /** Звонки в личных сообщениях — отдельно от `calls` (те про комнаты). */
+  dmCalls: boolean;
   friends: boolean;
   invites: boolean;
   // Контент и уведомления
@@ -540,6 +542,12 @@ export interface PlatformWindows {
    * ссылки на неё исчезают из интерфейса.
    */
   downloadPage: boolean;
+  /**
+   * Добавление устройства по QR-коду с сайта: кнопка «Добавить устройство»
+   * в разделе «Устройства» и сканер камеры. Выключено — кнопки нет, а
+   * серверные эндпоинты входа по QR отвечают 404.
+   */
+  qrLogin: boolean;
   /** Аудитория страницы, когда она включена. */
   audience: WindowsAudienceKind;
   /** Ники для `audience='users'` (сравнение без учёта регистра). */

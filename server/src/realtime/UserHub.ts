@@ -30,6 +30,8 @@ type OnlinePrivacyResolver = (userId: string) => Promise<PrivacyRule>;
 class UserHub {
   /** userId → набор открытых соединений. */
   private readonly conns = new Map<string, Set<UserConnection>>();
+  /** connId → соединение: адресная доставка конкретной вкладке (звонки). */
+  private readonly connsById = new Map<string, UserConnection>();
   /** userId → комната, которую он сейчас смотрит. */
   private readonly rooms = new Map<string, RoomRef>();
   /** userId → момент последнего ухода в офлайн (ms). In-memory, дублируется в БД. */
@@ -57,6 +59,11 @@ class UserHub {
    * `broadcastRoomVideo`, вызывается ВСЕГДА (не гейтится подписчиками библиотеки).
    */
   private roomVideoChanged: ((p: { roomId: string; slug: string; videoPoster: string | null; videoTitle: string | null }) => void) | null = null;
+  /**
+   * Хук на закрытие соединения — звонкам нужно знать, что вкладка, которая
+   * вела разговор, отвалилась (DI разрывает цикл импортов realtime↔calls).
+   */
+  private connectionClosed: ((conn: UserConnection) => void) | null = null;
 
   setFriendResolver(fn: FriendResolver): void {
     this.friendResolver = fn;
@@ -70,6 +77,9 @@ class UserHub {
   setRoomVideoChangedHook(fn: (p: { roomId: string; slug: string; videoPoster: string | null; videoTitle: string | null }) => void): void {
     this.roomVideoChanged = fn;
   }
+  setConnectionClosedHook(fn: (conn: UserConnection) => void): void {
+    this.connectionClosed = fn;
+  }
 
   attach(conn: UserConnection): void {
     let set = this.conns.get(conn.userId);
@@ -79,6 +89,7 @@ class UserHub {
     }
     const wasOnline = this.isOnline(conn.userId);
     set.add(conn);
+    this.connsById.set(conn.id, conn);
     // Только что подключился — считаем активным, пока клиент не пришлёт иначе.
     this.activeByConn.set(conn, true);
     if (!wasOnline) {
@@ -88,6 +99,10 @@ class UserHub {
   }
 
   detach(conn: UserConnection): void {
+    this.connsById.delete(conn.id);
+    // Звонок мог вестись именно из этой вкладки — сообщаем до того, как
+    // соединение исчезнет из реестра.
+    this.connectionClosed?.(conn);
     // Снять все подписки этого соединения.
     const watched = this.watchedByConn.get(conn);
     if (watched) {
@@ -280,6 +295,47 @@ class UserHub {
     for (const c of set) {
       if (c.isOpen()) c.send(msg);
     }
+  }
+
+  /**
+   * Отправить сообщение ОДНОМУ соединению. Нужно звонкам: разговор ведёт
+   * конкретная вкладка, и ICE-конфиг с сигналингом уходят только ей.
+   */
+  pushToConn(connId: string, msg: UserS2C): void {
+    const conn = this.connsById.get(connId);
+    if (conn?.isOpen()) conn.send(msg);
+  }
+
+  /**
+   * Всем соединениям пользователя, КРОМЕ одного. Ведущая разговор вкладка
+   * получает свою версию сообщения (с ICE-конфигом), остальные — общую, и
+   * никто не должен получить обе.
+   */
+  pushToExcept(userId: string, exceptConnId: string | null, msg: UserS2C): void {
+    const set = this.conns.get(userId);
+    if (!set) return;
+    for (const c of set) {
+      if (c.id === exceptConnId) continue;
+      if (c.isOpen()) c.send(msg);
+    }
+  }
+
+  /**
+   * Есть ли у пользователя хоть одно открытое соединение. В отличие от
+   * `isOnline`, не требует активности вкладки: простаивающая вкладка не
+   * показывается «в сети», но звонок в ней прозвенеть обязан.
+   */
+  hasConnection(userId: string): boolean {
+    return (this.conns.get(userId)?.size ?? 0) > 0;
+  }
+
+  /**
+   * Комната пользователя без гейта активности — для запрета звонков тому, кто
+   * смотрит. `roomOf` для этого не годится: у простаивающей вкладки он вернёт
+   * null, и звонок прорвался бы к человеку в комнате.
+   */
+  roomOfAny(userId: string): RoomRef | null {
+    return this.rooms.get(userId) ?? null;
   }
 
   /**

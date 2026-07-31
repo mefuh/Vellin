@@ -1,5 +1,5 @@
 import type { PlatformToggles } from '@vellin/shared';
-import { getMaintenance, getToggles } from './config.js';
+import { getMaintenance, getSettings, getToggles } from './config.js';
 
 interface HttpError extends Error {
   statusCode: number;
@@ -51,4 +51,14 @@ export async function assertNotMaintenance(isAdmin: boolean): Promise<void> {
   if (isAdmin) return;
   const m = await getMaintenance();
   if (m.enabled) throw httpError(503, m.message || 'Идут технические работы, зайдите позже');
+}
+
+/**
+ * Вход по QR-коду выключен тумблером WINDOWS в админ-панели — эндпоинты
+ * должны исчезнуть, а не просто пропасть из интерфейса: иначе заявку можно
+ * было бы создать в обход выключенной функции.
+ */
+export async function assertQrLoginEnabled(): Promise<void> {
+  const { windows } = await getSettings();
+  if (!windows.qrLogin) throw httpError(404, 'Вход по QR-коду недоступен');
 }

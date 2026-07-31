@@ -35,6 +35,7 @@ import { AdminMedia } from './pages/admin/AdminMedia';
 import { AdminGeo } from './pages/admin/AdminGeo';
 import { AdminPushAnalytics } from './pages/admin/AdminPushAnalytics';
 import { RuntimeLayer } from './components/RuntimeLayer';
+import { DmCallProvider } from './components/call/DmCallProvider';
 
 function ProtectedRoute({ children }: { children: React.ReactElement }) {
   const token = useAuthStore((s) => s.token);
@@ -188,6 +189,8 @@ export function App() {
       <PushBridge />
       <PushPrompt />
       <RuntimeLayer />
+      {/* Звонок живёт выше маршрутов: разговор переживает переходы по сайту. */}
+      <DmCallProvider />
     </RealtimeProvider>
   );
 }

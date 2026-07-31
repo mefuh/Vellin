@@ -644,6 +644,10 @@ export async function listConversations(
         // маркер должен опираться на него, а не ждать готового файла.
         hasVideo: !!last.videoStatus,
         hasRoomInvite: !!last.inviteRoomId,
+        hasCall: !!last.callId,
+        ...(last.callOutcome
+          ? { callOutcome: last.callOutcome as 'completed' | 'missed' | 'declined' | 'cancelled' | 'failed' }
+          : {}),
       },
       unreadCount: unread,
       peerLastReadAt: peerRead ? peerRead.toISOString() : null,

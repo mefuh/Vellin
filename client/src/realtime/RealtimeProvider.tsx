@@ -1,6 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { UserS2C } from '@vellin/shared';
 import { useAuthStore } from '../stores/authStore';
+import { useDmCallStore } from '../stores/dmCallStore';
+import { dmCallMediaBus, dmCallSignalBus, dmCallSpeakingBus } from '../ws/dmCallBuses';
 import { useNotificationsStore } from '../stores/notificationsStore';
 import { useFriendsStore } from '../stores/friendsStore';
 import { usePresenceStore } from '../stores/presenceStore';
@@ -42,6 +44,9 @@ const activityPolicy = (): ActivityPolicy => {
 export function RealtimeProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const token = useAuthStore((s) => s.token);
   const isUser = useAuthStore((s) => s.user?.kind === 'user');
+  // Сокет создаётся ниже по ходу эффекта, а нужен уже в обработчике hello
+  // (возврат в звонок после перезагрузки страницы).
+  const socketRef = useRef<UserSocket | null>(null);
 
   useEffect(() => {
     if (!token || !isUser) return;
@@ -55,6 +60,13 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
         case 'hello':
           notifications.setSnapshot(msg.notifications, msg.unreadCount);
           useDmStore.getState().setUnreadTotal(msg.dmUnreadTotal);
+          // Идентификатор соединения нужен звонкам: по нему вкладка понимает,
+          // её ли это разговор или он идёт на другом устройстве.
+          useDmCallStore.getState().setMyConnId(msg.connId);
+          if (msg.activeCall) {
+            // Перезагрузили страницу посреди разговора — возвращаемся в него.
+            socketRef.current?.send({ t: 'dmcall_rejoin', callId: msg.activeCall.callId });
+          }
           for (const p of msg.presence) usePresenceStore.getState().apply(p);
           // Подтягиваем список друзей; presence из снапшота применится после.
           void friends.refresh().then(() => {
@@ -119,8 +131,38 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
           // включаются и снимаются мгновенно, без перезагрузки страницы.
           useAuthStore.getState().setMaintenance(msg.maintenance.enabled, msg.maintenance.message);
           break;
-        default:
+
+        // ── Звонки в личных сообщениях ──────────────────────────────────
+        case 'dmcall_ring':
+          useDmCallStore.getState().onRing(msg.call, msg.from, msg.rtc);
           break;
+        case 'dmcall_state':
+          useDmCallStore.getState().onState(msg.call, msg.peer, msg.rtc);
+          break;
+        case 'dmcall_signal':
+          // Мимо стора: SDP и ICE не должны вызывать перерисовку.
+          dmCallSignalBus.emit(msg.fromUserId, msg.payload);
+          break;
+        case 'dmcall_speaking':
+          dmCallSpeakingBus.emit(msg.fromUserId, msg.speaking);
+          break;
+        case 'dmcall_media':
+          dmCallMediaBus.emit(msg.fromUserId, { audio: msg.audio, video: msg.video });
+          break;
+        case 'dmcall_error':
+          useDmCallStore.getState().onError(msg.message, msg.nonce);
+          break;
+
+        case 'ping':
+          // Keep-alive: на него отвечает сам сокет, здесь делать нечего.
+          break;
+
+        default: {
+          // Проверка полноты: новый тип сообщения нельзя молча потерять.
+          const unhandled: never = msg;
+          void unhandled;
+          break;
+        }
       }
     };
 
@@ -141,9 +183,11 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
           if (activity) socket.send({ t: 'activity', active: activity.getActive() });
         }, 250),
     });
+    socketRef.current = socket;
     usePresenceStore.getState().setSender((m) => socket.send(m));
     useLibraryStore.getState().setSender((m) => socket.send(m));
     useDmStore.getState().setSender((m) => socket.send(m));
+    useDmCallStore.getState().setSender((m) => socket.send(m));
     // На мобильных простой не отслеживаем: открытый сокет = онлайн (как раньше).
     // На тач-устройствах события активности редкие (скролл/тап раз в минуту —
     // это нормальное чтение, а не «ушёл»), а сворачивание/блокировка экрана уже
@@ -163,6 +207,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
 
     return () => {
       socket.close();
+      socketRef.current = null;
       unsubRoom?.();
       activity?.stop();
       useNotificationsStore.getState().reset();
@@ -170,6 +215,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
       usePresenceStore.getState().reset();
       useLibraryStore.getState().reset();
       useDmStore.getState().reset();
+      useDmCallStore.getState().reset();
+      useDmCallStore.getState().setSender(null);
     };
   }, [token, isUser]);
 
