@@ -63,13 +63,13 @@ dependencies:
   camera_windows: ^0.2.3
   visibility_detector: ^0.4.0+2
   window_manager: ^0.5.2
+  # Рабочая область экрана — чтобы поставить окно уведомления в угол над
+  # панелью задач (идёт с window_manager, но используется напрямую).
+  screen_retriever: ^0.2.0
   # QR-код для входа с телефона.
   qr_flutter: ^4.1.0
   # Открытие сайта во внешнем браузере (регистрация).
   url_launcher: ^6.3.1
-  # Системные уведомления Windows (тосты в центре уведомлений) — приходят, когда
-  # окно свёрнуто или не в фокусе; клик по тосту возвращает в приложение.
-  flutter_local_notifications: ^22.0.0
 
 dev_dependencies:
   flutter_test:

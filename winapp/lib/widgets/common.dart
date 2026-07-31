@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../app_config.dart';
+import '../theme/avatar_tint.dart';
 import '../theme/vellin_theme.dart';
 
 /// Аватар пользователя: загруженная картинка или градиент-заглушка с инициалом.
@@ -24,9 +25,7 @@ class VellinAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = AppConfig.mediaUrl(avatarUrl);
     final initial = username.isNotEmpty ? username[0].toUpperCase() : '?';
-    // Детерминированный оттенок заглушки по seed.
-    final hue = (avatarSeed.isEmpty ? username : avatarSeed).hashCode % 360;
-    final grad = HSLColor.fromAHSL(1, hue.abs().toDouble(), 0.5, 0.4).toColor();
+    final grad = avatarTint(avatarSeed, username);
 
     final avatar = Container(
       width: size,

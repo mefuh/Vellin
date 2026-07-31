@@ -20,7 +20,8 @@ import 'state/update_controller.dart';
 import 'storage/session_store.dart';
 import 'theme/vellin_theme.dart';
 import 'runtime/auth_window.dart';
-import 'runtime/desktop_notifier.dart';
+import 'runtime/toast_host.dart';
+import 'runtime/toast_window.dart';
 import 'runtime/updater_splash.dart';
 import 'widgets/notifications_bell.dart';
 import 'widgets/window_title_bar.dart';
@@ -29,7 +30,18 @@ import 'widgets/window_title_bar.dart';
 const _appSize = Size(1180, 760);
 const _appMinSize = Size(940, 640);
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
+  // Этот же exe обслуживает окна уведомлений: у Flutter на Windows одно окно
+  // на процесс, поэтому тост живёт отдельным процессом (см. toast_host.dart).
+  // Ветка ранняя: приложению целиком в этом режиме подниматься незачем.
+  if (args.length >= 2 && args.first == '--toast') {
+    final port = int.tryParse(args[1]);
+    if (port != null) {
+      await runToastApp(port);
+      return;
+    }
+  }
+
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
   MediaKit.ensureInitialized();
@@ -44,11 +56,11 @@ Future<void> main() async {
   final auth = AuthController(client, authApi, SessionStore());
   final update = UpdateController(client);
 
-  // Системные тосты Windows: инициализация не блокирует старт (при отказе
-  // остаётся колокольчик внутри приложения).
-  final notifier = DesktopNotifier();
+  // Всплывающие уведомления в фирменном стиле — отдельным окном-процессом.
+  // Поднимается лениво, при первом уведомлении.
+  final toasts = ToastHost();
   final notifications = NotificationsController(notificationsApi, friendsApi, socket);
-  notifier.init().then((_) => notifications.onIncoming = notifier.show);
+  notifications.onIncoming = toasts.show;
 
   // Старт: сценарий обновления и восстановление сессии идут параллельно.
   update.run();
@@ -88,6 +100,7 @@ Future<void> main() async {
         ChangeNotifierProvider<DmController>(create: (_) => DmController(dmApi, socket)),
         ChangeNotifierProvider<PresenceController>(create: (_) => PresenceController(socket)),
         ChangeNotifierProvider<NotificationsController>.value(value: notifications),
+        Provider<ToastHost>.value(value: toasts),
         ChangeNotifierProvider<UpdateController>.value(value: update),
       ],
       child: const VellinApp(),
@@ -168,7 +181,11 @@ class _VellinAppState extends State<VellinApp> {
         // жизненному циклу рвала бы подписку и обнуляла список.
         final notifications = context.read<NotificationsController>();
         if (target == _Phase.app) notifications.start();
-        if (target == _Phase.auth) notifications.stop();
+        if (target == _Phase.auth) {
+          notifications.stop();
+          // Вышли из аккаунта — окно уведомлений больше не нужно.
+          context.read<ToastHost>().stop();
+        }
       });
     }
 
