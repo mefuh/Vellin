@@ -502,6 +502,8 @@ export interface PlatformToggles {
   playlists: boolean;
   // Общение
   directMessages: boolean;
+  /** Звонки в личных сообщениях — отдельно от `calls` (те про комнаты). */
+  dmCalls: boolean;
   friends: boolean;
   invites: boolean;
   // Контент и уведомления

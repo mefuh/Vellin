@@ -209,10 +209,13 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       ]);
       conn.send({
         t: 'hello',
+        connId: conn.id,
         notifications: snapshot.notifications,
         unreadCount: snapshot.unreadCount,
         presence,
         dmUnreadTotal: dmUnread,
+        // Звонок появится здесь в P2 — пока звонков в ЛС нет вовсе.
+        activeCall: null,
         serverTs: Date.now(),
       });
     } catch (err) {

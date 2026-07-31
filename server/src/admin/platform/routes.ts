@@ -30,6 +30,7 @@ const settingsSchema = z.object({
     calls: z.boolean().optional(),
     playlists: z.boolean().optional(),
     directMessages: z.boolean().optional(),
+    dmCalls: z.boolean().optional(),
     friends: z.boolean().optional(),
     invites: z.boolean().optional(),
     uploads: z.boolean().optional(),

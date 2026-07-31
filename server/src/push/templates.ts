@@ -23,6 +23,23 @@ export const DEFAULT_TEMPLATES: Record<PushNotificationType, Omit<NotificationTe
     silent: false,
     enabled: true,
   },
+  dm_call_missed: {
+    type: 'dm_call_missed',
+    title: 'Пропущенный звонок',
+    body: '{{username}} вам звонил',
+    icon: '/icon-192.png',
+    badge: '/badge-72.png',
+    image: null,
+    url: '/messages/{{publicId}}',
+    sound: null,
+    ttl: 86400,
+    urgency: 'high',
+    requireInteraction: false,
+    // Один пропущенный на диалог: повторный звонок заменяет предыдущий.
+    tag: 'dmcall-{{conversationId}}',
+    silent: false,
+    enabled: true,
+  },
   friend_request: {
     type: 'friend_request',
     title: 'Заявка в друзья',

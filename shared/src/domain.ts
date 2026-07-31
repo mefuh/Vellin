@@ -51,8 +51,16 @@ export type PrivacyVisibility = 'everyone' | 'friends' | 'nobody';
 /**
  * Категории приватности профиля.
  * - `messages` — кто может писать вам в личные сообщения (зритель = отправитель).
+ * - `calls` — кто может вам звонить в ЛС (отдельно от `messages`: писать и
+ *   звонить — разные по назойливости действия).
  */
-export type PrivacyCategory = 'online' | 'friends' | 'personalInfo' | 'favorites' | 'messages';
+export type PrivacyCategory =
+  | 'online'
+  | 'friends'
+  | 'personalInfo'
+  | 'favorites'
+  | 'messages'
+  | 'calls';
 
 /**
  * Правило видимости одной категории. `allow`/`deny` — точечные исключения по
@@ -75,6 +83,7 @@ export const PRIVACY_CATEGORIES: readonly PrivacyCategory[] = [
   'personalInfo',
   'favorites',
   'messages',
+  'calls',
 ];
 
 /** Базовое правило по умолчанию — всё видно всем (текущее поведение сервиса). */
@@ -88,6 +97,7 @@ export function defaultPrivacySettings(): PrivacySettings {
     personalInfo: { visibility: 'everyone', allow: [], deny: [] },
     favorites: { visibility: 'everyone', allow: [], deny: [] },
     messages: { visibility: 'everyone', allow: [], deny: [] },
+    calls: { visibility: 'everyone', allow: [], deny: [] },
   };
 }
 
@@ -543,6 +553,17 @@ export interface DirectMessageDTO {
   /** Статус приглашения. */
   inviteStatus?: 'pending' | 'accepted' | 'declined' | 'expired';
   /**
+   * Запись о состоявшемся звонке. Присутствие `callId` определяет тип бабла —
+   * запись о звонке (без него это обычное сообщение). Отправителем записи
+   * ВСЕГДА числится звонящий, поэтому «исходящий/входящий» выводится из
+   * `senderId`, отдельного поля для направления не нужно.
+   */
+  callId?: string;
+  callKind?: 'audio' | 'video';
+  callOutcome?: 'completed' | 'missed' | 'declined' | 'cancelled' | 'failed';
+  /** Длительность разговора в секундах; 0 у несостоявшихся звонков. */
+  callDurationSec?: number;
+  /**
    * Эхо клиентского nonce — отдаётся только отправителю, чтобы он сопоставил
    * пришедшее с сервера сообщение со своей оптимистичной отправкой.
    */
@@ -606,6 +627,64 @@ export interface CallSnapshot {
   startedByUserId: string | null;
   startedAt: number | null;
 }
+
+// ── Звонок 1:1 в личных сообщениях ──────────────────────────────────────
+//
+// Отдельный от комнатного звонка механизм: там «зайти в общий звонок комнаты»,
+// здесь — «позвонить человеку» с дозвоном, ответом и отбоем. Состояние живёт
+// на сервере, клиенты его только отражают.
+
+export type DmCallPhase = 'ringing' | 'active' | 'ended';
+
+export type DmCallEndReason =
+  /** Повесили трубку после ответа. */
+  | 'hangup'
+  /** Получатель отклонил. */
+  | 'declined'
+  /** Звонящий отменил до ответа. */
+  | 'cancelled'
+  /** Не ответили за отведённое время либо получателя нет в сети. */
+  | 'missed'
+  /** Получатель в комнате или уже разговаривает. */
+  | 'busy'
+  /** Не удалось соединиться либо связь потеряна. */
+  | 'failed';
+
+/** Состояние микрофона и камеры одной стороны. */
+export interface DmCallMediaState {
+  audio: boolean;
+  video: boolean;
+}
+
+/** Полное состояние звонка — единственный источник правды для клиентов. */
+export interface DmCallSnapshot {
+  callId: string;
+  callerId: string;
+  calleeId: string;
+  /** Звонок начат как видео (камеру можно включать и выключать по ходу). */
+  video: boolean;
+  phase: DmCallPhase;
+  /** ISO — момент приглашения. */
+  createdAt: string;
+  /** ISO — момент ответа; null, пока идёт дозвон. */
+  answeredAt: string | null;
+  endedAt: string | null;
+  endReason: DmCallEndReason | null;
+  /**
+   * Соединения (вкладка/устройство), которые ведут звонок с каждой стороны.
+   * У пользователя их может быть несколько, но звонок обслуживает одно:
+   * остальные по несовпадению своего connId понимают, что разговор идёт на
+   * другом устройстве, и гасят звонок у себя.
+   */
+  callerConnId: string;
+  /** null, пока не ответили. */
+  calleeConnId: string | null;
+  /** Микрофон и камера каждой стороны: userId → состояние. */
+  media: Record<string, DmCallMediaState>;
+}
+
+/** Сколько идёт дозвон, прежде чем звонок станет пропущенным. */
+export const DM_CALL_RING_MS = 45_000;
 
 /** Portable mirror of browser `RTCIceServer` — usable on Node and client. */
 export interface IceServerConfig {

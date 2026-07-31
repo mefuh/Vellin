@@ -120,6 +120,9 @@ const privacyRuleSchema = z.object({
   allow: z.array(z.string().max(64)).max(200),
   deny: z.array(z.string().max(64)).max(200),
 });
+// `calls` — новая категория, поэтому необязательна: клиент, загруженный до её
+// появления, шлёт объект без неё, и он должен сохраняться, а не падать в 400.
+// Отсутствующую категорию дополняет parsePrivacy дефолтом.
 const updatePrivacySchema = z.object({
   privacy: z.object({
     online: privacyRuleSchema,
@@ -127,8 +130,9 @@ const updatePrivacySchema = z.object({
     personalInfo: privacyRuleSchema,
     favorites: privacyRuleSchema,
     messages: privacyRuleSchema,
+    calls: privacyRuleSchema.optional(),
   }),
-}) satisfies z.ZodType<UpdatePrivacyRequest>;
+});
 
 interface DbUserCore {
   id: string;
@@ -407,7 +411,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const principal = requireUser(req, reply);
     if (!principal) return;
     const body = updatePrivacySchema.parse(req.body);
-    const json = serializePrivacy(body.privacy);
+    // Накладываем присланное на сохранённое: клиент, не знающий о новой
+    // категории, не должен сбрасывать её настройку своим сохранением.
+    const saved = await prisma.user.findUnique({
+      where: { id: principal.userId },
+      select: { privacyJson: true },
+    });
+    const json = serializePrivacy({ ...parsePrivacy(saved?.privacyJson), ...body.privacy });
     await prisma.user.update({ where: { id: principal.userId }, data: { privacyJson: json } });
     // Онлайн-статус мог стать видимым/скрытым для части людей — переразошлём
     // гейтнутый презенс, чтобы изменения применились без перезахода.
