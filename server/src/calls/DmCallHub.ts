@@ -192,9 +192,12 @@ class DmCallHub {
     s.media[s.calleeId] = { audio: true, video };
     this.clearTimer(callId, 'ring');
     this.setTimer(callId, 'connect', CONNECT_MS, () => {
-      // Обе стороны обязаны подтвердить установленное соединение.
+      // Достаточно подтверждения от ОДНОЙ стороны: канал у разговора общий, и
+      // если он поднялся у одного, разговор идёт. Требовать оба подтверждения
+      // нельзя — клиенты сообщают о соединении по разным событиям, и молчание
+      // одного из них помечало состоявшийся разговор как несостоявшийся.
       const cur = this.sessions.get(callId);
-      if (cur && cur.connected.size < 2) this.end(callId, 'failed');
+      if (cur && cur.connected.size === 0) this.end(callId, 'failed');
     });
     logger.info({ callId }, 'dmcall:accept');
     this.onChanged?.(s);
@@ -206,7 +209,7 @@ class DmCallHub {
     const s = this.sessions.get(callId);
     if (!s || s.phase !== 'active') return null;
     s.connected.add(userId);
-    if (s.connected.size >= 2) this.clearTimer(callId, 'connect');
+    this.clearTimer(callId, 'connect');
     return s;
   }
 

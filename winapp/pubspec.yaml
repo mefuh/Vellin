@@ -70,6 +70,9 @@ dependencies:
   qr_flutter: ^4.1.0
   # Открытие сайта во внешнем браузере (регистрация).
   url_launcher: ^6.3.1
+  # Звонки один на один в личных сообщениях. Пакет несёт готовый libwebrtc.dll,
+  # без загрузок и nuget на сборке — по тем же соображениям, что и media_kit.
+  flutter_webrtc: ^1.5.2
 
 dev_dependencies:
   flutter_test:

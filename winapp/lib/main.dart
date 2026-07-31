@@ -14,6 +14,7 @@ import 'router.dart';
 import 'state/auth_controller.dart';
 import 'state/friends_controller.dart';
 import 'state/dm_controller.dart';
+import 'state/call_controller.dart';
 import 'state/notifications_controller.dart';
 import 'state/presence_controller.dart';
 import 'state/update_controller.dart';
@@ -23,6 +24,7 @@ import 'runtime/auth_window.dart';
 import 'runtime/toast_host.dart';
 import 'runtime/toast_window.dart';
 import 'runtime/updater_splash.dart';
+import 'widgets/call_overlay.dart';
 import 'widgets/notifications_bell.dart';
 import 'widgets/window_title_bar.dart';
 
@@ -100,6 +102,7 @@ Future<void> main(List<String> args) async {
         ChangeNotifierProvider<DmController>(create: (_) => DmController(dmApi, socket)),
         ChangeNotifierProvider<PresenceController>(create: (_) => PresenceController(socket)),
         ChangeNotifierProvider<NotificationsController>.value(value: notifications),
+        ChangeNotifierProvider<CallController>(create: (_) => CallController(socket)),
         Provider<ToastHost>.value(value: toasts),
         ChangeNotifierProvider<UpdateController>.value(value: update),
       ],
@@ -171,6 +174,16 @@ class _VellinAppState extends State<VellinApp> {
         ? _Phase.updater
         : (auth.ready && !auth.authenticated ? _Phase.auth : _Phase.app);
 
+    // Звонки поднимаем, как только известен пользователь, а не на смене фазы:
+    // на переходе окна профиль мог быть ещё не загружен, и тогда звонки не
+    // включались бы вовсе. Метод идемпотентен.
+    final me = auth.user;
+    if (target == _Phase.app && me != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.read<CallController>().start(me.id);
+      });
+    }
+
     if (target != _phase) {
       _phase = target;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -180,9 +193,11 @@ class _VellinAppState extends State<VellinApp> {
         // профиль или настройки выходит за пределы оболочки, и привязка к её
         // жизненному циклу рвала бы подписку и обнуляла список.
         final notifications = context.read<NotificationsController>();
+        final calls = context.read<CallController>();
         if (target == _Phase.app) notifications.start();
         if (target == _Phase.auth) {
           notifications.stop();
+          calls.stop();
           // Вышли из аккаунта — окно уведомлений больше не нужно.
           context.read<ToastHost>().stop();
         }
@@ -210,9 +225,15 @@ class _VellinAppState extends State<VellinApp> {
         builder: (context, child) => Stack(children: [
           Column(children: [
             const WindowTitleBar(),
+            // Свёрнутый звонок — полоса под заголовком, над содержимым раздела.
+            const CallBarSlot(),
             Expanded(child: child ?? const SizedBox.shrink()),
           ]),
           const NotificationsPanelOverlay(),
+          // Экраны звонка выше роутера: разговор переживает переходы по
+          // разделам. Positioned.fill обязателен: вложенный Stack без него
+          // схлопнулся бы по содержимому и рисовал экраны не на месте.
+          const Positioned.fill(child: CallLayer()),
         ]),
       );
     }

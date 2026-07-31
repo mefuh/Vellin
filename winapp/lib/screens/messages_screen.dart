@@ -10,6 +10,7 @@ import '../models/dm.dart';
 import '../state/auth_controller.dart';
 import '../state/dm_controller.dart';
 import '../state/presence_controller.dart';
+import '../state/call_controller.dart';
 import '../theme/vellin_theme.dart';
 import '../widgets/back_dismiss.dart';
 import '../widgets/common.dart';
@@ -377,11 +378,16 @@ class _ChatPaneState extends State<_ChatPane> {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: VellinColors.line2))),
           alignment: Alignment.centerLeft,
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(peerName ?? 'Диалог',
-                style: const TextStyle(color: VellinColors.text0, fontSize: 16, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 2),
-            _StatusLine(activity: dm.peerActivity, online: info?.online ?? false, lastSeenAt: info?.lastSeenAt),
+          child: Row(children: [
+            Expanded(
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(peerName ?? 'Диалог',
+                    style: const TextStyle(color: VellinColors.text0, fontSize: 16, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 2),
+                _StatusLine(activity: dm.peerActivity, online: info?.online ?? false, lastSeenAt: info?.lastSeenAt),
+              ]),
+            ),
+            _CallButtons(peerId: peerId),
           ]),
         ),
       ),
@@ -832,6 +838,31 @@ class _Composer extends StatelessWidget {
 
 /// Строка статуса в шапке чата: живой индикатор «печатает/записывает …» либо
 /// присутствие («в сети» / «был(а) в сети …»). Меняется в реальном времени.
+/// Кнопки звонка в шапке переписки. Пока идёт звонок, они заблокированы:
+/// разговор всё равно может быть только один.
+class _CallButtons extends StatelessWidget {
+  final String? peerId;
+  const _CallButtons({required this.peerId});
+
+  @override
+  Widget build(BuildContext context) {
+    final call = context.watch<CallController>();
+    final busy = call.call != null || call.incoming != null;
+    final enabled = peerId != null && !busy;
+
+    Widget button(IconData icon, String tooltip, bool video) => IconButton(
+          icon: Icon(icon, size: 19, color: enabled ? VellinColors.text1 : VellinColors.text3),
+          tooltip: busy ? 'Вы уже в звонке' : tooltip,
+          onPressed: enabled ? () => call.invite(peerId!, video: video) : null,
+        );
+
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      button(Icons.call, 'Позвонить', false),
+      button(Icons.videocam, 'Видеозвонок', true),
+    ]);
+  }
+}
+
 class _StatusLine extends StatelessWidget {
   final String? activity; // 'text' | 'voice' | 'video' | null
   final bool online;
