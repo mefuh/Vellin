@@ -143,6 +143,8 @@ class DmConversation {
         preview = '⭕ Видеосообщение';
       } else if (last['hasRoomInvite'] == true) {
         preview = '🎬 Приглашение';
+      } else if (last['hasCall'] == true) {
+        preview = last['callOutcome'] == 'missed' ? '📞 Пропущенный звонок' : '📞 Звонок';
       }
     }
     return DmConversation(
