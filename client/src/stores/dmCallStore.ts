@@ -33,6 +33,8 @@ interface DmCallState {
   onRing: (call: DmCallSnapshot, from: PublicUser, rtc: RtcConfig) => void;
   onState: (call: DmCallSnapshot, peer: PublicUser, rtc?: RtcConfig) => void;
   onError: (message: string, nonce?: string) => void;
+  /** Собеседник включил или выключил микрофон либо камеру. */
+  onPeerMedia: (userId: string, media: { audio: boolean; video: boolean }) => void;
 
   /** Веду ли разговор именно я (эта вкладка), а не другое моё устройство. */
   isMine: () => boolean;
@@ -94,6 +96,17 @@ export const useDmCallStore = create<DmCallState>((set, get) => ({
       incoming: call.phase === 'active' && !mine ? null : s.incoming,
       uiMode: mine ? (s.uiMode === 'hidden' ? 'expanded' : s.uiMode) : 'hidden',
     }));
+  },
+
+  /**
+   * Переключение микрофона и камеры сервер шлёт отдельным сообщением, без
+   * нового снимка состояния. Без этого включённая по ходу разговора камера
+   * собеседника не появлялась на экране: видео рисуется по флагу из снимка.
+   */
+  onPeerMedia: (userId, media) => {
+    const { call } = get();
+    if (!call) return;
+    set({ call: { ...call, media: { ...call.media, [userId]: media } } });
   },
 
   onError: (message, nonce) => {

@@ -146,9 +146,13 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
         case 'dmcall_speaking':
           dmCallSpeakingBus.emit(msg.fromUserId, msg.speaking);
           break;
-        case 'dmcall_media':
-          dmCallMediaBus.emit(msg.fromUserId, { audio: msg.audio, video: msg.video });
+        case 'dmcall_media': {
+          const media = { audio: msg.audio, video: msg.video };
+          // В стор — состояние собеседника решает, показывать ли его видео.
+          useDmCallStore.getState().onPeerMedia(msg.fromUserId, media);
+          dmCallMediaBus.emit(msg.fromUserId, media);
           break;
+        }
         case 'dmcall_error':
           useDmCallStore.getState().onError(msg.message, msg.nonce);
           break;
