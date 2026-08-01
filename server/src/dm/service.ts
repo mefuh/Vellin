@@ -87,6 +87,24 @@ export function dmRowToDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
           inviteStatus: (m.inviteStatus ?? 'pending') as 'pending' | 'accepted' | 'declined' | 'expired',
         }
       : {}),
+    // Запись о звонке: по ней клиент рисует плашку вместо пузыря переписки.
+    ...(m.callId
+      ? {
+          callId: m.callId,
+          ...(m.callKind ? { callKind: m.callKind as 'audio' | 'video' } : {}),
+          ...(m.callOutcome
+            ? {
+                callOutcome: m.callOutcome as
+                  | 'completed'
+                  | 'missed'
+                  | 'declined'
+                  | 'cancelled'
+                  | 'failed',
+              }
+            : {}),
+          ...(m.callDurationSec != null ? { callDurationSec: m.callDurationSec } : {}),
+        }
+      : {}),
     ...(nonce ? { nonce } : {}),
   };
 }
