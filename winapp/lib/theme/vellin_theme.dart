@@ -59,5 +59,18 @@ ThemeData buildVellinTheme() {
       bodySmall: TextStyle(color: VellinColors.text1, fontSize: 13),
     ),
     splashFactory: InkRipple.splashFactory,
+    // Подсказки Material по умолчанию светлые — на тёмном интерфейсе они
+    // вспыхивают белой табличкой. Задаём фирменный тёмный вид один раз здесь,
+    // чтобы это не приходилось повторять на каждой кнопке.
+    tooltipTheme: TooltipThemeData(
+      waitDuration: const Duration(milliseconds: 400),
+      textStyle: const TextStyle(color: VellinColors.text0, fontSize: 12.5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: VellinColors.bg3,
+        borderRadius: BorderRadius.circular(VellinRadius.sm),
+        border: Border.all(color: VellinColors.line2),
+      ),
+    ),
   );
 }

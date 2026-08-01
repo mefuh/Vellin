@@ -38,15 +38,24 @@ class CallLayer extends StatelessWidget {
     return Overlay(initialEntries: [
       OverlayEntry(builder: (context) {
         final c = context.watch<CallController>();
-        return Stack(children: [
-          if (c.incoming != null) const _IncomingCall(),
-          if (c.isMine && c.call != null && c.uiMode == CallUiMode.expanded) const _CallScreen(),
-          if (c.error != null) _CallError(message: c.error!, onDone: c.clearError),
-        ]);
+        // Material обязателен: Overlay сам по себе не даёт ни подложки, ни
+        // базового стиля текста, и надписи рисовались с жёлтым подчёркиванием
+        // «текста вне Material». Прозрачный — фон рисуют сами экраны.
+        return Material(
+          type: MaterialType.transparency,
+          child: Stack(children: [
+            if (c.incoming != null) const _IncomingCall(),
+            if (c.isMine && c.call != null && c.uiMode == CallUiMode.expanded) const _CallScreen(),
+            if (c.error != null) _CallError(message: c.error!, onDone: c.clearError),
+          ]),
+        );
       }),
     ]);
   }
 }
+
+/// Высота полосы свёрнутого звонка.
+const double _callBarHeight = 44;
 
 /// Место для свёрнутого звонка в колонке окна: полоса раздвигает содержимое,
 /// а не накрывает его, иначе она перекрывала бы шапку раздела.
@@ -59,7 +68,12 @@ class CallBarSlot extends StatelessWidget {
     if (!call.isMine || call.call == null || call.uiMode != CallUiMode.minimized) {
       return const SizedBox.shrink();
     }
-    return const _CallBar();
+    // Полоса живёт над навигатором, где своего Overlay нет, а подсказкам
+    // кнопок он нужен — иначе они всплывают чужим светлым прямоугольником.
+    return SizedBox(
+      height: _callBarHeight,
+      child: Overlay(initialEntries: [OverlayEntry(builder: (_) => const _CallBar())]),
+    );
   }
 }
 
@@ -283,7 +297,7 @@ class _CallBarState extends State<_CallBar> {
       child: InkWell(
         onTap: () => call.setUiMode(CallUiMode.expanded),
         child: Container(
-          height: 44,
+          height: _callBarHeight,
           padding: const EdgeInsets.symmetric(horizontal: 14),
           decoration: const BoxDecoration(
             border: Border(bottom: BorderSide(color: VellinColors.line2)),

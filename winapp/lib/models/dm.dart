@@ -19,6 +19,17 @@ class DirectMessage {
   final String? videoThumbUrl;
   final int? videoDurationSec;
   final String? inviteRoomId;
+
+  /// Запись о звонке. Наличие [callId] делает сообщение записью о звонке;
+  /// отправителем всегда числится звонящий, поэтому «исходящий» и «входящий»
+  /// выводятся из того, моё ли это сообщение, без отдельного поля.
+  final String? callId;
+  /// 'audio' | 'video'.
+  final String? callKind;
+  /// 'completed' | 'missed' | 'declined' | 'cancelled' | 'failed'.
+  final String? callOutcome;
+  final int? callDurationSec;
+
   /// Эхо оптимистичной отправки (только у отправителя).
   final String? nonce;
   /// Локальный флаг «ещё отправляется» (оптимистичный бабл до эха с сервера).
@@ -41,9 +52,16 @@ class DirectMessage {
     this.videoThumbUrl,
     this.videoDurationSec,
     this.inviteRoomId,
+    this.callId,
+    this.callKind,
+    this.callOutcome,
+    this.callDurationSec,
     this.nonce,
     this.pending = false,
   });
+
+  /// Сообщение — запись о звонке, а не переписка.
+  bool get isCallRecord => callId != null && callId!.isNotEmpty;
 
   factory DirectMessage.fromJson(Map<String, dynamic> j) => DirectMessage(
         id: j['id'] as String? ?? '',
@@ -62,10 +80,15 @@ class DirectMessage {
         videoThumbUrl: j['videoThumbUrl'] as String?,
         videoDurationSec: (j['videoDurationSec'] as num?)?.toInt(),
         inviteRoomId: j['inviteRoomId'] as String?,
+        callId: j['callId'] as String?,
+        callKind: j['callKind'] as String?,
+        callOutcome: j['callOutcome'] as String?,
+        callDurationSec: (j['callDurationSec'] as num?)?.toInt(),
         nonce: j['nonce'] as String?,
       );
 
-  bool get hasAttachment => imageUrl != null || voiceUrl != null || videoStatus != null || inviteRoomId != null;
+  bool get hasAttachment =>
+      imageUrl != null || voiceUrl != null || videoStatus != null || inviteRoomId != null || isCallRecord;
 
   /// Текст для превью/бабла с учётом вложений (текст может быть пустым).
   String get previewText {
@@ -74,6 +97,13 @@ class DirectMessage {
     if (voiceUrl != null) return '🎤 Голосовое';
     if (videoStatus != null) return '⭕ Видеосообщение';
     if (inviteRoomId != null) return '🎬 Приглашение в комнату';
+    if (isCallRecord) {
+      return callOutcome == 'missed'
+          ? '📞 Пропущенный звонок'
+          : callKind == 'video'
+              ? '📹 Видеозвонок'
+              : '📞 Звонок';
+    }
     return '';
   }
 }

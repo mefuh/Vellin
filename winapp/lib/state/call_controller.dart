@@ -325,6 +325,10 @@ class CallController extends ChangeNotifier {
           _socket.send({'t': 'dmcall_signal', 'callId': snapshot.callId, 'payload': payload}),
       onConnected: () => _socket.send({'t': 'dmcall_connected', 'callId': snapshot.callId}),
       onRemoteStream: (stream) {
+        // Камеру собеседник включает по ходу разговора, и дорожка приходит в
+        // тот же поток. Поверхность привязана к объекту потока и такой
+        // добавки не замечает — переустанавливаем её принудительно.
+        remoteRenderer.srcObject = null;
         remoteRenderer.srcObject = stream;
         notifyListeners();
       },

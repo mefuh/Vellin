@@ -657,6 +657,9 @@ class _Bubble extends StatelessWidget {
   }
 
   Widget _content() {
+    // Запись о звонке — своя плашка, а не пузырь переписки.
+    if (m.isCallRecord) return _CallRecord(m: m, mine: mine);
+
     // Видео-кружок — отдельный круглый бабл без прямоугольной подложки.
     if (m.videoStatus != null) {
       return Column(
@@ -878,6 +881,63 @@ class _CallButtons extends StatelessWidget {
       button(Icons.call, 'Позвонить', false),
       button(Icons.videocam, 'Видеозвонок', true),
     ]);
+  }
+}
+
+/// Плашка о состоявшемся (или несостоявшемся) звонке в переписке.
+/// Формулировки те же, что на сайте: запись одна на обе стороны, и читаться
+/// она должна одинаково.
+class _CallRecord extends StatelessWidget {
+  final DirectMessage m;
+  final bool mine;
+  const _CallRecord({required this.m, required this.mine});
+
+  @override
+  Widget build(BuildContext context) {
+    final missed = m.callOutcome == 'missed';
+    final failed = m.callOutcome == 'failed';
+    final video = m.callKind == 'video';
+
+    final title = switch (m.callOutcome) {
+      'missed' => mine ? 'Не дозвонились' : 'Пропущенный звонок',
+      'declined' => mine ? 'Звонок отклонён' : 'Вы отклонили звонок',
+      'cancelled' => mine ? 'Вы отменили звонок' : 'Отменённый звонок',
+      'failed' => 'Звонок не состоялся',
+      _ => video ? 'Видеозвонок' : 'Звонок',
+    };
+
+    // Пропущенный подсвечиваем: это единственный случай, требующий внимания.
+    final iconColor = missed && !mine ? VellinColors.accent : VellinColors.text2;
+    final duration = m.callDurationSec ?? 0;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      decoration: BoxDecoration(
+        color: VellinColors.bg2,
+        borderRadius: BorderRadius.circular(VellinRadius.lg),
+        border: Border.all(color: VellinColors.line1),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(
+          missed || failed
+              ? Icons.phone_disabled
+              : video
+                  ? Icons.videocam
+                  : Icons.call,
+          size: 17,
+          color: iconColor,
+        ),
+        const SizedBox(width: 10),
+        Text(title, style: const TextStyle(color: VellinColors.text0, fontSize: 13.5)),
+        if (m.callOutcome == 'completed')
+          Text(
+            ' · ${duration ~/ 60}:${(duration % 60).toString().padLeft(2, '0')}',
+            style: const TextStyle(color: VellinColors.text3, fontSize: 13.5),
+          ),
+        const SizedBox(width: 10),
+        _TimeLabel(iso: m.createdAt, mine: false),
+      ]),
+    );
   }
 }
 

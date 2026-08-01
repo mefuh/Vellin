@@ -5,9 +5,10 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 /// Одно соединение звонка один на один.
 ///
 /// Переносит на Flutter ту же схему, что в вебе: «вежливая» сторона (по
-/// сравнению идентификаторов) уступает при встречном предложении, а видео-
-/// трансивер создаётся заранее — тогда включение камеры по ходу разговора
-/// делается заменой дорожки, без повторного согласования.
+/// сравнению идентификаторов) уступает при встречном предложении. Камера
+/// включается по ходу разговора добавлением дорожки и новым согласованием —
+/// заранее заведённая пустая видео-линия для этого не годится, стороны
+/// договариваются о ней как о «только приёме».
 class DmCallSession {
   final String myUserId;
   final String peerUserId;
@@ -35,7 +36,17 @@ class DmCallSession {
   MediaStream? _localStream;
   RTCRtpSender? _videoSender;
   bool _makingOffer = false;
-  bool _settingRemoteAnswer = false;
+
+  /// Соединение просило согласование не вовремя — предложим, как освободится.
+  bool _renegotiatePending = false;
+
+  /// Своё предложение отправлено, ответ ещё не пришёл.
+  ///
+  /// Состояние самого соединения для этого не годится: оно обновляется с
+  /// задержкой (сразу после создания читается как «неизвестно», а сразу после
+  /// применения ответа — ещё как «жду ответ»), и решения по нему выходили
+  /// неверными — согласование вставало навсегда.
+  bool _negotiating = false;
   bool _closed = false;
   bool _connectedReported = false;
 
@@ -110,37 +121,20 @@ class DmCallSession {
       }
     };
 
-    pc.onRenegotiationNeeded = () async {
-      if (_closed) return;
-      try {
-        _makingOffer = true;
-        final offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        final local = await pc.getLocalDescription();
-        if (local?.sdp != null) sendSignal({'kind': 'offer', 'sdp': local!.sdp});
-      } catch (_) {
-        // Согласование повторится по следующему событию.
-      } finally {
-        _makingOffer = false;
-      }
-    };
+    pc.onRenegotiationNeeded = () => _offerIfPossible();
 
-    // Аудио отправляем сразу; видео-трансивер заводим заранее, даже когда
-    // камера выключена — потом достаточно подменить дорожку.
+    // Аудио отправляем сразу; видео добавится при включении камеры.
     for (final track in _localStream!.getAudioTracks()) {
       await pc.addTrack(track, _localStream!);
     }
     final videoTrack = _localStream!.getVideoTracks().isNotEmpty
         ? _localStream!.getVideoTracks().first
         : null;
+    // Видео добавляем только когда оно действительно есть. Заведённая заранее
+    // пустая видео-линия соглашалась как «только приём», и включённая позже
+    // камера в неё уже не проходила — картинки не видел никто.
     if (videoTrack != null) {
       _videoSender = await pc.addTrack(videoTrack, _localStream!);
-    } else {
-      final transceiver = await pc.addTransceiver(
-        kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
-        init: RTCRtpTransceiverInit(direction: TransceiverDirection.SendRecv),
-      );
-      _videoSender = transceiver.sender;
     }
   }
 
@@ -164,27 +158,39 @@ class DmCallSession {
       }
 
       if (kind == 'offer') {
-        final signalingState = pc.signalingState;
-        final ready = !_makingOffer &&
-            (signalingState == RTCSignalingState.RTCSignalingStateStable || _settingRemoteAnswer);
+        final ready = !_makingOffer && !_negotiating;
         // Столкновение предложений: невежливая сторона своё не уступает.
         if (!ready && !_polite) return;
+        // А вежливая — откатывает своё, иначе чужое предложение не принять и
+        // согласование встанет (например, когда камеру включили одновременно).
+        if (!ready && _polite) {
+          try {
+            await pc.setLocalDescription(RTCSessionDescription(null, 'rollback'));
+          } catch (_) {
+            // Отката нет — примем предложение как есть.
+          }
+          _negotiating = false;
+        }
 
         await pc.setRemoteDescription(RTCSessionDescription(payload['sdp'] as String?, 'offer'));
         final answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         final local = await pc.getLocalDescription();
         if (local?.sdp != null) sendSignal({'kind': 'answer', 'sdp': local!.sdp});
+        await _flushPendingRenegotiation();
         return;
       }
 
       if (kind == 'answer') {
-        _settingRemoteAnswer = true;
+        // Своего предложения нет — этот ответ уже неактуален (обмен закрыт
+        // откатом или чужим предложением), и соединение его отвергнет.
+        if (!_negotiating) return;
         await pc.setRemoteDescription(RTCSessionDescription(payload['sdp'] as String?, 'answer'));
-        _settingRemoteAnswer = false;
+        _negotiating = false;
+        await _flushPendingRenegotiation();
       }
     } catch (_) {
-      _settingRemoteAnswer = false;
+      // Согласование повторится по следующему изменению.
     }
   }
 
@@ -214,6 +220,8 @@ class DmCallSession {
     if (!enabled) {
       for (final t in stream.getVideoTracks()) {
         t.enabled = false;
+        // Отправитель остаётся на месте: линия уже согласована, и включить
+        // камеру обратно можно будет одной подменой дорожки.
         await _videoSender?.replaceTrack(null);
         await stream.removeTrack(t);
         await t.stop();
@@ -231,7 +239,55 @@ class DmCallSession {
     });
     final track = camStream.getVideoTracks().first;
     await stream.addTrack(track);
-    await _videoSender?.replaceTrack(track);
+
+    final sender = _videoSender;
+    if (sender == null) {
+      // Первое включение камеры в разговоре: дорожку добавляем в соединение,
+      // и оно само просит новое согласование — иначе видео некуда идти.
+      _videoSender = await _pc?.addTrack(track, stream);
+      // Просьба о согласовании приходит раньше, чем дорожка действительно
+      // встала в соединение, и то предложение уходит ещё без видео. Просим
+      // ещё раз: если обмен уже идёт, повтор дождётся его конца.
+      await _offerIfPossible();
+    } else {
+      await sender.replaceTrack(track);
+    }
+  }
+
+  /// Догнать отложенное согласование, когда обмен завершился.
+  Future<void> _flushPendingRenegotiation() async {
+    if (!_renegotiatePending) return;
+    _renegotiatePending = false;
+    await _offerIfPossible();
+  }
+
+  /// Предложить согласование, если соединение к нему готово.
+  ///
+  /// Предлагать можно только из спокойного состояния: второе предложение
+  /// поверх незавершённого обмена его ломает — собеседник отвечает на оба, и
+  /// второй ответ соединение уже отвергает. Поэтому просьба, пришедшая не
+  /// вовремя, не теряется, а откладывается до конца текущего обмена.
+  Future<void> _offerIfPossible() async {
+    final pc = _pc;
+    if (pc == null || _closed) return;
+    if (_makingOffer || _negotiating) {
+      _renegotiatePending = true;
+      return;
+    }
+    try {
+      _makingOffer = true;
+      final offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      final local = await pc.getLocalDescription();
+      if (local?.sdp != null) {
+        _negotiating = true;
+        sendSignal({'kind': 'offer', 'sdp': local!.sdp});
+      }
+    } catch (_) {
+      // Предложение не составилось — повторим при следующей просьбе.
+    } finally {
+      _makingOffer = false;
+    }
   }
 
   Future<void> dispose() async {
