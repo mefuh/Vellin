@@ -178,6 +178,8 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   const prevSelfSpeakingRef = useRef<boolean>(false);
   const stateRef = useRef<CallState>('idle');
   stateRef.current = state;
+  // Signals that arrived while we were still joining — replayed on entry.
+  const pendingSignalsRef = useRef<{ fromUserId: string; payload: CallSignalPayload }[]>([]);
 
   // ── Signaling envelope helpers ──────────────────────────────────────────
 
@@ -473,9 +475,8 @@ export function useCall(opts: UseCallOpts): UseCallApi {
 
   // ── Incoming signal handling ────────────────────────────────────────────
 
-  useEffect(() => {
-    const off = signalBus.on(async (fromUserId, payload) => {
-      if (stateRef.current !== 'in') return;
+  const handleSignal = useCallback(
+    async (fromUserId: string, payload: CallSignalPayload): Promise<void> => {
       let rec = pcsRef.current.get(fromUserId);
       if (!rec) {
         // We received signaling before we noticed the peer joined — create
@@ -521,9 +522,27 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       } catch (err) {
         console.warn('[call] signal handling failed', err);
       }
+    },
+    [createPeer, sendSignal],
+  );
+
+  useEffect(() => {
+    const off = signalBus.on(async (fromUserId, payload) => {
+      // Entering a call takes a moment — mic permission, the noise pipeline,
+      // the camera. A peer that got ready first signals into that gap, and
+      // dropping its offer here deadlocks negotiation: the impolite side waits
+      // for an answer that never comes, so neither audio nor video ever flows.
+      // Hold early signals and replay them once we are in.
+      if (stateRef.current !== 'in') {
+        if (pendingSignalsRef.current.length < 64) {
+          pendingSignalsRef.current.push({ fromUserId, payload });
+        }
+        return;
+      }
+      await handleSignal(fromUserId, payload);
     });
     return off;
-  }, [createPeer, sendSignal]);
+  }, [handleSignal]);
 
   // ── Snapshot watcher: diff callMembers vs open PCs ──────────────────────
 
@@ -729,13 +748,29 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       onLocalMedia({ audio: false, video: withVideo });
       transport.join(withVideo);
       setState('in');
+      // React applies the state on the next render, but the queued signals
+      // must be handled now — the peer is already waiting for our answer.
+      stateRef.current = 'in';
+      const queued = pendingSignalsRef.current;
+      pendingSignalsRef.current = [];
+      for (const s of queued) await handleSignal(s.fromUserId, s.payload);
     },
-    [myUserId, myUserKind, transport, onLocalMedia, attachAnalyser, ensureAudioCtx, syncOutboundVideo],
+    [
+      myUserId,
+      myUserKind,
+      transport,
+      onLocalMedia,
+      attachAnalyser,
+      ensureAudioCtx,
+      syncOutboundVideo,
+      handleSignal,
+    ],
   );
 
   const leave = useCallback<UseCallApi['leave']>(() => {
     if (stateRef.current === 'idle') return;
     transport.leave();
+    pendingSignalsRef.current = [];
     closeAllPeers();
     pipelineRef.current?.teardown();
     pipelineRef.current = null;
