@@ -47,6 +47,10 @@ class DmCallSession {
   /// применения ответа — ещё как «жду ответ»), и решения по нему выходили
   /// неверными — согласование вставало навсегда.
   bool _negotiating = false;
+
+  /// Сторож на ответ и число повторов предложения.
+  Timer? _offerWatchdog;
+  int _offerAttempts = 0;
   bool _closed = false;
   bool _connectedReported = false;
 
@@ -187,6 +191,8 @@ class DmCallSession {
         if (!_negotiating) return;
         await pc.setRemoteDescription(RTCSessionDescription(payload['sdp'] as String?, 'answer'));
         _negotiating = false;
+        _offerWatchdog?.cancel();
+        _offerAttempts = 0;
         await _flushPendingRenegotiation();
       }
     } catch (_) {
@@ -220,11 +226,26 @@ class DmCallSession {
     if (!enabled) {
       for (final t in stream.getVideoTracks()) {
         t.enabled = false;
-        // Отправитель остаётся на месте: линия уже согласована, и включить
-        // камеру обратно можно будет одной подменой дорожки.
-        await _videoSender?.replaceTrack(null);
-        await stream.removeTrack(t);
-        await t.stop();
+        // Каждый шаг — сам по себе: снятие дорожки из локального потока на
+        // Windows иногда срывается, и раньше это обрывало всё выключение —
+        // собеседник не получал даже уведомления и видел застывший кадр.
+        try {
+          // Отправитель остаётся на месте: линия уже согласована, и включить
+          // камеру обратно можно будет одной подменой дорожки.
+          await _videoSender?.replaceTrack(null);
+        } catch (_) {
+          // Дорожка уже не отправляется.
+        }
+        try {
+          await stream.removeTrack(t);
+        } catch (_) {
+          // В потоке её всё равно больше нет смысла держать.
+        }
+        try {
+          await t.stop();
+        } catch (_) {
+          // Камера освободится вместе с разговором.
+        }
       }
       return;
     }
@@ -282,6 +303,7 @@ class DmCallSession {
       if (local?.sdp != null) {
         _negotiating = true;
         sendSignal({'kind': 'offer', 'sdp': local!.sdp});
+        _armOfferWatchdog();
       }
     } catch (_) {
       // Предложение не составилось — повторим при следующей просьбе.
@@ -290,8 +312,26 @@ class DmCallSession {
     }
   }
 
+  /// Ждать ответ ограниченное время и предложить заново, если его нет.
+  ///
+  /// Пока обмен не завершён, сторона по правилу разрешения столкновений
+  /// отклоняет встречные предложения — и если ответ потерялся (собеседник ещё
+  /// поднимал микрофон), звонок остаётся без звука и видео навсегда. Повтор
+  /// выводит из этого тупика.
+  void _armOfferWatchdog() {
+    _offerWatchdog?.cancel();
+    _offerWatchdog = Timer(const Duration(seconds: 3), () {
+      if (_closed || !_negotiating) return;
+      if (_offerAttempts >= 3) return;
+      _offerAttempts++;
+      _negotiating = false;
+      _offerIfPossible();
+    });
+  }
+
   Future<void> dispose() async {
     _closed = true;
+    _offerWatchdog?.cancel();
     for (final t in _localStream?.getTracks() ?? const <MediaStreamTrack>[]) {
       await t.stop();
     }

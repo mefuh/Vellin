@@ -412,15 +412,21 @@ class CallController extends ChangeNotifier {
     final c = call;
     if (s == null || c == null) return;
     final next = !s.videoEnabled;
-    await s.setCameraEnabled(next);
-    localRenderer.srcObject = s.localStream;
-    _socket.send({
-      't': 'dmcall_media',
-      'callId': c.callId,
-      'audio': s.micEnabled,
-      'video': next,
-    });
-    notifyListeners();
+    try {
+      await s.setCameraEnabled(next);
+    } finally {
+      // Сообщить собеседнику нужно в любом случае: сорвись переключение на
+      // полпути — он всё равно перестанет получать картинку, и без этого
+      // сообщения у него останется висеть застывший кадр.
+      localRenderer.srcObject = s.localStream;
+      _socket.send({
+        't': 'dmcall_media',
+        'callId': c.callId,
+        'audio': s.micEnabled,
+        'video': next,
+      });
+      notifyListeners();
+    }
   }
 
   void setUiMode(CallUiMode mode) {
