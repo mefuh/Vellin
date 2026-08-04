@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useCallContextOptional } from '../../hooks/CallContext';
+import { ownerOfStreamKey } from '../../hooks/useCall';
 import { useCallSettingsStore } from '../../stores/callSettingsStore';
 
 /**
@@ -15,8 +16,10 @@ export function RemoteAudioMixer({ streams }: { streams?: Map<string, MediaStrea
   const remoteStreams = streams ?? ctx?.remoteStreams ?? new Map<string, MediaStream>();
   return (
     <div aria-hidden style={{ display: 'none' }}>
-      {[...remoteStreams.entries()].map(([userId, stream]) => (
-        <RemoteAudio key={userId} userId={userId} stream={stream} />
+      {/* Ключ может быть и «userId», и «userId:screen» — звук демонстрации
+          играется наравне с голосом, а громкость берётся по владельцу. */}
+      {[...remoteStreams.entries()].map(([key, stream]) => (
+        <RemoteAudio key={key} userId={ownerOfStreamKey(key)} stream={stream} />
       ))}
     </div>
   );

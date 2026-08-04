@@ -34,6 +34,7 @@ export function DmCallMiniBar({ api }: { api: UseCallApi }): React.ReactElement 
 
   const micOff = api.myStream?.getAudioTracks()[0]?.enabled === false;
   const speaking = api.speaking.has(peer.id);
+  const peerScreen = call.media[peer.id]?.screen === true;
 
   return (
     <div
@@ -94,6 +95,8 @@ export function DmCallMiniBar({ api }: { api: UseCallApi }): React.ReactElement 
           </span>
           <span style={{ fontSize: 11.5, color: 'var(--text-2)' }}>
             {call.phase === 'ringing' ? 'Дозвон…' : formatDuration(answeredAt)}
+            {/* Демонстрация идёт и в свёрнутом звонке — про неё надо помнить. */}
+            {peerScreen && ' · демонстрация экрана'}
           </span>
         </span>
       </button>

@@ -504,6 +504,12 @@ export interface PlatformToggles {
   directMessages: boolean;
   /** Звонки в личных сообщениях — отдельно от `calls` (те про комнаты). */
   dmCalls: boolean;
+  /**
+   * Демонстрация экрана в звонках личных сообщений. Отдельно от `dmCalls`:
+   * она заметно тяжелее для канала, и выключить её нужно уметь, не трогая
+   * сами звонки. Вести демонстрацию умеет только клиент для Windows.
+   */
+  dmScreenShare: boolean;
   friends: boolean;
   invites: boolean;
   // Контент и уведомления

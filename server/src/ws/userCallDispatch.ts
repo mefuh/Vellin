@@ -51,7 +51,17 @@ const schemas = {
   dmcall_cancel: z.object({ callId: idSchema }),
   dmcall_hangup: z.object({ callId: idSchema }),
   dmcall_signal: z.object({ callId: idSchema, payload: signalSchema }),
-  dmcall_media: z.object({ callId: idSchema, audio: z.boolean(), video: z.boolean() }),
+  dmcall_media: z.object({
+    callId: idSchema,
+    audio: z.boolean(),
+    video: z.boolean(),
+    // Старые сборки клиента о демонстрации не знают — считаем, что её нет.
+    screen: z.boolean().optional(),
+    // Приметы дорожки демонстрации: идентификатор линии в согласовании и
+    // идентификатор потока. И то, и другое — короткие технические строки.
+    screenMid: z.string().min(1).max(64).optional(),
+    screenStreamId: z.string().min(1).max(128).optional(),
+  }),
   dmcall_speaking: z.object({ callId: idSchema, speaking: z.boolean() }),
   dmcall_connected: z.object({ callId: idSchema }),
   dmcall_rejoin: z.object({ callId: idSchema }),
@@ -108,7 +118,14 @@ export function dispatchDmCall(userId: string, connId: string, msg: Record<strin
     }
     case 'dmcall_media': {
       const p = schemas.dmcall_media.safeParse(msg);
-      if (p.success) handleDmCallMedia(userId, p.data.callId, { audio: p.data.audio, video: p.data.video });
+      if (p.success) {
+        void handleDmCallMedia(
+          userId,
+          p.data.callId,
+          { audio: p.data.audio, video: p.data.video, screen: p.data.screen === true },
+          { mid: p.data.screenMid, streamId: p.data.screenStreamId },
+        );
+      }
       return;
     }
     case 'dmcall_speaking': {

@@ -19,6 +19,7 @@ const DEFAULT_TOGGLES: PlatformToggles = {
   playlists: true,
   directMessages: true,
   dmCalls: true,
+  dmScreenShare: true,
   friends: true,
   invites: true,
   uploads: true,

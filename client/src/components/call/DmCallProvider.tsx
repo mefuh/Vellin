@@ -4,7 +4,7 @@ import type { CallMember } from '@vellin/shared';
 import { useAuthStore } from '../../stores/authStore';
 import { useDmCallStore } from '../../stores/dmCallStore';
 import { useCall, type CallTransport } from '../../hooks/useCall';
-import { dmCallSignalBus, dmCallSpeakingBus } from '../../ws/dmCallBuses';
+import { dmCallMediaBus, dmCallSignalBus, dmCallSpeakingBus } from '../../ws/dmCallBuses';
 import { RemoteAudioMixer } from '../room/RemoteAudioMixer';
 import { IncomingCallModal } from './IncomingCallModal';
 import { DmCallOverlay } from './DmCallOverlay';
@@ -44,7 +44,9 @@ export function DmCallProvider(): React.ReactElement | null {
         if (callId) send({ t: 'dmcall_signal', callId, payload });
       },
       media: (audio, video) => {
-        if (callId) send({ t: 'dmcall_media', callId, audio, video });
+        // Демонстрацию экрана сайт не ведёт — она есть только в клиенте для
+        // Windows, поэтому свой флаг всегда выключен.
+        if (callId) send({ t: 'dmcall_media', callId, audio, video, screen: false });
       },
       speaking: (speaking) => {
         if (callId) send({ t: 'dmcall_speaking', callId, speaking });
@@ -101,6 +103,19 @@ export function DmCallProvider(): React.ReactElement | null {
     speakingBus: dmCallSpeakingBus,
     onLocalMedia,
   });
+
+  // Приметы дорожки демонстрации собеседника — соединению, чтобы оно не
+  // приняло её за камеру. Подсказка может прийти и раньше самой дорожки, и
+  // позже: раскладка потоков пересобирается в обоих случаях.
+  const setScreenHint = callApi.setScreenHint;
+  useEffect(() => {
+    return dmCallMediaBus.on((fromUserId, media) => {
+      setScreenHint(
+        fromUserId,
+        media.screen ? { mid: media.screenMid, streamId: media.screenStreamId } : null,
+      );
+    });
+  }, [setScreenHint]);
 
   // Захват микрофона поднимаем, когда разговор начался, и отпускаем в конце.
   const joinedForRef = useRef<string | null>(null);
