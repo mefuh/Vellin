@@ -62,11 +62,33 @@ export interface UseCallOpts {
   onLocalMedia: (media: { audio: boolean; video: boolean }) => void;
 }
 
+/**
+ * Ключ потока собеседника в `remoteStreams`: камера лежит под самим `userId`,
+ * демонстрация экрана — под `userId:screen`. Демонстрация не заменяет камеру,
+ * поэтому у одного человека потоков может быть два.
+ */
+export const SCREEN_KEY_SUFFIX = ':screen';
+export const screenKey = (userId: string): string => `${userId}${SCREEN_KEY_SUFFIX}`;
+/** Кому принадлежит поток — из ключа любого вида. */
+export const ownerOfStreamKey = (key: string): string => key.split(':')[0] ?? key;
+
+/**
+ * Приметы дорожки демонстрации, присланные её ведущим: идентификатор линии в
+ * согласовании и идентификатор потока. Двух примет нужно две, потому что на
+ * Windows первая доезжает не всегда.
+ */
+export interface ScreenTrackHint {
+  mid?: string;
+  streamId?: string;
+}
+
 export interface UseCallApi {
   state: CallState;
   permissionError: PermissionError;
   myStream: MediaStream | null;
   remoteStreams: Map<string, MediaStream>;
+  /** Сообщить, какая дорожка собеседника — демонстрация экрана (null — её нет). */
+  setScreenHint: (userId: string, hint: ScreenTrackHint | null) => void;
   speaking: Set<string>;
   /** Latest enumerateDevices snapshot — populated once the mic permission is granted. */
   availableDevices: { mics: MediaDeviceInfo[]; cameras: MediaDeviceInfo[] };
@@ -78,6 +100,13 @@ export interface UseCallApi {
   switchMic: (deviceId: string) => Promise<void>;
   /** Switch the active camera without renegotiating SDP (`sender.replaceTrack`). */
   switchCamera: (deviceId: string) => Promise<void>;
+}
+
+/** Входящий поток и приметы, по которым его можно опознать. */
+interface InboundStream {
+  mid: string | null;
+  streamId: string;
+  stream: MediaStream;
 }
 
 interface PeerRecord {
@@ -149,6 +178,11 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   const [permissionError, setPermissionError] = useState<PermissionError>(null);
   const [myStream, setMyStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
+  // Все входящие потоки с их приметами и присланные подсказки о демонстрации.
+  // Хранятся врозь, потому что дорожка и подсказка приходят разными путями и в
+  // любом порядке: раскладка пересобирается из них при каждом изменении.
+  const inboundRef = useRef<Map<string, InboundStream[]>>(new Map());
+  const screenHintsRef = useRef<Map<string, ScreenTrackHint>>(new Map());
   const [speaking, setSpeaking] = useState<Set<string>>(new Set());
   const [availableDevices, setAvailableDevices] = useState<{
     mics: MediaDeviceInfo[];
@@ -323,6 +357,42 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     });
   }, [myUserId]);
 
+  // ── Раскладка входящих потоков ──────────────────────────────────────────
+
+  /**
+   * Пересобрать `remoteStreams` из накопленных потоков и подсказок.
+   *
+   * Дорожка и подсказка о ней приходят разными путями — по соединению и по
+   * сигнальному каналу — и в любом порядке. Поэтому раскладка не решается «на
+   * месте» в момент прихода дорожки, а каждый раз выводится заново из обоих
+   * источников: тогда поздняя подсказка сама переставит поток в демонстрацию.
+   */
+  const rebuildRemoteStreams = useCallback((): void => {
+    const next = new Map<string, MediaStream>();
+    for (const [userId, entries] of inboundRef.current) {
+      const hint = screenHintsRef.current.get(userId);
+      for (const e of entries) {
+        const isScreen =
+          !!hint &&
+          ((!!hint.mid && e.mid === hint.mid) || (!!hint.streamId && e.streamId === hint.streamId));
+        next.set(isScreen ? screenKey(userId) : userId, e.stream);
+      }
+    }
+    setRemoteStreams((prev) => {
+      if (prev.size === next.size && [...next].every(([k, v]) => prev.get(k) === v)) return prev;
+      return next;
+    });
+  }, []);
+
+  const setScreenHint = useCallback(
+    (userId: string, hint: ScreenTrackHint | null): void => {
+      if (hint && (hint.mid || hint.streamId)) screenHintsRef.current.set(userId, hint);
+      else screenHintsRef.current.delete(userId);
+      rebuildRemoteStreams();
+    },
+    [rebuildRemoteStreams],
+  );
+
   // ── Peer connection lifecycle ───────────────────────────────────────────
 
   const createPeer = useCallback(
@@ -388,12 +458,15 @@ export function useCall(opts: UseCallOpts): UseCallApi {
             .map((t) => t.kind)
             .join(',')}`,
         );
-        setRemoteStreams((prev) => {
-          if (prev.get(peerUserId) === stream) return prev;
-          const next = new Map(prev);
-          next.set(peerUserId, stream);
-          return next;
-        });
+        // Потоков от одного человека может быть два — камера и демонстрация.
+        // Копим их все, а кто из них кто — решает раскладка по подсказкам.
+        const entries = inboundRef.current.get(peerUserId) ?? [];
+        const mid = ev.transceiver?.mid ?? null;
+        const known = entries.find((e) => e.stream === stream);
+        if (known) known.mid = known.mid ?? mid;
+        else entries.push({ mid, streamId: stream.id, stream });
+        inboundRef.current.set(peerUserId, entries);
+        rebuildRemoteStreams();
         // NB: do NOT attach a Web Audio analyser to a remote PeerConnection
         // stream — Chrome silently mutes the <audio> playback for that stream
         // once a MediaStreamAudioSourceNode owns it. Active-speaker indicator
@@ -450,12 +523,10 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       }
       pcsRef.current.delete(peerUserId);
       detachAnalyser(peerUserId);
-      setRemoteStreams((prev) => {
-        if (!prev.has(peerUserId)) return prev;
-        const next = new Map(prev);
-        next.delete(peerUserId);
-        return next;
-      });
+      // Уходят оба потока — и камера, и демонстрация.
+      inboundRef.current.delete(peerUserId);
+      screenHintsRef.current.delete(peerUserId);
+      rebuildRemoteStreams();
       // Clear any lingering speaking indicator — handles hard-disconnects
       // where the peer left while their last `call_speaking: true` was the
       // most recent broadcast.
@@ -466,7 +537,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         return next;
       });
     },
-    [detachAnalyser],
+    [detachAnalyser, rebuildRemoteStreams],
   );
 
   const closeAllPeers = useCallback((): void => {
@@ -787,6 +858,8 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     prevSelfSpeakingRef.current = false;
     for (const key of [...analysersRef.current.keys()]) detachAnalyser(key);
     setMyStream(null);
+    inboundRef.current.clear();
+    screenHintsRef.current.clear();
     setRemoteStreams(new Map());
     setSpeaking(new Set());
     onLocalMedia({ audio: false, video: false });
@@ -1013,6 +1086,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     permissionError,
     myStream,
     remoteStreams,
+    setScreenHint,
     speaking,
     availableDevices,
     join,

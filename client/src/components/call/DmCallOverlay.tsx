@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '../../shared';
 import { Icon } from '../../shared/Icon';
 import { useDmCallStore } from '../../stores/dmCallStore';
-import type { UseCallApi } from '../../hooks/useCall';
+import { screenKey, type UseCallApi } from '../../hooks/useCall';
 import { startRingbackTone } from '../../utils/sound';
 
 /** «5:32» — длительность разговора. */
@@ -14,6 +14,16 @@ function formatDuration(startedAt: number | null): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/** Один показываемый поток разговора: демонстрация, камера или аватар. */
+interface Tile {
+  key: string;
+  kind: 'screen' | 'camera' | 'avatar';
+  stream: MediaStream | null;
+  label: string;
+  /** Свой поток: он не звучит (иначе эхо) и камера показывается зеркально. */
+  mine: boolean;
+}
+
 /** Развёрнутый экран разговора. */
 export function DmCallOverlay({ api }: { api: UseCallApi }): React.ReactElement | null {
   const call = useDmCallStore((s) => s.call);
@@ -21,6 +31,9 @@ export function DmCallOverlay({ api }: { api: UseCallApi }): React.ReactElement 
   const hangup = useDmCallStore((s) => s.hangup);
   const setUiMode = useDmCallStore((s) => s.setUiMode);
   const [, tick] = useState(0);
+  // Какой поток показан крупно. null — по порядку: демонстрация собеседника,
+  // затем его камера. Выбор живёт, пока открыт экран звонка.
+  const [mainKey, setMainKey] = useState<string | null>(null);
 
   const answeredAt = call?.answeredAt ? Date.parse(call.answeredAt) : null;
   const ringing = call?.phase === 'ringing';
@@ -45,6 +58,32 @@ export function DmCallOverlay({ api }: { api: UseCallApi }): React.ReactElement 
   const peerVideoOn = call.media[peer.id]?.video === true;
   const myVideoOn = api.myStream?.getVideoTracks()[0]?.enabled === true;
   const peerStream = api.remoteStreams.get(peer.id) ?? null;
+  const peerScreenStream = api.remoteStreams.get(screenKey(peer.id)) ?? null;
+
+  // Все потоки разговора: демонстрация не заменяет камеру, поэтому их может
+  // быть несколько. Первый в списке показывается крупно, остальные — плитками;
+  // клик по плитке меняет её с главным потоком местами.
+  const tiles: Tile[] = [];
+  if (call.media[peer.id]?.screen && peerScreenStream) {
+    tiles.push({
+      key: 'peer-screen',
+      kind: 'screen',
+      stream: peerScreenStream,
+      label: `Экран: ${peer.username}`,
+      mine: false,
+    });
+  }
+  tiles.push(
+    peerVideoOn && peerStream
+      ? { key: 'peer-camera', kind: 'camera', stream: peerStream, label: peer.username, mine: false }
+      : { key: 'peer-avatar', kind: 'avatar', stream: null, label: peer.username, mine: false },
+  );
+  if (myVideoOn && api.myStream) {
+    tiles.push({ key: 'my-camera', kind: 'camera', stream: api.myStream, label: 'Вы', mine: true });
+  }
+
+  const main = tiles.find((t) => t.key === mainKey) ?? tiles[0]!;
+  const others = tiles.filter((t) => t.key !== main.key);
 
   return (
     <div
@@ -85,9 +124,7 @@ export function DmCallOverlay({ api }: { api: UseCallApi }): React.ReactElement 
         <Icon name="chevronD" size={18} />
       </button>
 
-      {peerVideoOn && peerStream ? (
-        <VideoTile stream={peerStream} label={peer.username} />
-      ) : (
+      {main.kind === 'avatar' ? (
         <Avatar
           name={peer.username}
           seed={peer.avatarSeed}
@@ -99,13 +136,75 @@ export function DmCallOverlay({ api }: { api: UseCallApi }): React.ReactElement 
               : undefined
           }
         />
+      ) : (
+        <VideoTile
+          stream={main.stream!}
+          label={main.label}
+          muted={main.mine}
+          mirrored={main.kind === 'camera' && main.mine}
+          contain={main.kind === 'screen'}
+        />
       )}
       <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-0)' }}>{peer.username}</div>
 
-      {/* Своё видео — в углу, зеркально, как во всех видеозвонках. */}
-      {myVideoOn && api.myStream && (
-        <div style={{ position: 'absolute', right: 20, bottom: 20, width: 180, aspectRatio: '4 / 3' }}>
-          <VideoTile stream={api.myStream} label="Вы" muted mirrored />
+      {/* Остальные потоки — плитками в углу; клик меняет плитку с главной. */}
+      {others.length > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            right: 20,
+            bottom: 20,
+            display: 'flex',
+            gap: 10,
+            flexWrap: 'wrap',
+            justifyContent: 'flex-end',
+            maxWidth: 'min(560px, 60vw)',
+          }}
+        >
+          {others.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setMainKey(t.key)}
+              title={`Показать крупно: ${t.label}`}
+              aria-label={`Показать крупно: ${t.label}`}
+              style={{
+                width: 180,
+                aspectRatio: '16 / 9',
+                padding: 0,
+                border: 'none',
+                background: 'transparent',
+                borderRadius: 'var(--r-md)',
+                cursor: 'pointer',
+                overflow: 'hidden',
+              }}
+            >
+              {t.kind === 'avatar' ? (
+                <div
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    display: 'grid',
+                    placeItems: 'center',
+                    background: 'var(--bg-2)',
+                    border: '1px solid var(--line-2)',
+                    borderRadius: 'var(--r-md)',
+                  }}
+                >
+                  <Avatar name={peer.username} seed={peer.avatarSeed} src={peer.avatarUrl} size={48} />
+                </div>
+              ) : (
+                <VideoTile
+                  stream={t.stream!}
+                  label={t.label}
+                  muted={t.mine}
+                  mirrored={t.kind === 'camera' && t.mine}
+                  contain={t.kind === 'screen'}
+                  fill
+                />
+              )}
+            </button>
+          ))}
         </div>
       )}
       <div style={{ fontSize: 14, color: 'var(--text-2)', minHeight: 20 }}>
@@ -124,23 +223,37 @@ export function DmCallOverlay({ api }: { api: UseCallApi }): React.ReactElement 
           icon={myVideoOn ? 'video' : 'videoOff'}
           onClick={() => void api.toggleCamera()}
         />
+        {/* Демонстрацию умеет вести только клиент для Windows; здесь кнопка
+            нужна, чтобы о такой возможности вообще узнали. */}
+        <ControlButton
+          label="Демонстрация экрана доступна в приложении для Windows"
+          icon="cast"
+          disabled
+          onClick={() => {}}
+        />
         <ControlButton label="Завершить" icon="phoneOff" danger onClick={hangup} />
       </div>
     </div>
   );
 }
 
-/** Кадр видео: собеседника во всю ширину либо своё в углу. */
+/** Кадр видео: главный во всю ширину либо плитка в углу. */
 function VideoTile({
   stream,
   label,
   muted,
   mirrored,
+  contain,
+  fill,
 }: {
   stream: MediaStream;
   label: string;
   muted?: boolean;
   mirrored?: boolean;
+  /** Демонстрацию показываем целиком: обрезать чужой экран нельзя. */
+  contain?: boolean;
+  /** Растянуть на размер родителя — режим плитки. */
+  fill?: boolean;
 }) {
   const ref = useRef<HTMLVideoElement | null>(null);
 
@@ -162,11 +275,11 @@ function VideoTile({
       aria-label={label}
       style={{
         width: '100%',
-        maxWidth: mirrored ? undefined : 'min(720px, 82vw)',
-        maxHeight: mirrored ? undefined : '52vh',
-        height: mirrored ? '100%' : undefined,
-        objectFit: 'cover',
-        borderRadius: 'var(--r-lg)',
+        maxWidth: fill ? undefined : 'min(960px, 88vw)',
+        maxHeight: fill ? undefined : '56vh',
+        height: fill ? '100%' : undefined,
+        objectFit: contain ? 'contain' : 'cover',
+        borderRadius: fill ? 'var(--r-md)' : 'var(--r-lg)',
         background: 'var(--bg-2)',
         border: '1px solid var(--line-2)',
         transform: mirrored ? 'scaleX(-1)' : undefined,
@@ -180,16 +293,19 @@ function ControlButton({
   icon,
   onClick,
   danger,
+  disabled,
 }: {
   label: string;
-  icon: 'mic' | 'micOff' | 'video' | 'videoOff' | 'phoneOff';
+  icon: 'mic' | 'micOff' | 'video' | 'videoOff' | 'phoneOff' | 'cast';
   onClick: () => void;
   danger?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       title={label}
       aria-label={label}
       style={{
@@ -198,10 +314,11 @@ function ControlButton({
         borderRadius: 999,
         border: danger ? 'none' : '1px solid var(--line-2)',
         background: danger ? 'var(--accent)' : 'var(--bg-3)',
-        color: danger ? '#fff' : 'var(--text-1)',
+        color: danger ? '#fff' : disabled ? 'var(--text-3)' : 'var(--text-1)',
         display: 'grid',
         placeItems: 'center',
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.55 : 1,
       }}
     >
       <Icon name={icon} size={22} />

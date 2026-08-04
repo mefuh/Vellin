@@ -613,13 +613,17 @@ export interface UserS2CDmCallSignal {
   fromUserId: string;
   payload: CallSignalPayload;
 }
-/** Собеседник включил/выключил микрофон или камеру. */
+/** Собеседник включил/выключил микрофон, камеру или демонстрацию экрана. */
 export interface UserS2CDmCallMedia {
   t: 'dmcall_media';
   callId: string;
   fromUserId: string;
   audio: boolean;
   video: boolean;
+  screen: boolean;
+  /** Приметы дорожки демонстрации — см. `UserC2SDmCallMedia`. */
+  screenMid?: string;
+  screenStreamId?: string;
 }
 /** Собеседник говорит (или замолчал) — индикатор речи. Не персистится. */
 export interface UserS2CDmCallSpeaking {
@@ -650,6 +654,8 @@ export interface UserS2CDmCallError {
     | 'guest_forbidden'
     /** Звонки в ЛС выключены администратором. */
     | 'disabled'
+    /** Демонстрация экрана выключена администратором — сам звонок идёт. */
+    | 'screen_disabled'
     | 'rate_limited'
     /** Сервер не знает такого звонка (перезапуск, истёкшая сессия). */
     | 'no_session';
@@ -815,12 +821,23 @@ export interface UserC2SDmCallSignal {
   callId: string;
   payload: CallSignalPayload;
 }
-/** Я включил/выключил микрофон или камеру. */
+/**
+ * Я включил/выключил микрофон, камеру или демонстрацию экрана.
+ *
+ * Демонстрация приходит второй видео-дорожкой в том же соединении, и приёмнику
+ * надо отличить её от камеры. Для этого ведущий сообщает приметы своей дорожки:
+ * `screenMid` — идентификатор линии в согласовании (совпадает у обеих сторон),
+ * `screenStreamId` — идентификатор потока захвата. Двух примет нужно две,
+ * потому что на Windows первая доезжает не всегда.
+ */
 export interface UserC2SDmCallMedia {
   t: 'dmcall_media';
   callId: string;
   audio: boolean;
   video: boolean;
+  screen: boolean;
+  screenMid?: string;
+  screenStreamId?: string;
 }
 /** Начал/перестал говорить — только на переходах. */
 export interface UserC2SDmCallSpeaking {

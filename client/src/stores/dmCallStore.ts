@@ -1,5 +1,11 @@
 import { create } from 'zustand';
-import type { DmCallSnapshot, PublicUser, RtcConfig, UserC2S } from '@vellin/shared';
+import type {
+  DmCallMediaState,
+  DmCallSnapshot,
+  PublicUser,
+  RtcConfig,
+  UserC2S,
+} from '@vellin/shared';
 
 /** Как показан звонок: скрыт, свёрнут в полоску или развёрнут на весь экран. */
 export type DmCallUiMode = 'hidden' | 'minimized' | 'expanded';
@@ -34,7 +40,7 @@ interface DmCallState {
   onState: (call: DmCallSnapshot, peer: PublicUser, rtc?: RtcConfig) => void;
   onError: (message: string, nonce?: string) => void;
   /** Собеседник включил или выключил микрофон либо камеру. */
-  onPeerMedia: (userId: string, media: { audio: boolean; video: boolean }) => void;
+  onPeerMedia: (userId: string, media: DmCallMediaState) => void;
 
   /** Веду ли разговор именно я (эта вкладка), а не другое моё устройство. */
   isMine: () => boolean;

@@ -20,6 +20,7 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   not_found: 'Пользователь не найден',
   guest_forbidden: 'Гостям звонки недоступны',
   disabled: 'Звонки временно отключены администратором',
+  screen_disabled: 'Демонстрация экрана временно отключена администратором',
   rate_limited: 'Слишком часто — подождите немного',
   no_session: 'Звонок уже завершён',
 };
@@ -237,20 +238,33 @@ export function handleDmCallSignal(userId: string, callId: string, payload: Call
   else userHub.pushTo(peerId, msg);
 }
 
-export function handleDmCallMedia(
+export async function handleDmCallMedia(
   userId: string,
   callId: string,
-  media: { audio: boolean; video: boolean },
-): void {
-  const s = dmCallHub.setMedia(callId, userId, media);
+  media: { audio: boolean; video: boolean; screen: boolean },
+  screen?: { mid?: string; streamId?: string },
+): Promise<void> {
+  // Демонстрацию можно выключить отдельно от звонков: она заметно тяжелее для
+  // канала. Отказ гасит только её — разговор продолжается.
+  let next = media;
+  if (media.screen && !(await isToggleEnabled('dmScreenShare'))) {
+    fail(userId, 'screen_disabled', { callId });
+    next = { ...media, screen: false };
+  }
+
+  const s = dmCallHub.setMedia(callId, userId, next);
   if (!s) return;
   const peerId = dmCallHub.peerOf(s, userId);
   userHub.pushTo(peerId, {
     t: 'dmcall_media',
     callId,
     fromUserId: userId,
-    audio: media.audio,
-    video: media.video,
+    audio: next.audio,
+    video: next.video,
+    screen: next.screen,
+    // Приметы дорожки демонстрации — по ним собеседник отличит её от камеры.
+    ...(next.screen && screen?.mid ? { screenMid: screen.mid } : {}),
+    ...(next.screen && screen?.streamId ? { screenStreamId: screen.streamId } : {}),
   });
 }
 

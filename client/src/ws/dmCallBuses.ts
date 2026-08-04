@@ -9,13 +9,25 @@ import { createSpeakingBus } from './callSpeakingBus';
 export const dmCallSignalBus = createSignalBus();
 export const dmCallSpeakingBus = createSpeakingBus();
 
-type MediaListener = (fromUserId: string, media: { audio: boolean; video: boolean }) => void;
+/**
+ * Состояние медиа собеседника плюс приметы дорожки демонстрации: по ним
+ * приёмник отличает её от камеры (см. `useCall.setScreenHint`).
+ */
+export interface DmCallMediaEvent {
+  audio: boolean;
+  video: boolean;
+  screen: boolean;
+  screenMid?: string;
+  screenStreamId?: string;
+}
 
-/** Микрофон и камера собеседника — тоже мимо стора, приходят часто. */
+type MediaListener = (fromUserId: string, media: DmCallMediaEvent) => void;
+
+/** Микрофон, камера и демонстрация собеседника — мимо стора, приходят часто. */
 export const dmCallMediaBus = (() => {
   const listeners = new Set<MediaListener>();
   return {
-    emit(fromUserId: string, media: { audio: boolean; video: boolean }): void {
+    emit(fromUserId: string, media: DmCallMediaEvent): void {
       for (const l of listeners) l(fromUserId, media);
     },
     on(listener: MediaListener): () => void {

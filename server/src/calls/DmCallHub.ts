@@ -165,8 +165,8 @@ class DmCallHub {
       calleeConnId: null,
       // Микрофон у звонящего включён всегда, камера — по намерению.
       media: {
-        [p.callerId]: { audio: true, video: p.video },
-        [p.calleeId]: { audio: true, video: false },
+        [p.callerId]: { audio: true, video: p.video, screen: false },
+        [p.calleeId]: { audio: true, video: false, screen: false },
       },
       connected: new Set(),
       recorded: false,
@@ -189,7 +189,7 @@ class DmCallHub {
     s.phase = 'active';
     s.answeredAt = Date.now();
     s.calleeConnId = calleeConnId;
-    s.media[s.calleeId] = { audio: true, video };
+    s.media[s.calleeId] = { audio: true, video, screen: false };
     this.clearTimer(callId, 'ring');
     this.setTimer(callId, 'connect', CONNECT_MS, () => {
       // Обе стороны обязаны подтвердить установленное соединение.
