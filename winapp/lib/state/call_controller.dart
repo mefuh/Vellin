@@ -10,6 +10,7 @@ import '../runtime/call_tones.dart';
 import '../runtime/media_gate.dart';
 import '../runtime/toast_host.dart';
 import '../webrtc/dm_call_session.dart';
+import '../webrtc/screen_share.dart';
 
 /// Как показан звонок в окне.
 enum CallUiMode { hidden, minimized, expanded }
@@ -53,9 +54,37 @@ class CallController extends ChangeNotifier {
 
   final RTCVideoRenderer localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
+
+  /// Поверхности демонстрации: своей и собеседника. Отдельно от камер —
+  /// демонстрация их не заменяет, показываются вместе.
+  final RTCVideoRenderer localScreenRenderer = RTCVideoRenderer();
+  final RTCVideoRenderer remoteScreenRenderer = RTCVideoRenderer();
   bool _renderersReady = false;
 
+  /// Идущая своя демонстрация (null — не ведём).
+  ActiveScreenShare? screenShare;
+
+  /// Приметы дорожки демонстрации собеседника — по ним отличаем её от камеры.
+  String? _peerScreenMid;
+  String? _peerScreenStreamId;
+
+  /// Все входящие потоки с их приметами. Дорожка и подсказка о ней приходят
+  /// разными путями и в любом порядке, поэтому раскладка не решается на месте,
+  /// а каждый раз выводится заново из обоих источников.
+  final List<({MediaStream stream, String? mid})> _inbound = [];
+
+  /// Показывать ли своё превью демонстрации: по умолчанию хватает полосы
+  /// состояния, а картинка своего же экрана только отвлекает.
+  bool showMyScreenPreview = false;
+
   bool get hasRemoteVideo => remoteRenderer.srcObject != null && (call?.media[peerId]?.video ?? false);
+
+  /// Собеседник демонстрирует экран, и его картинка уже дошла.
+  bool get hasRemoteScreen =>
+      remoteScreenRenderer.srcObject != null && (call?.media[peerId]?.screen ?? false);
+
+  /// Веду ли демонстрацию я.
+  bool get sharingScreen => screenShare != null;
 
   /// Микрофон собеседника: выключенный он не слышен, и об этом надо сказать —
   /// иначе тишина читается как обрыв связи.
@@ -87,6 +116,8 @@ class CallController extends ChangeNotifier {
     if (_renderersReady) return;
     await localRenderer.initialize();
     await remoteRenderer.initialize();
+    await localScreenRenderer.initialize();
+    await remoteScreenRenderer.initialize();
     _renderersReady = true;
   }
 
@@ -95,6 +126,8 @@ class CallController extends ChangeNotifier {
     _renderersReady = false;
     localRenderer.srcObject = null;
     remoteRenderer.srcObject = null;
+    localScreenRenderer.srcObject = null;
+    remoteScreenRenderer.srcObject = null;
   }
 
   Future<void> stop() async {
@@ -117,6 +150,8 @@ class CallController extends ChangeNotifier {
     _session?.dispose();
     localRenderer.dispose();
     remoteRenderer.dispose();
+    localScreenRenderer.dispose();
+    remoteScreenRenderer.dispose();
     super.dispose();
   }
 
@@ -166,13 +201,23 @@ class CallController extends ChangeNotifier {
         final from = msg['fromUserId'] as String?;
         final current = call;
         if (from != null && current != null && current.callId == msg['callId']) {
+          final screen = msg['screen'] as bool? ?? false;
           call = current.withMedia(
             from,
             DmCallMediaState(
               audio: msg['audio'] as bool? ?? true,
               video: msg['video'] as bool? ?? false,
+              screen: screen,
             ),
           );
+          if (from == peerId) {
+            // Приметы дорожки демонстрации: по ним отличим её от камеры.
+            // Прийти они могут и раньше самой дорожки, и позже — раскладка
+            // потоков пересобирается в обоих случаях.
+            _peerScreenMid = screen ? msg['screenMid'] as String? : null;
+            _peerScreenStreamId = screen ? msg['screenStreamId'] as String? : null;
+            _reassignRemoteStreams();
+          }
         }
         notifyListeners();
         break;
@@ -324,12 +369,16 @@ class CallController extends ChangeNotifier {
       sendSignal: (payload) =>
           _socket.send({'t': 'dmcall_signal', 'callId': snapshot.callId, 'payload': payload}),
       onConnected: () => _socket.send({'t': 'dmcall_connected', 'callId': snapshot.callId}),
-      onRemoteStream: (stream) {
-        // Камеру собеседник включает по ходу разговора, и дорожка приходит в
-        // тот же поток. Поверхность привязана к объекту потока и такой
-        // добавки не замечает — переустанавливаем её принудительно.
-        remoteRenderer.srcObject = null;
-        remoteRenderer.srcObject = stream;
+      onRemoteStream: (stream, mid) {
+        // Потоков от собеседника может быть два — камера и демонстрация.
+        // Копим их вместе с приметами, а кто из них кто, решает раскладка.
+        final known = _inbound.indexWhere((e) => e.stream.id == stream.id);
+        if (known >= 0) {
+          _inbound[known] = (stream: stream, mid: _inbound[known].mid ?? mid);
+        } else {
+          _inbound.add((stream: stream, mid: mid));
+        }
+        _reassignRemoteStreams();
         notifyListeners();
       },
     );
@@ -349,9 +398,39 @@ class CallController extends ChangeNotifier {
   Future<void> _teardownSession() async {
     final s = _session;
     _session = null;
+    final share = screenShare;
+    screenShare = null;
+    if (share != null) await ScreenShare.stop(share);
+    _inbound.clear();
+    _peerScreenMid = null;
+    _peerScreenStreamId = null;
+    showMyScreenPreview = false;
     await _releaseRenderers();
     await s?.dispose();
     MediaGate.instance.releaseFromCall();
+  }
+
+  /// Разложить накопленные потоки собеседника по поверхностям: демонстрация —
+  /// в свою, всё остальное — в камеру.
+  void _reassignRemoteStreams() {
+    if (!_renderersReady) return;
+    MediaStream? camera;
+    MediaStream? screen;
+    for (final e in _inbound) {
+      final isScreen = (_peerScreenMid != null && e.mid == _peerScreenMid) ||
+          (_peerScreenStreamId != null && e.stream.id == _peerScreenStreamId);
+      if (isScreen) {
+        screen = e.stream;
+      } else {
+        camera = e.stream;
+      }
+    }
+    // Дорожка приходит в уже показанный поток, а поверхность привязана к
+    // объекту потока и такой добавки не замечает — переустанавливаем силой.
+    remoteRenderer.srcObject = null;
+    remoteRenderer.srcObject = camera;
+    remoteScreenRenderer.srcObject = null;
+    remoteScreenRenderer.srcObject = screen;
   }
 
   // ── Действия пользователя ─────────────────────────────────────────────────
@@ -390,20 +469,32 @@ class CallController extends ChangeNotifier {
     _socket.send({'t': 'dmcall_hangup', 'callId': c.callId});
   }
 
+  /// Сообщить собеседнику своё состояние целиком: микрофон, камера и
+  /// демонстрация уходят вместе — так у него не разъедется картина, что бы из
+  /// этого ни переключалось.
+  void _sendMedia({bool? audio, bool? video, bool? screen}) {
+    final s = _session;
+    final c = call;
+    if (s == null || c == null) return;
+    final marks = s.screenMarks;
+    final sharing = screen ?? sharingScreen;
+    _socket.send({
+      't': 'dmcall_media',
+      'callId': c.callId,
+      'audio': audio ?? s.micEnabled,
+      'video': video ?? s.videoEnabled,
+      'screen': sharing,
+      if (sharing && marks.mid != null) 'screenMid': marks.mid,
+      if (sharing && marks.streamId != null) 'screenStreamId': marks.streamId,
+    });
+  }
+
   void toggleMic() {
     final s = _session;
     if (s == null) return;
     final next = !s.micEnabled;
     s.setMicEnabled(next);
-    final c = call;
-    if (c != null) {
-      _socket.send({
-        't': 'dmcall_media',
-        'callId': c.callId,
-        'audio': next,
-        'video': s.videoEnabled,
-      });
-    }
+    _sendMedia(audio: next);
     notifyListeners();
   }
 
@@ -419,14 +510,74 @@ class CallController extends ChangeNotifier {
       // полпути — он всё равно перестанет получать картинку, и без этого
       // сообщения у него останется висеть застывший кадр.
       localRenderer.srcObject = s.localStream;
-      _socket.send({
-        't': 'dmcall_media',
-        'callId': c.callId,
-        'audio': s.micEnabled,
-        'video': next,
-      });
+      _sendMedia(video: next);
       notifyListeners();
     }
+  }
+
+  /// Начать демонстрацию выбранного источника.
+  Future<void> startScreenShare(ScreenShareSource source, ScreenShareOptions options) async {
+    final s = _session;
+    if (s == null || sharingScreen) return;
+
+    ActiveScreenShare share;
+    try {
+      share = await ScreenShare.start(source: source, options: options);
+    } catch (_) {
+      error = 'Не удалось начать демонстрацию экрана';
+      notifyListeners();
+      return;
+    }
+
+    screenShare = share;
+    localScreenRenderer.srcObject = share.stream;
+    // Источник закрыли (окно свернули в никуда, монитор отключили) —
+    // демонстрация прекращается сама, иначе у собеседника застынет кадр.
+    share.videoTrack.onEnded = () => stopScreenShare();
+
+    try {
+      await s.startScreen(
+        stream: share.stream,
+        videoTrack: share.videoTrack,
+        audioTrack: share.audioTrack,
+        maxBitrate: options.resolution.maxBitrate(options.fps),
+        maxFramerate: options.fps,
+      );
+    } finally {
+      // Приметы дорожки известны только после её добавления в соединение —
+      // отсюда и уходит сообщение.
+      _sendMedia(screen: true);
+      await ScreenShareSettings.save(options);
+      notifyListeners();
+    }
+
+    if (options.withAudio && !share.hasAudio) {
+      error = 'Звук захватить не удалось — демонстрация идёт без него';
+      notifyListeners();
+    }
+  }
+
+  /// Прекратить демонстрацию.
+  Future<void> stopScreenShare() async {
+    final share = screenShare;
+    if (share == null) return;
+    screenShare = null;
+    showMyScreenPreview = false;
+    localScreenRenderer.srcObject = null;
+    try {
+      await _session?.stopScreen();
+      await ScreenShare.stop(share);
+    } finally {
+      // Как и с камерой: уведомление уходит в любом случае — иначе у
+      // собеседника останется висеть застывший кадр.
+      _sendMedia(screen: false);
+      notifyListeners();
+    }
+  }
+
+  void setMyScreenPreview(bool shown) {
+    showMyScreenPreview = shown;
+    notifyListeners();
   }
 
   void setUiMode(CallUiMode mode) {

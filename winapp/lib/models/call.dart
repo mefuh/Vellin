@@ -6,11 +6,17 @@ import 'social.dart';
 class DmCallMediaState {
   final bool audio;
   final bool video;
-  const DmCallMediaState({required this.audio, required this.video});
+
+  /// Идёт демонстрация экрана. Отдельно от [video]: она не заменяет камеру,
+  /// показываются вместе.
+  final bool screen;
+
+  const DmCallMediaState({required this.audio, required this.video, this.screen = false});
 
   factory DmCallMediaState.fromJson(Map<String, dynamic> j) => DmCallMediaState(
         audio: j['audio'] as bool? ?? true,
         video: j['video'] as bool? ?? false,
+        screen: j['screen'] as bool? ?? false,
       );
 }
 

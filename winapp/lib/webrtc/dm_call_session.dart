@@ -20,8 +20,11 @@ class DmCallSession {
   /// Соединение установлено — сервер ждёт этого подтверждения.
   final void Function()? onConnected;
 
-  /// Пришёл поток собеседника (или обновился).
-  final void Function(MediaStream stream)? onRemoteStream;
+  /// Пришёл поток собеседника (или обновился). Потоков может быть два —
+  /// камера и демонстрация экрана, — поэтому вместе с потоком отдаём его
+  /// приметы: идентификатор линии согласования и идентификатор потока. По ним
+  /// принимающая сторона решает, что из них что.
+  final void Function(MediaStream stream, String? mid)? onRemoteStream;
 
   DmCallSession({
     required this.myUserId,
@@ -35,6 +38,13 @@ class DmCallSession {
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
   RTCRtpSender? _videoSender;
+
+  /// Отправители демонстрации экрана и линия, по которой она идёт: её номер
+  /// нужен собеседнику, чтобы отличить демонстрацию от камеры.
+  RTCRtpSender? _screenVideoSender;
+  RTCRtpSender? _screenAudioSender;
+  RTCRtpTransceiver? _screenTransceiver;
+  String? _screenStreamId;
   bool _makingOffer = false;
 
   /// Соединение просило согласование не вовремя — предложим, как освободится.
@@ -101,7 +111,7 @@ class DmCallSession {
 
     pc.onTrack = (event) {
       if (event.streams.isNotEmpty) {
-        onRemoteStream?.call(event.streams.first);
+        onRemoteStream?.call(event.streams.first, event.transceiver?.mid);
         // Поток собеседника пошёл — соединение состоялось. Ждать только
         // onConnectionState ненадёжно: на Windows это событие приходит не
         // всегда, и сервер записывал состоявшийся разговор как несостоявшийся.
@@ -272,6 +282,80 @@ class DmCallSession {
       await _offerIfPossible();
     } else {
       await sender.replaceTrack(track);
+    }
+  }
+
+  /// Приметы идущей демонстрации: номер линии и идентификатор потока.
+  /// Собеседнику они нужны, чтобы отличить демонстрацию от камеры.
+  ({String? mid, String? streamId}) get screenMarks =>
+      (mid: _screenTransceiver?.mid, streamId: _screenStreamId);
+
+  /// Начать демонстрацию: дорожки уходят в СВОЁМ потоке, отдельно от камеры —
+  /// тогда у демонстрации собственный идентификатор, и собеседник ни с чем её
+  /// не спутает.
+  Future<void> startScreen({
+    required MediaStream stream,
+    required MediaStreamTrack videoTrack,
+    MediaStreamTrack? audioTrack,
+    required int maxBitrate,
+    required int maxFramerate,
+  }) async {
+    final pc = _pc;
+    if (pc == null || _closed) return;
+
+    _screenStreamId = stream.id;
+    _screenVideoSender = await pc.addTrack(videoTrack, stream);
+    if (audioTrack != null) _screenAudioSender = await pc.addTrack(audioTrack, stream);
+
+    // Найти линию, по которой пошла демонстрация: её номер уедет собеседнику.
+    for (final t in await pc.getTransceivers()) {
+      if (identical(t.sender, _screenVideoSender) || t.sender.senderId == _screenVideoSender?.senderId) {
+        _screenTransceiver = t;
+        break;
+      }
+    }
+
+    await _limitScreenSending(maxBitrate: maxBitrate, maxFramerate: maxFramerate);
+    // Просьба о согласовании приходит раньше, чем дорожка встаёт в соединение
+    // (та же беда, что с камерой), поэтому просим ещё раз.
+    await _offerIfPossible();
+  }
+
+  /// Прекратить демонстрацию. Линии остаются на месте — повторный запуск
+  /// обойдётся подменой дорожки, без нового согласования.
+  Future<void> stopScreen() async {
+    for (final s in [_screenVideoSender, _screenAudioSender]) {
+      if (s == null) continue;
+      try {
+        await s.replaceTrack(null);
+      } catch (_) {
+        // Дорожка уже не отправляется.
+      }
+    }
+    _screenStreamId = null;
+  }
+
+  /// Потолок битрейта и частоты для демонстрации: без него крупная картинка
+  /// съедает канал, и первым начинает рваться голос.
+  Future<void> _limitScreenSending({required int maxBitrate, required int maxFramerate}) async {
+    final sender = _screenVideoSender;
+    if (sender == null) return;
+    try {
+      final params = sender.parameters;
+      final encodings = params.encodings;
+      if (encodings == null || encodings.isEmpty) {
+        params.encodings = [
+          RTCRtpEncoding(maxBitrate: maxBitrate, maxFramerate: maxFramerate),
+        ];
+      } else {
+        for (final e in encodings) {
+          e.maxBitrate = maxBitrate;
+          e.maxFramerate = maxFramerate;
+        }
+      }
+      await sender.setParameters(params);
+    } catch (_) {
+      // Ограничить не вышло — демонстрация пойдёт как есть.
     }
   }
 

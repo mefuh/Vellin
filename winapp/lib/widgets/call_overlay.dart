@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 
+import '../models/social.dart';
 import '../state/call_controller.dart';
 import '../theme/vellin_theme.dart';
 import 'common.dart';
+import 'screen_share_picker.dart';
 
 /// «5:32» от момента ответа.
 String _elapsed(String? answeredAt) {
@@ -153,6 +155,13 @@ class _CallScreen extends StatefulWidget {
 class _CallScreenState extends State<_CallScreen> {
   Timer? _tick;
 
+  /// Какой поток показан крупно. Пусто — первый по порядку: демонстрация
+  /// собеседника, затем его камера.
+  String _mainKey = '';
+
+  /// Открыт выбор источника демонстрации.
+  bool _pickingSource = false;
+
   @override
   void initState() {
     super.initState();
@@ -175,19 +184,54 @@ class _CallScreenState extends State<_CallScreen> {
     final peer = call.peer;
     if (snapshot == null || peer == null) return const SizedBox.shrink();
 
+    // Все потоки разговора. Демонстрация не заменяет камеры — они идут рядом,
+    // поэтому потоков может быть до четырёх. Первый показывается крупно,
+    // остальные — плитками; клик по плитке меняет её местами с главным.
+    final tiles = <_CallTile>[
+      if (call.hasRemoteScreen)
+        _CallTile(
+          key: 'peer-screen',
+          renderer: call.remoteScreenRenderer,
+          label: 'Экран: ${peer.username}',
+          contain: true,
+        ),
+      if (call.sharingScreen && call.showMyScreenPreview)
+        _CallTile(
+          key: 'my-screen',
+          renderer: call.localScreenRenderer,
+          label: 'Ваш экран',
+          contain: true,
+        ),
+      if (call.hasRemoteVideo)
+        _CallTile(key: 'peer-camera', renderer: call.remoteRenderer, label: peer.username)
+      else
+        _CallTile(key: 'peer-avatar', renderer: null, label: peer.username),
+      if (call.cameraEnabled)
+        _CallTile(key: 'my-camera', renderer: call.localRenderer, label: 'Вы', mirror: true),
+    ];
+    final main = tiles.firstWhere((t) => t.key == _mainKey, orElse: () => tiles.first);
+    final others = tiles.where((t) => t.key != main.key).toList();
+
     return Positioned.fill(
       child: Container(
         color: VellinColors.bg0,
         child: Stack(children: [
           Center(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              if (call.hasRemoteVideo)
+              if (main.renderer != null)
                 SizedBox(
-                  width: 720,
-                  height: 405,
+                  width: 860,
+                  height: 484,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(VellinRadius.lg),
-                    child: RTCVideoView(call.remoteRenderer, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
+                    child: RTCVideoView(
+                      main.renderer!,
+                      mirror: main.mirror,
+                      // Чужой экран нельзя обрезать — показываем целиком.
+                      objectFit: main.contain
+                          ? RTCVideoViewObjectFit.RTCVideoViewObjectFitContain
+                          : RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    ),
                   ),
                 )
               else
@@ -225,6 +269,19 @@ class _CallScreenState extends State<_CallScreen> {
                 ),
                 const SizedBox(width: 14),
                 _RoundButton(
+                  icon: call.sharingScreen ? Icons.stop_screen_share : Icons.screen_share,
+                  color: call.sharingScreen ? VellinColors.accentHi : VellinColors.bg3,
+                  tooltip: call.sharingScreen ? 'Остановить демонстрацию' : 'Демонстрация экрана',
+                  onTap: () {
+                    if (call.sharingScreen) {
+                      call.stopScreenShare();
+                    } else {
+                      setState(() => _pickingSource = true);
+                    }
+                  },
+                ),
+                const SizedBox(width: 14),
+                _RoundButton(
                   icon: Icons.call_end,
                   color: VellinColors.accent,
                   tooltip: 'Завершить',
@@ -233,17 +290,41 @@ class _CallScreenState extends State<_CallScreen> {
               ]),
             ]),
           ),
-          // Своё изображение — в углу, зеркально.
-          if (call.cameraEnabled)
+
+          // Своя демонстрация: по умолчанию — полоса состояния, а не картинка
+          // собственного экрана. Превью открывается по желанию.
+          if (call.sharingScreen && !call.showMyScreenPreview)
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 16,
+              child: Center(
+                child: _MyScreenBanner(
+                  title: call.screenShare!.source.name,
+                  withAudio: call.screenShare!.hasAudio,
+                  onPreview: () => call.setMyScreenPreview(true),
+                  onStop: call.stopScreenShare,
+                ),
+              ),
+            ),
+
+          // Остальные потоки — плитками в углу.
+          if (others.isNotEmpty)
             Positioned(
               right: 20,
               bottom: 20,
-              width: 220,
-              height: 124,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(VellinRadius.md),
-                // Своё изображение зеркалим — так привычнее, как в зеркале.
-                child: RTCVideoView(call.localRenderer, mirror: true),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final t in others) ...[
+                    _TilePreview(
+                      tile: t,
+                      peer: peer,
+                      onTap: () => setState(() => _mainKey = t.key),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                ],
               ),
             ),
           Positioned(
@@ -255,8 +336,138 @@ class _CallScreenState extends State<_CallScreen> {
               onPressed: () => call.setUiMode(CallUiMode.minimized),
             ),
           ),
+
+          // Выбор источника — поверх разговора, в том же слое: навигатора
+          // здесь нет, обычный диалог открыть не из чего.
+          if (_pickingSource)
+            Positioned.fill(
+              child: ScreenSharePicker(
+                onCancel: () => setState(() => _pickingSource = false),
+                onPick: (pick) {
+                  setState(() => _pickingSource = false);
+                  call.startScreenShare(pick.source, pick.options);
+                },
+              ),
+            ),
         ]),
       ),
+    );
+  }
+}
+
+/// Один показываемый поток разговора.
+class _CallTile {
+  final String key;
+  /// null — вместо картинки показываем аватар собеседника.
+  final RTCVideoRenderer? renderer;
+  final String label;
+  /// Своё изображение зеркалим — так привычнее, как в зеркале.
+  final bool mirror;
+  /// Демонстрацию показываем целиком: обрезать чужой экран нельзя.
+  final bool contain;
+
+  const _CallTile({
+    required this.key,
+    required this.renderer,
+    required this.label,
+    this.mirror = false,
+    this.contain = false,
+  });
+}
+
+
+/// Маленькая плитка потока: клик делает её главной.
+class _TilePreview extends StatelessWidget {
+  final _CallTile tile;
+  final PublicUser peer;
+  final VoidCallback onTap;
+  const _TilePreview({required this.tile, required this.peer, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Показать крупно: ${tile.label}',
+      child: Material(
+        color: VellinColors.bg2,
+        borderRadius: BorderRadius.circular(VellinRadius.md),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(VellinRadius.md),
+          onTap: onTap,
+          child: SizedBox(
+            width: 200,
+            height: 113,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(VellinRadius.md),
+              child: tile.renderer == null
+                  ? Center(
+                      child: VellinAvatar(
+                        username: peer.username,
+                        avatarSeed: peer.avatarSeed,
+                        avatarUrl: peer.avatarUrl,
+                        size: 52,
+                      ),
+                    )
+                  : RTCVideoView(
+                      tile.renderer!,
+                      mirror: tile.mirror,
+                      objectFit: tile.contain
+                          ? RTCVideoViewObjectFit.RTCVideoViewObjectFitContain
+                          : RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Полоса «вы демонстрируете» — вместо картинки собственного экрана.
+class _MyScreenBanner extends StatelessWidget {
+  final String title;
+  final bool withAudio;
+  final VoidCallback onPreview;
+  final VoidCallback onStop;
+  const _MyScreenBanner({
+    required this.title,
+    required this.withAudio,
+    required this.onPreview,
+    required this.onStop,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+      decoration: BoxDecoration(
+        color: VellinColors.bg2,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: VellinColors.line2),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.screen_share, size: 17, color: VellinColors.accentHi),
+        const SizedBox(width: 9),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: Text(
+            'Вы демонстрируете: $title${withAudio ? ' · со звуком' : ''}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: VellinColors.text0, fontSize: 13),
+          ),
+        ),
+        const SizedBox(width: 12),
+        TextButton(
+          onPressed: onPreview,
+          style: TextButton.styleFrom(foregroundColor: VellinColors.text1),
+          child: const Text('Показать'),
+        ),
+        TextButton(
+          onPressed: onStop,
+          style: TextButton.styleFrom(foregroundColor: VellinColors.accentHi),
+          child: const Text('Остановить'),
+        ),
+      ]),
     );
   }
 }
@@ -317,7 +528,23 @@ class _CallBarState extends State<_CallBar> {
               snapshot.isRinging ? 'Дозвон…' : _elapsed(snapshot.answeredAt),
               style: const TextStyle(color: VellinColors.text2, fontSize: 12),
             ),
+            // Демонстрация идёт и в свёрнутом звонке — о ней надо помнить.
+            if (call.sharingScreen || call.hasRemoteScreen) ...[
+              const SizedBox(width: 10),
+              Icon(Icons.screen_share, size: 15, color: VellinColors.accentHi),
+              const SizedBox(width: 5),
+              Text(
+                call.sharingScreen ? 'вы демонстрируете' : 'демонстрация экрана',
+                style: const TextStyle(color: VellinColors.text2, fontSize: 12),
+              ),
+            ],
             const Spacer(),
+            if (call.sharingScreen)
+              IconButton(
+                icon: const Icon(Icons.stop_screen_share, size: 18, color: VellinColors.accentHi),
+                tooltip: 'Остановить демонстрацию',
+                onPressed: call.stopScreenShare,
+              ),
             IconButton(
               icon: Icon(call.micEnabled ? Icons.mic : Icons.mic_off, size: 18, color: VellinColors.text1),
               tooltip: call.micEnabled ? 'Выключить микрофон' : 'Включить микрофон',
