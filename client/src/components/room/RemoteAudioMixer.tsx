@@ -25,9 +25,22 @@ export function RemoteAudioMixer({ streams }: { streams?: Map<string, MediaStrea
   );
 }
 
+/** Умеет ли браузер выводить звук в выбранное устройство (не все умеют). */
+export const canPickSpeaker = (): boolean =>
+  typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+
 function RemoteAudio({ userId, stream }: { userId: string; stream: MediaStream }) {
   const ref = useRef<HTMLAudioElement | null>(null);
   const volume = useCallSettingsStore((s) => s.peerVolumes[userId] ?? 1);
+  const speakerId = useCallSettingsStore((s) => s.preferredSpeakerId);
+
+  // Выбранный динамик. Поддержки может не быть — тогда звук идёт в системный,
+  // и настройка просто не действует.
+  useEffect(() => {
+    const el = ref.current as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
+    if (!el?.setSinkId) return;
+    void el.setSinkId(speakerId ?? '').catch(() => undefined);
+  }, [speakerId, stream]);
 
   useEffect(() => {
     const el = ref.current;

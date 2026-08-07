@@ -137,20 +137,24 @@ const VIDEO_CONSTRAINTS_BASE: MediaTrackConstraints = {
   frameRate: { ideal: 24 },
 };
 const AUDIO_CONSTRAINTS_BASE: MediaTrackConstraints = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: true,
   channelCount: 1,
   sampleRate: 48000,
 };
 
 function audioConstraints(deviceId: string | null, mode: 'ideal' | 'exact' = 'ideal'): MediaTrackConstraints {
+  // Обработка звука берётся из настроек: её выключение видно только при
+  // захвате, поменять её у уже работающей дорожки нельзя.
+  const { noiseSuppression, echoCancellation, autoGainControl } = useCallSettingsStore.getState();
+  const base: MediaTrackConstraints = {
+    ...AUDIO_CONSTRAINTS_BASE,
+    echoCancellation,
+    noiseSuppression,
+    autoGainControl,
+  };
   // `ideal` on initial join → graceful fallback if the previously chosen device
   // is unplugged. `exact` on explicit switch → guarantee we get the device the
   // user just picked (otherwise the browser ignores the hint).
-  return deviceId
-    ? { ...AUDIO_CONSTRAINTS_BASE, deviceId: { [mode]: deviceId } as ConstrainDOMString }
-    : AUDIO_CONSTRAINTS_BASE;
+  return deviceId ? { ...base, deviceId: { [mode]: deviceId } as ConstrainDOMString } : base;
 }
 
 function videoConstraints(deviceId: string | null, mode: 'ideal' | 'exact' = 'ideal'): MediaTrackConstraints {
@@ -791,6 +795,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         try {
           pipeline = await setupAudioPipeline(ctx, stream);
           pipelineRef.current = pipeline;
+          pipeline.setDenoiseEnabled(useCallSettingsStore.getState().noiseSuppression);
           // Outbound starts with processed audio only. `syncOutboundVideo`
           // adds the video track (flipped or raw depending on mirror setting)
           // before we announce ourselves to peers.
@@ -923,7 +928,15 @@ export function useCall(opts: UseCallOpts): UseCallApi {
 
   // ── Device hot-swap ────────────────────────────────────────────────────
 
-  const switchMic = useCallback<UseCallApi['switchMic']>(async (deviceId) => {
+  /**
+   * Перезахватить микрофон и подменить дорожку, не пересогласовывая соединение.
+   * Одним путём идут и смена устройства, и смена обработки звука: и то, и
+   * другое задаётся только при захвате.
+   */
+  const recaptureMic = useCallback(async (
+    deviceId: string | null,
+    mode: 'ideal' | 'exact',
+  ): Promise<void> => {
     if (stateRef.current !== 'in') return;
     const local = localStreamRef.current;
     if (!local) return;
@@ -932,10 +945,10 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       // `exact` so the browser actually gives us the device the user picked,
       // not the original mic with a non-binding `ideal` hint.
       newStream = await navigator.mediaDevices.getUserMedia({
-        audio: audioConstraints(deviceId, 'exact'),
+        audio: audioConstraints(deviceId, mode),
       });
     } catch (err) {
-      console.warn('[call] switchMic getUserMedia failed', err);
+      console.warn('[call] recaptureMic getUserMedia failed', err);
       return;
     }
     const newTrack = newStream.getAudioTracks()[0];
@@ -972,9 +985,35 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     }
     local.addTrack(newTrack);
     setMyStream(new MediaStream(local.getTracks()));
-    useCallSettingsStore.getState().setPreferredMicId(deviceId);
-    console.log('[call] switched mic to', deviceId);
+    console.log('[call] mic recaptured', deviceId ?? 'default');
   }, []);
+
+  const switchMic = useCallback<UseCallApi['switchMic']>(async (deviceId) => {
+    useCallSettingsStore.getState().setPreferredMicId(deviceId);
+    await recaptureMic(deviceId, 'exact');
+  }, [recaptureMic]);
+
+  // Обработка звука задаётся при захвате, поэтому её переключение — это
+  // перезахват микрофона. Своё шумоподавление живёт поверх браузерного и
+  // снимается отдельно, иначе тумблер не менял бы ничего на слух.
+  const noiseSuppression = useCallSettingsStore((s) => s.noiseSuppression);
+  const echoCancellation = useCallSettingsStore((s) => s.echoCancellation);
+  const autoGainControl = useCallSettingsStore((s) => s.autoGainControl);
+  const processingReady = useRef(false);
+  useEffect(() => {
+    if (state !== 'in') {
+      processingReady.current = false;
+      return;
+    }
+    pipelineRef.current?.setDenoiseEnabled(noiseSuppression);
+    // Первый заход — это вход в звонок: микрофон только что взят с этими же
+    // настройками, второй раз его брать незачем.
+    if (!processingReady.current) {
+      processingReady.current = true;
+      return;
+    }
+    void recaptureMic(useCallSettingsStore.getState().preferredMicId, 'ideal');
+  }, [state, noiseSuppression, echoCancellation, autoGainControl, recaptureMic]);
 
   const switchCamera = useCallback<UseCallApi['switchCamera']>(async (deviceId) => {
     if (stateRef.current !== 'in') return;

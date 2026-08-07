@@ -26,6 +26,12 @@ export interface AudioPipeline {
   selfAnalyser: AnalyserNode;
   setMicEnabled: (on: boolean) => void;
   /**
+   * Включить или обойти RNNoise. Нужен, чтобы тумблер шумоподавления в
+   * настройках действительно его снимал: флаг браузера убирает только свой
+   * слой обработки, а этот живёт поверх него и остался бы работать.
+   */
+  setDenoiseEnabled: (on: boolean) => void;
+  /**
    * Swap the input MediaStream while keeping the rest of the graph (and the
    * outbound RTC track) intact. Peers don't see a renegotiation — the
    * MediaStreamDestination keeps producing the same track id; only what
@@ -72,8 +78,21 @@ export async function setupAudioPipeline(
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 512;
 
-  source.connect(rnnoise);
-  rnnoise.connect(gain);
+  // Маршрут собирается заново при каждой смене входа или тумблера: узлы те же,
+  // меняются только связи, поэтому исходящая дорожка остаётся прежней и
+  // собеседник ничего не пересогласовывает.
+  let denoise = true;
+  const route = (): void => {
+    try { source.disconnect(); } catch { /* ignore */ }
+    try { rnnoise.disconnect(); } catch { /* ignore */ }
+    if (denoise) {
+      source.connect(rnnoise);
+      rnnoise.connect(gain);
+    } else {
+      source.connect(gain);
+    }
+  };
+  route();
   gain.connect(dest);
   // Tap the post-gain signal so the self speaking indicator goes silent
   // the instant the mic is muted, even though the source mic keeps running.
@@ -90,11 +109,16 @@ export async function setupAudioPipeline(
     setMicEnabled: (on) => {
       gain.gain.value = on ? 1 : 0;
     },
+    setDenoiseEnabled: (on) => {
+      if (torn || denoise === on) return;
+      denoise = on;
+      route();
+    },
     replaceMicStream: (newStream) => {
       if (torn) return;
       try { source.disconnect(); } catch { /* ignore */ }
       source = ctx.createMediaStreamSource(newStream);
-      source.connect(rnnoise);
+      route();
     },
     teardown: () => {
       if (torn) return;
