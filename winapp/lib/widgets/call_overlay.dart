@@ -5,6 +5,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 
 import '../models/social.dart';
+import '../state/auth_controller.dart';
 import '../state/call_controller.dart';
 import '../theme/call_design.dart';
 // Подписи пресетов качества для плашки «вы демонстрируете».
@@ -255,6 +256,10 @@ class _CallScreenState extends State<_CallScreen> {
     final peer = call.peer;
     if (snapshot == null || peer == null) return const SizedBox.shrink();
 
+    // Своё лицо в кадре — такое же, как у собеседника: аватар из профиля, а не
+    // безымянный кружок с буквой.
+    final me = context.watch<AuthController>().user;
+
     final connecting = call.netState == CallNetState.connecting;
     final sharing = call.sharingScreen;
     final peerSharing = call.hasRemoteScreen;
@@ -314,6 +319,8 @@ class _CallScreenState extends State<_CallScreen> {
                 peerMuted: !call.peerMicEnabled,
                 mySpeaking: call.iAmSpeaking,
                 myMuted: !call.micEnabled,
+                myAvatarUrl: me?.avatarUrl,
+                myUsername: me?.username ?? 'Вы',
               ),
 
             // Затемнение снизу — чтобы имя и капсула читались на любом кадре.
@@ -461,6 +468,8 @@ class _CallScreenState extends State<_CallScreen> {
                   cameraOn: myCam,
                   speaking: call.iAmSpeaking,
                   muted: !call.micEnabled,
+                  avatarUrl: me?.avatarUrl,
+                  username: me?.username ?? 'Вы',
                 ),
               ),
             ),
@@ -861,6 +870,8 @@ class _AudioOnlyStage extends StatelessWidget {
   final bool peerMuted;
   final bool mySpeaking;
   final bool myMuted;
+  final String? myAvatarUrl;
+  final String myUsername;
 
   const _AudioOnlyStage({
     required this.peer,
@@ -868,6 +879,8 @@ class _AudioOnlyStage extends StatelessWidget {
     required this.peerMuted,
     required this.mySpeaking,
     required this.myMuted,
+    required this.myAvatarUrl,
+    required this.myUsername,
   });
 
   @override
@@ -879,12 +892,22 @@ class _AudioOnlyStage extends StatelessWidget {
         children: [
           _Person(
             name: peer.username,
+            initialFrom: peer.username,
             avatarUrl: peer.avatarUrl,
             speaking: peerSpeaking,
             muted: peerMuted,
           ),
           const SizedBox(width: 104),
-          _Person(name: 'Вы', avatarUrl: null, speaking: mySpeaking, muted: myMuted, dim: true),
+          // Подписано «Вы», но лицо и буква — свои: подпись объясняет, кто это,
+          // а не заменяет человека.
+          _Person(
+            name: 'Вы',
+            initialFrom: myUsername,
+            avatarUrl: myAvatarUrl,
+            speaking: mySpeaking,
+            muted: myMuted,
+            dim: true,
+          ),
         ],
       ),
     );
@@ -893,12 +916,16 @@ class _AudioOnlyStage extends StatelessWidget {
 
 class _Person extends StatelessWidget {
   final String name;
+
+  /// Откуда взять букву, если аватара нет.
+  final String initialFrom;
   final String? avatarUrl;
   final bool speaking;
   final bool muted;
   final bool dim;
   const _Person({
     required this.name,
+    required this.initialFrom,
     required this.avatarUrl,
     required this.speaking,
     required this.muted,
@@ -909,7 +936,7 @@ class _Person extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(mainAxisSize: MainAxisSize.min, children: [
       CallAvatar(
-        username: name,
+        username: initialFrom,
         avatarUrl: avatarUrl,
         size: 148,
         speaking: speaking,
@@ -1105,12 +1132,16 @@ class _SelfPip extends StatelessWidget {
   final bool cameraOn;
   final bool speaking;
   final bool muted;
+  final String? avatarUrl;
+  final String username;
 
   const _SelfPip({
     required this.renderer,
     required this.cameraOn,
     required this.speaking,
     required this.muted,
+    required this.avatarUrl,
+    required this.username,
   });
 
   @override
@@ -1152,17 +1183,7 @@ class _SelfPip extends StatelessWidget {
                 ),
               ),
               child: Center(
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white.withValues(alpha: 0.06),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                  ),
-                  child: CallIcon(CallGlyphs.cameraOff, size: 18, color: CallColors.textMuted),
-                ),
+                child: CallAvatar(username: username, avatarUrl: avatarUrl, size: 48, dim: true),
               ),
             ),
           ),

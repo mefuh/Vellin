@@ -242,15 +242,28 @@ class _Scanner {
     _skip();
     final startIndex = _i;
     if (_i < _s.length && (_s[_i] == '-' || _s[_i] == '+')) _i++;
+
+    // Числа в путях пишут вплотную и без разделителей: «-1.4.7» — это два
+    // числа, −1.4 и 0.7. Поэтому на второй точке число обрывается, иначе
+    // разбор склеивает их в одно и путь уходит в сторону.
+    var seenDot = false;
     while (_i < _s.length) {
       final c = _s.codeUnitAt(_i);
       final isDigit = c >= 48 && c <= 57;
       final isDot = c == 46;
       final isExp = c == 101 || c == 69;
-      if (isDigit || isDot || isExp) {
+      if (isDot) {
+        if (seenDot) break;
+        seenDot = true;
+        _i++;
+      } else if (isDigit) {
+        _i++;
+      } else if (isExp) {
         _i++;
         // Знак после экспоненты — часть числа.
-        if (isExp && _i < _s.length && (_s[_i] == '-' || _s[_i] == '+')) _i++;
+        if (_i < _s.length && (_s[_i] == '-' || _s[_i] == '+')) _i++;
+        // После экспоненты дробная часть невозможна — точка начнёт новое число.
+        seenDot = true;
       } else {
         break;
       }
