@@ -321,6 +321,42 @@ class DmCallSession {
     await _offerIfPossible();
   }
 
+  /// Заменить то, что демонстрируется, не прерывая демонстрацию: другой
+  /// источник, другое разрешение или частота, снятый звук.
+  ///
+  /// Линии остаются прежними, поэтому нового согласования не нужно, а приметы
+  /// демонстрации не меняются — собеседник продолжает узнавать её как ту же
+  /// самую, и картинка у него не мигает.
+  Future<bool> replaceScreen({
+    required MediaStreamTrack videoTrack,
+    MediaStreamTrack? audioTrack,
+    required int maxBitrate,
+    required int maxFramerate,
+  }) async {
+    final video = _screenVideoSender;
+    if (video == null || _closed) return false;
+    try {
+      await video.replaceTrack(videoTrack);
+    } catch (_) {
+      return false;
+    }
+    // Звук можно только снять или подменить: появление нового звука требует
+    // новой линии, и такой случай сюда не доходит.
+    final audio = _screenAudioSender;
+    if (audio != null) {
+      try {
+        await audio.replaceTrack(audioTrack);
+      } catch (_) {
+        // Звук останется прежним.
+      }
+    }
+    await _limitScreenSending(maxBitrate: maxBitrate, maxFramerate: maxFramerate);
+    return true;
+  }
+
+  /// Есть ли в соединении линия для звука демонстрации.
+  bool get hasScreenAudioLine => _screenAudioSender != null;
+
   /// Прекратить демонстрацию. Линии остаются на месте — повторный запуск
   /// обойдётся подменой дорожки, без нового согласования.
   Future<void> stopScreen() async {

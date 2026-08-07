@@ -400,7 +400,10 @@ class CallController extends ChangeNotifier {
     _session = null;
     final share = screenShare;
     screenShare = null;
-    if (share != null) await ScreenShare.stop(share);
+    if (share != null) {
+      share.videoTrack.onEnded = null;
+      await ScreenShare.stop(share);
+    }
     _inbound.clear();
     _peerScreenMid = null;
     _peerScreenStreamId = null;
@@ -557,10 +560,74 @@ class CallController extends ChangeNotifier {
     }
   }
 
+  /// Изменить идущую демонстрацию: другой экран или окно, другое качество,
+  /// снятый звук. Демонстрация при этом не прерывается — дорожка подменяется в
+  /// уже согласованной линии, и у собеседника картинка не мигает.
+  Future<void> updateScreenShare(ScreenShareSource source, ScreenShareOptions options) async {
+    final s = _session;
+    final current = screenShare;
+    if (s == null || current == null) return;
+
+    final same = current.source.id == source.id &&
+        current.options.resolution == options.resolution &&
+        current.options.fps == options.fps &&
+        options.withAudio == current.hasAudio;
+    if (same) {
+      await ScreenShareSettings.save(options);
+      return;
+    }
+
+    // Звука не было, а теперь просят — для него нужна новая линия в
+    // соединении, и это единственный случай, который идёт через перезапуск.
+    if (options.withAudio && !s.hasScreenAudioLine) {
+      await stopScreenShare();
+      await startScreenShare(source, options);
+      return;
+    }
+
+    ActiveScreenShare next;
+    try {
+      next = await ScreenShare.start(source: source, options: options);
+    } catch (_) {
+      error = 'Не удалось изменить демонстрацию';
+      notifyListeners();
+      return;
+    }
+
+    final replaced = await s.replaceScreen(
+      videoTrack: next.videoTrack,
+      audioTrack: options.withAudio ? next.audioTrack : null,
+      maxBitrate: options.resolution.maxBitrate(options.fps),
+      maxFramerate: options.fps,
+    );
+    if (!replaced) {
+      // Подмена не удалась — прежняя демонстрация продолжается как шла.
+      await ScreenShare.stop(next);
+      error = 'Не удалось изменить демонстрацию';
+      notifyListeners();
+      return;
+    }
+
+    screenShare = next;
+    localScreenRenderer.srcObject = next.stream;
+    next.videoTrack.onEnded = () => stopScreenShare();
+    // Снимаем сторож со старой дорожки: её остановка не должна прекратить
+    // демонстрацию, которая уже идёт с новой.
+    current.videoTrack.onEnded = null;
+    await ScreenShare.stop(current);
+    await ScreenShareSettings.save(options);
+
+    if (options.withAudio && !next.hasAudio) {
+      error = 'Звук захватить не удалось — демонстрация идёт без него';
+    }
+    notifyListeners();
+  }
+
   /// Прекратить демонстрацию.
   Future<void> stopScreenShare() async {
     final share = screenShare;
     if (share == null) return;
+    share.videoTrack.onEnded = null;
     screenShare = null;
     showMyScreenPreview = false;
     localScreenRenderer.srcObject = null;

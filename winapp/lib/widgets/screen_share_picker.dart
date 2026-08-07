@@ -17,7 +17,21 @@ typedef ScreenSharePick = ({ScreenShareSource source, ScreenShareOptions options
 class ScreenSharePicker extends StatefulWidget {
   final ValueChanged<ScreenSharePick> onPick;
   final VoidCallback onCancel;
-  const ScreenSharePicker({super.key, required this.onPick, required this.onCancel});
+
+  /// Настройка уже идущей демонстрации: показываем её нынешние значения и
+  /// заранее отмечаем показываемый источник.
+  final ScreenShareOptions? initialOptions;
+  final String? initialSourceId;
+  final bool adjusting;
+
+  const ScreenSharePicker({
+    super.key,
+    required this.onPick,
+    required this.onCancel,
+    this.initialOptions,
+    this.initialSourceId,
+    this.adjusting = false,
+  });
 
   @override
   State<ScreenSharePicker> createState() => _ScreenSharePickerState();
@@ -34,6 +48,9 @@ class _ScreenSharePickerState extends State<ScreenSharePicker> {
   @override
   void initState() {
     super.initState();
+    _selectedId = widget.initialSourceId;
+    final initial = widget.initialOptions;
+    if (initial != null) _options = initial;
     _load();
     // Окна открываются и закрываются, пока диалог висит: подновляем список.
     _refresh = Timer.periodic(const Duration(seconds: 3), (_) => _load(quiet: true));
@@ -47,18 +64,28 @@ class _ScreenSharePickerState extends State<ScreenSharePicker> {
 
   Future<void> _load({bool quiet = false}) async {
     if (!quiet) {
-      final saved = await ScreenShareSettings.load();
-      if (mounted) setState(() => _options = saved);
+      // У идущей демонстрации свои значения — запомненные их не перебивают.
+      if (widget.initialOptions == null) {
+        final saved = await ScreenShareSettings.load();
+        if (mounted) setState(() => _options = saved);
+      }
     } else {
       await ScreenShare.refreshThumbnails();
     }
     final list = await ScreenShare.sources();
     if (!mounted) return;
     setState(() {
+      final first = _loading;
       _sources = list;
       _loading = false;
       // Выбор мог указывать на закрытое окно — тогда снимаем его.
       if (_selectedId != null && !list.any((s) => s.id == _selectedId)) _selectedId = null;
+      // Открываемся на той вкладке, где показываемый источник.
+      if (first) {
+        for (final s in list) {
+          if (s.id == _selectedId) _tab = s.kind;
+        }
+      }
     });
   }
 
@@ -92,8 +119,9 @@ class _ScreenSharePickerState extends State<ScreenSharePicker> {
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 20, 16, 12),
             child: Row(children: [
-              const Text('Демонстрация экрана',
-                  style: TextStyle(color: VellinColors.text0, fontSize: 18, fontWeight: FontWeight.w600)),
+              Text(widget.adjusting ? 'Настройка демонстрации' : 'Демонстрация экрана',
+                  style: const TextStyle(
+                      color: VellinColors.text0, fontSize: 18, fontWeight: FontWeight.w600)),
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.close, color: VellinColors.text2),
@@ -150,17 +178,17 @@ class _ScreenSharePickerState extends State<ScreenSharePicker> {
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
             child: Row(children: [
-              _Dropdown<ScreenResolution>(
+              _Segmented<ScreenResolution>(
                 label: 'Разрешение',
                 value: _options.resolution,
                 items: ScreenResolution.values.map((r) => (value: r, label: r.label)).toList(),
                 onChanged: (v) => setState(() => _options = _options.copyWith(resolution: v)),
               ),
               const SizedBox(width: 14),
-              _Dropdown<int>(
+              _Segmented<int>(
                 label: 'Частота кадров',
                 value: _options.fps,
-                items: const [(value: 30, label: '30 кадров/с'), (value: 60, label: '60 кадров/с')],
+                items: const [(value: 30, label: '30'), (value: 60, label: '60')],
                 onChanged: (v) => setState(() => _options = _options.copyWith(fps: v)),
               ),
               const SizedBox(width: 18),
@@ -200,7 +228,7 @@ class _ScreenSharePickerState extends State<ScreenSharePicker> {
                 onPressed: selected == null
                     ? null
                     : () => widget.onPick((source: selected, options: _options)),
-                child: const Text('Начать демонстрацию'),
+                child: Text(widget.adjusting ? 'Применить' : 'Начать демонстрацию'),
               ),
             ]),
           ),
@@ -293,12 +321,17 @@ class _SourceCard extends StatelessWidget {
   }
 }
 
-class _Dropdown<T> extends StatelessWidget {
+/// Выбор из нескольких значений в один ряд.
+///
+/// Не выпадающий список: его меню открывается через навигатор приложения, а
+/// слой звонка нарисован выше навигатора — меню оказывалось под ним и не
+/// нажималось. Переключатель живёт в том же слое и от навигатора не зависит.
+class _Segmented<T> extends StatelessWidget {
   final String label;
   final T value;
   final List<({T value, String label})> items;
   final ValueChanged<T> onChanged;
-  const _Dropdown({
+  const _Segmented({
     required this.label,
     required this.value,
     required this.items,
@@ -311,23 +344,39 @@ class _Dropdown<T> extends StatelessWidget {
       Text(label, style: const TextStyle(color: VellinColors.text3, fontSize: 11.5)),
       const SizedBox(height: 4),
       Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
           color: VellinColors.bg2,
           borderRadius: BorderRadius.circular(VellinRadius.sm),
           border: Border.all(color: VellinColors.line2),
         ),
-        child: DropdownButton<T>(
-          value: value,
-          underline: const SizedBox.shrink(),
-          dropdownColor: VellinColors.bg2,
-          style: const TextStyle(color: VellinColors.text0, fontSize: 13.5),
-          items: items
-              .map((i) => DropdownMenuItem<T>(value: i.value, child: Text(i.label)))
-              .toList(),
-          onChanged: (v) {
-            if (v != null) onChanged(v);
-          },
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final i in items)
+              Padding(
+                padding: const EdgeInsets.only(right: 3),
+                child: Material(
+                  color: i.value == value ? VellinColors.accent : Colors.transparent,
+                  borderRadius: BorderRadius.circular(VellinRadius.sm - 2),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(VellinRadius.sm - 2),
+                    onTap: () => onChanged(i.value),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+                      child: Text(
+                        i.label,
+                        style: TextStyle(
+                          color: i.value == value ? VellinColors.text0 : VellinColors.text2,
+                          fontSize: 13,
+                          fontWeight: i.value == value ? FontWeight.w600 : FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     ]);

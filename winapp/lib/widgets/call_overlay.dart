@@ -162,6 +162,9 @@ class _CallScreenState extends State<_CallScreen> {
   /// Открыт выбор источника демонстрации.
   bool _pickingSource = false;
 
+  /// Выбор открыт для настройки уже идущей демонстрации, а не для запуска.
+  bool _adjusting = false;
+
   @override
   void initState() {
     super.initState();
@@ -291,9 +294,9 @@ class _CallScreenState extends State<_CallScreen> {
             ]),
           ),
 
-          // Своя демонстрация: по умолчанию — полоса состояния, а не картинка
-          // собственного экрана. Превью открывается по желанию.
-          if (call.sharingScreen && !call.showMyScreenPreview)
+          // Своя демонстрация: полоса состояния держится всё время, пока идёт
+          // показ, — из неё же меняются настройки и убирается превью.
+          if (call.sharingScreen)
             Positioned(
               left: 0,
               right: 0,
@@ -302,7 +305,12 @@ class _CallScreenState extends State<_CallScreen> {
                 child: _MyScreenBanner(
                   title: call.screenShare!.source.name,
                   withAudio: call.screenShare!.hasAudio,
-                  onPreview: () => call.setMyScreenPreview(true),
+                  previewShown: call.showMyScreenPreview,
+                  onTogglePreview: () => call.setMyScreenPreview(!call.showMyScreenPreview),
+                  onAdjust: () => setState(() {
+                    _pickingSource = true;
+                    _adjusting = true;
+                  }),
                   onStop: call.stopScreenShare,
                 ),
               ),
@@ -342,10 +350,27 @@ class _CallScreenState extends State<_CallScreen> {
           if (_pickingSource)
             Positioned.fill(
               child: ScreenSharePicker(
-                onCancel: () => setState(() => _pickingSource = false),
+                adjusting: _adjusting,
+                // Флажок звука показываем по факту: он мог не захватиться.
+                initialOptions: _adjusting
+                    ? call.screenShare?.options.copyWith(withAudio: call.screenShare!.hasAudio)
+                    : null,
+                initialSourceId: _adjusting ? call.screenShare?.source.id : null,
+                onCancel: () => setState(() {
+                  _pickingSource = false;
+                  _adjusting = false;
+                }),
                 onPick: (pick) {
-                  setState(() => _pickingSource = false);
-                  call.startScreenShare(pick.source, pick.options);
+                  final adjusting = _adjusting;
+                  setState(() {
+                    _pickingSource = false;
+                    _adjusting = false;
+                  });
+                  if (adjusting) {
+                    call.updateScreenShare(pick.source, pick.options);
+                  } else {
+                    call.startScreenShare(pick.source, pick.options);
+                  }
                 },
               ),
             ),
@@ -422,16 +447,21 @@ class _TilePreview extends StatelessWidget {
   }
 }
 
-/// Полоса «вы демонстрируете» — вместо картинки собственного экрана.
+/// Полоса «вы демонстрируете»: что показывается, и всё управление показом —
+/// настройки, превью и остановка.
 class _MyScreenBanner extends StatelessWidget {
   final String title;
   final bool withAudio;
-  final VoidCallback onPreview;
+  final bool previewShown;
+  final VoidCallback onTogglePreview;
+  final VoidCallback onAdjust;
   final VoidCallback onStop;
   const _MyScreenBanner({
     required this.title,
     required this.withAudio,
-    required this.onPreview,
+    required this.previewShown,
+    required this.onTogglePreview,
+    required this.onAdjust,
     required this.onStop,
   });
 
@@ -458,9 +488,14 @@ class _MyScreenBanner extends StatelessWidget {
         ),
         const SizedBox(width: 12),
         TextButton(
-          onPressed: onPreview,
+          onPressed: onAdjust,
           style: TextButton.styleFrom(foregroundColor: VellinColors.text1),
-          child: const Text('Показать'),
+          child: const Text('Настроить'),
+        ),
+        TextButton(
+          onPressed: onTogglePreview,
+          style: TextButton.styleFrom(foregroundColor: VellinColors.text1),
+          child: Text(previewShown ? 'Скрыть' : 'Показать'),
         ),
         TextButton(
           onPressed: onStop,
