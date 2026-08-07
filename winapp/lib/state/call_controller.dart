@@ -43,10 +43,17 @@ class CallController extends ChangeNotifier {
     final s = _session;
     if (s == null) return;
     switch (change) {
-      // Обработка звука живёт в источнике: поменять её у работающей дорожки
-      // нельзя, нужен перезахват.
+      // Микрофон и обработка звука живут в источнике: поменять их у работающей
+      // дорожки нельзя, нужен перезахват. Выбор устройства перед этим уходит в
+      // саму библиотеку — перезахват возьмёт уже его.
+      case CallSettingsChange.audioInput:
+        await settings.applyAudioDevices();
+        await s.applyAudioInput();
       case CallSettingsChange.processing:
         await s.applyAudioInput();
+      case CallSettingsChange.audioOutput:
+        // Динамик переключается на лету, пересобирать нечего.
+        await settings.applyAudioDevices();
       case CallSettingsChange.videoInput:
         await s.applyVideoInput();
         localRenderer.srcObject = s.localStream;
@@ -54,6 +61,19 @@ class CallController extends ChangeNotifier {
       case CallSettingsChange.volume:
         _applyPeerVolume();
     }
+  }
+
+  /// Взять выбранные устройства, когда звук пошёл.
+  ///
+  /// Раньше нельзя: до разговора звуковой модуль библиотеки устройств не знает
+  /// и выбор отклоняет, поэтому первый захват идёт на системном микрофоне.
+  /// Здесь он повторяется уже с выбранным.
+  Future<void> _applyChosenAudioDevices() async {
+    final s = _session;
+    if (s == null) return;
+    if (settings.micId == null && settings.speakerId == null) return;
+    await settings.applyAudioDevices();
+    if (settings.micId != null) await s.applyAudioInput();
   }
 
   /// Уровень своего микрофона во время разговора — для проверки звука, когда
@@ -399,7 +419,10 @@ class CallController extends ChangeNotifier {
       settings: settings,
       sendSignal: (payload) =>
           _socket.send({'t': 'dmcall_signal', 'callId': snapshot.callId, 'payload': payload}),
-      onConnected: () => _socket.send({'t': 'dmcall_connected', 'callId': snapshot.callId}),
+      onConnected: () {
+        _socket.send({'t': 'dmcall_connected', 'callId': snapshot.callId});
+        _applyChosenAudioDevices();
+      },
       onRemoteStream: (stream, mid) {
         // Потоков от собеседника может быть два — камера и демонстрация.
         // Копим их вместе с приметами, а кто из них кто, решает раскладка.

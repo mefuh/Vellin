@@ -18,6 +18,7 @@
 namespace {
 
 using Microsoft::WRL::ComPtr;
+using flutter::EncodableList;
 using flutter::EncodableMap;
 using flutter::EncodableValue;
 
@@ -30,17 +31,9 @@ std::string Utf8(const wchar_t* text) {
   return out;
 }
 
-// Название устройства, которое система отдаёт разговорам, — то самое, что
-// показано в «Параметры → Звук» как устройство связи.
-std::string CommunicationsDeviceName(IMMDeviceEnumerator* enumerator, EDataFlow flow) {
-  ComPtr<IMMDevice> device;
-  // Устройства может не быть вовсе — тогда и звонку брать нечего.
-  if (FAILED(enumerator->GetDefaultAudioEndpoint(flow, eCommunications, &device))) {
-    return std::string();
-  }
+std::string FriendlyName(IMMDevice* device) {
   ComPtr<IPropertyStore> props;
   if (FAILED(device->OpenPropertyStore(STGM_READ, &props))) return std::string();
-
   PROPVARIANT name;
   ::PropVariantInit(&name);
   if (FAILED(props->GetValue(PKEY_Device_FriendlyName, &name))) {
@@ -52,6 +45,47 @@ std::string CommunicationsDeviceName(IMMDeviceEnumerator* enumerator, EDataFlow 
   return result;
 }
 
+std::string DeviceId(IMMDevice* device) {
+  LPWSTR id = nullptr;
+  if (FAILED(device->GetId(&id))) return std::string();
+  std::string result = Utf8(id);
+  ::CoTaskMemFree(id);
+  return result;
+}
+
+/// Устройство, которое система отдаёт разговорам, — им звонок пользуется, пока
+/// человек не выбрал другое.
+std::string CommunicationsDeviceId(IMMDeviceEnumerator* enumerator, EDataFlow flow) {
+  ComPtr<IMMDevice> device;
+  if (FAILED(enumerator->GetDefaultAudioEndpoint(flow, eCommunications, &device))) {
+    return std::string();
+  }
+  return DeviceId(device.Get());
+}
+
+EncodableList ActiveDevices(IMMDeviceEnumerator* enumerator, EDataFlow flow) {
+  EncodableList list;
+  ComPtr<IMMDeviceCollection> collection;
+  // Только работающие устройства: отключённые и выключенные показывать незачем,
+  // выбрать их всё равно нельзя.
+  if (FAILED(enumerator->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection))) {
+    return list;
+  }
+  UINT count = 0;
+  if (FAILED(collection->GetCount(&count))) return list;
+  for (UINT i = 0; i < count; i++) {
+    ComPtr<IMMDevice> device;
+    if (FAILED(collection->Item(i, &device))) continue;
+    std::string id = DeviceId(device.Get());
+    if (id.empty()) continue;
+    list.push_back(EncodableValue(EncodableMap{
+        {EncodableValue("id"), EncodableValue(id)},
+        {EncodableValue("label"), EncodableValue(FriendlyName(device.Get()))},
+    }));
+  }
+  return list;
+}
+
 }  // namespace
 
 void RegisterAudioDeviceChannel(flutter::FlutterEngine* engine) {
@@ -61,9 +95,9 @@ void RegisterAudioDeviceChannel(flutter::FlutterEngine* engine) {
       &flutter::StandardMethodCodec::GetInstance());
 
   channel->SetMethodCallHandler(
-      [channel](const flutter::MethodCall<EncodableValue>& call,
-                std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
-        if (call.method_name() != "communications") {
+      [](const flutter::MethodCall<EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
+        if (call.method_name() != "list") {
           result->NotImplemented();
           return;
         }
@@ -72,25 +106,23 @@ void RegisterAudioDeviceChannel(flutter::FlutterEngine* engine) {
         if (FAILED(::CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                                       __uuidof(IMMDeviceEnumerator),
                                       reinterpret_cast<void**>(enumerator.GetAddressOf())))) {
-          // Пустые названия читаются как «узнать не удалось» — приложение
-          // покажет это словами, а не пустым местом.
-          result->Success(EncodableValue(EncodableMap{
-              {EncodableValue("capture"), EncodableValue(std::string())},
-              {EncodableValue("render"), EncodableValue(std::string())},
-          }));
+          // Пустые списки читаются как «узнать не удалось» — приложение скажет
+          // это словами, а не пустым местом.
+          result->Success(EncodableValue(EncodableMap{}));
           return;
         }
 
         result->Success(EncodableValue(EncodableMap{
-            {EncodableValue("capture"),
-             EncodableValue(CommunicationsDeviceName(enumerator.Get(), eCapture))},
-            {EncodableValue("render"),
-             EncodableValue(CommunicationsDeviceName(enumerator.Get(), eRender))},
+            {EncodableValue("capture"), EncodableValue(ActiveDevices(enumerator.Get(), eCapture))},
+            {EncodableValue("render"), EncodableValue(ActiveDevices(enumerator.Get(), eRender))},
+            {EncodableValue("defaultCapture"),
+             EncodableValue(CommunicationsDeviceId(enumerator.Get(), eCapture))},
+            {EncodableValue("defaultRender"),
+             EncodableValue(CommunicationsDeviceId(enumerator.Get(), eRender))},
         }));
       });
 
-  // Канал должен пережить вызов: обработчик держит его сам, а здесь остаётся
-  // ссылка на время работы приложения.
+  // Канал должен пережить вызов: держим ссылку на время работы приложения.
   static std::shared_ptr<flutter::MethodChannel<EncodableValue>> keep_alive;
   keep_alive = channel;
 }

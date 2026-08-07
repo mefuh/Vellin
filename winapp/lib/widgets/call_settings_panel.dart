@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher_string.dart';
 
 import '../state/call_controller.dart';
 import '../theme/vellin_theme.dart';
@@ -29,7 +28,6 @@ class CallSettingsPanel extends StatefulWidget {
 
 class _CallSettingsPanelState extends State<CallSettingsPanel> {
   CallDevices _devices = CallDevices.empty;
-  SystemAudioDevices _audio = SystemAudioDevices.unknown;
   bool _loading = true;
 
   MicTest? _test;
@@ -52,22 +50,11 @@ class _CallSettingsPanelState extends State<CallSettingsPanel> {
 
   Future<void> _loadDevices() async {
     final found = await CallSettings.devices();
-    final audio = await CallSettings.systemAudioDevices();
     if (!mounted) return;
     setState(() {
       _devices = found;
-      _audio = audio;
       _loading = false;
     });
-  }
-
-  /// Открыть параметры звука Windows: микрофон и динамик звонка выбираются там.
-  Future<void> _openSystemSound() async {
-    try {
-      await launchUrlString('ms-settings:sound');
-    } catch (_) {
-      // Не открылось — человек дойдёт до настроек сам.
-    }
   }
 
   Future<void> _toggleTest(CallSettings settings, CallController call) async {
@@ -119,29 +106,24 @@ class _CallSettingsPanelState extends State<CallSettingsPanel> {
           child: Center(child: CircularProgressIndicator(color: VellinColors.accentHi)),
         )
       else ...[
-        // Микрофон и динамик звонку выдаёт Windows: библиотека звонков своих
-        // устройств не перечисляет и выбирать их не даёт. Поэтому показываем,
-        // что система отдала разговорам, и уводим менять это к ней.
-        _SystemAudioRow(
-          icon: Icons.mic,
+        _DevicePicker(
           label: 'Микрофон',
-          device: _audio.micLabel,
-          onOpenSettings: _openSystemSound,
+          icon: Icons.mic,
+          devices: _devices.mics,
+          value: settings.micId,
+          systemLabel: _devices.labelFor(_devices.mics, _devices.defaultMicId),
+          onChanged: settings.setMic,
         ),
-        const SizedBox(height: 10),
-        _SystemAudioRow(
-          icon: Icons.volume_up,
+        const SizedBox(height: 14),
+        _DevicePicker(
           label: 'Динамик',
-          device: _audio.speakerLabel,
-          onOpenSettings: _openSystemSound,
+          icon: Icons.volume_up,
+          devices: _devices.speakers,
+          value: settings.speakerId,
+          systemLabel: _devices.labelFor(_devices.speakers, _devices.defaultSpeakerId),
+          onChanged: settings.setSpeaker,
         ),
-        const SizedBox(height: 6),
-        const Text(
-          'Звонок использует устройства связи Windows. Сменить их можно в '
-          'параметрах звука — там же, где они выбираются для других программ.',
-          style: TextStyle(color: VellinColors.text3, fontSize: 12),
-        ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         _DevicePicker(
           label: 'Камера',
           icon: Icons.videocam,
@@ -237,68 +219,17 @@ class _CallSettingsPanelState extends State<CallSettingsPanel> {
   }
 }
 
-/// Устройство звука, выданное системой: показываем, но не выбираем.
-class _SystemAudioRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String device;
-  final VoidCallback onOpenSettings;
-  const _SystemAudioRow({
-    required this.icon,
-    required this.label,
-    required this.device,
-    required this.onOpenSettings,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        Icon(icon, size: 15, color: VellinColors.text3),
-        const SizedBox(width: 7),
-        Text(label, style: const TextStyle(color: VellinColors.text3, fontSize: 11.5)),
-      ]),
-      const SizedBox(height: 6),
-      Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-        decoration: BoxDecoration(
-          color: VellinColors.bg2,
-          borderRadius: BorderRadius.circular(VellinRadius.sm),
-          border: Border.all(color: VellinColors.line2),
-        ),
-        child: Row(children: [
-          Expanded(
-            child: Text(
-              // Пустое название значит, что устройство не нашлось: так и
-              // говорим, иначе строка выглядела бы сломанной.
-              device.isEmpty ? 'Устройство не найдено' : device,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: device.isEmpty ? VellinColors.text3 : VellinColors.text0,
-                fontSize: 13,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: onOpenSettings,
-            style: TextButton.styleFrom(foregroundColor: VellinColors.text1),
-            child: const Text('Сменить'),
-          ),
-        ]),
-      ),
-    ]);
-  }
-}
-
 /// Выбор устройства. Первый пункт — «как в системе»: тогда настройка не
-/// ломается, когда камеру отключили.
+/// ломается, когда устройство отключили.
 class _DevicePicker extends StatelessWidget {
   final String label;
   final IconData icon;
   final List<CallDevice> devices;
   final String? value;
+
+  /// Что система отдаёт разговорам сама — показываем рядом с «как в системе»,
+  /// чтобы этот пункт не был котом в мешке.
+  final String? systemLabel;
   final ValueChanged<String?> onChanged;
 
   const _DevicePicker({
@@ -306,6 +237,7 @@ class _DevicePicker extends StatelessWidget {
     required this.icon,
     required this.devices,
     required this.value,
+    this.systemLabel,
     required this.onChanged,
   });
 
@@ -330,7 +262,7 @@ class _DevicePicker extends StatelessWidget {
         ),
         child: Column(children: [
           _Option(
-            label: 'Как в системе',
+            label: systemLabel == null ? 'Как в системе' : 'Как в системе · $systemLabel',
             selected: !known,
             onTap: () => onChanged(null),
           ),

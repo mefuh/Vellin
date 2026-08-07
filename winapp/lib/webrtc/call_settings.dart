@@ -7,9 +7,9 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Что именно поменялось в настройках. Разное применяется по-разному: громкость
-/// ложится мгновенно, а смена камеры или обработки звука требует перезахвата
-/// дорожки — поэтому слушателю важно знать, из-за чего его позвали.
-enum CallSettingsChange { videoInput, processing, volume }
+/// ложится мгновенно, а смена устройства захвата или обработки звука требует
+/// перезахвата дорожки — поэтому слушателю важно знать, из-за чего его позвали.
+enum CallSettingsChange { audioInput, audioOutput, videoInput, processing, volume }
 
 /// Одно устройство в списке выбора.
 class CallDevice {
@@ -18,26 +18,33 @@ class CallDevice {
   const CallDevice({required this.id, required this.label});
 }
 
-/// Камеры, доступные звонку.
-///
-/// Микрофонов и динамиков здесь нет намеренно: библиотека звонков на Windows
-/// звуковых устройств не перечисляет и выбирать их не даёт — звук всегда идёт
-/// через «устройства связи» Windows. Их названия читаются отдельно, через
-/// [systemAudioDevices].
+/// Устройства, доступные звонку.
 class CallDevices {
+  final List<CallDevice> mics;
+  final List<CallDevice> speakers;
   final List<CallDevice> cameras;
-  const CallDevices({required this.cameras});
 
-  static const empty = CallDevices(cameras: []);
-}
+  /// Что система отдаёт разговорам, когда своё устройство не выбрано.
+  final String? defaultMicId;
+  final String? defaultSpeakerId;
 
-/// Устройства связи Windows: через них идёт звук любого звонка.
-class SystemAudioDevices {
-  final String micLabel;
-  final String speakerLabel;
-  const SystemAudioDevices({required this.micLabel, required this.speakerLabel});
+  const CallDevices({
+    required this.mics,
+    required this.speakers,
+    required this.cameras,
+    this.defaultMicId,
+    this.defaultSpeakerId,
+  });
 
-  static const unknown = SystemAudioDevices(micLabel: '', speakerLabel: '');
+  static const empty = CallDevices(mics: [], speakers: [], cameras: []);
+
+  String? labelFor(List<CallDevice> list, String? id) {
+    if (id == null) return null;
+    for (final d in list) {
+      if (d.id == id) return d.label;
+    }
+    return null;
+  }
 }
 
 /// Настройки звонка: камера, обработка звука и громкость собеседников.
@@ -46,6 +53,8 @@ class SystemAudioDevices {
 /// не каждый разговор. `null` у камеры означает «как в системе» — так настройка
 /// не ломается, когда камеру отключили.
 class CallSettings extends ChangeNotifier {
+  static const _kMic = 'vellin_call_mic';
+  static const _kSpeaker = 'vellin_call_speaker';
   static const _kCamera = 'vellin_call_camera';
   static const _kNoise = 'vellin_call_noise_suppression';
   static const _kEcho = 'vellin_call_echo_cancellation';
@@ -54,6 +63,8 @@ class CallSettings extends ChangeNotifier {
 
   static const _audioDevices = MethodChannel('vellin/audio_devices');
 
+  String? _micId;
+  String? _speakerId;
   String? _cameraId;
   bool _noiseSuppression = true;
   bool _echoCancellation = true;
@@ -69,6 +80,8 @@ class CallSettings extends ChangeNotifier {
   /// На что реагировать тому, кто ведёт разговор.
   Stream<CallSettingsChange> get changes => _changes.stream;
 
+  String? get micId => _micId;
+  String? get speakerId => _speakerId;
   String? get cameraId => _cameraId;
   bool get noiseSuppression => _noiseSuppression;
   bool get echoCancellation => _echoCancellation;
@@ -80,6 +93,8 @@ class CallSettings extends ChangeNotifier {
   Future<void> load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      _micId = prefs.getString(_kMic);
+      _speakerId = prefs.getString(_kSpeaker);
       _cameraId = prefs.getString(_kCamera);
       _noiseSuppression = prefs.getBool(_kNoise) ?? true;
       _echoCancellation = prefs.getBool(_kEcho) ?? true;
@@ -107,17 +122,62 @@ class CallSettings extends ChangeNotifier {
     }
   }
 
+  Future<void> _remember(String key, String? value) async {
+    final prefs = await _prefs();
+    if (prefs == null) return;
+    if (value == null) {
+      await prefs.remove(key);
+    } else {
+      await prefs.setString(key, value);
+    }
+  }
+
+  Future<void> setMic(String? id) async {
+    if (_micId == id) return;
+    _micId = id;
+    notifyListeners();
+    _changes.add(CallSettingsChange.audioInput);
+    await _remember(_kMic, id);
+  }
+
+  Future<void> setSpeaker(String? id) async {
+    if (_speakerId == id) return;
+    _speakerId = id;
+    notifyListeners();
+    _changes.add(CallSettingsChange.audioOutput);
+    await _remember(_kSpeaker, id);
+  }
+
   Future<void> setCamera(String? id) async {
     if (_cameraId == id) return;
     _cameraId = id;
     notifyListeners();
     _changes.add(CallSettingsChange.videoInput);
-    final prefs = await _prefs();
-    if (prefs == null) return;
-    if (id == null) {
-      await prefs.remove(_kCamera);
-    } else {
-      await prefs.setString(_kCamera, id);
+    await _remember(_kCamera, id);
+  }
+
+  /// Сказать библиотеке, какие устройства брать. Отдельно от захвата: динамик
+  /// иначе не переключить вовсе, а микрофон так подхватывается перезахватом.
+  ///
+  /// Работает, только когда звук уже идёт: до разговора звуковой модуль
+  /// библиотеки устройств не знает и на выбор отвечает отказом. Поэтому вызов
+  /// повторяется в начале каждого разговора.
+  Future<void> applyAudioDevices() async {
+    final mic = _micId;
+    if (mic != null) {
+      try {
+        await Helper.selectAudioInput(mic);
+      } catch (_) {
+        // Устройство исчезло или звук ещё не идёт — останется системное.
+      }
+    }
+    final speaker = _speakerId;
+    if (speaker != null) {
+      try {
+        await Helper.selectAudioOutput(speaker);
+      } catch (_) {
+        // То же: без звука выбор не принимается, повторим со следующим звонком.
+      }
     }
   }
 
@@ -145,10 +205,14 @@ class CallSettings extends ChangeNotifier {
     await prefs.setString(_kVolumes, jsonEncode(_peerVolume));
   }
 
-  /// Ограничения захвата микрофона. Устройство здесь не задаётся: его выбирает
-  /// Windows. Обработка звука, наоборот, живёт в источнике, и поменять её иначе
-  /// как перезахватом нельзя.
+  /// Ограничения захвата микрофона: выбранное устройство и обработка звука.
+  /// И то, и другое задаётся только при захвате — у работающей дорожки их не
+  /// поменять.
   Map<String, dynamic> audioConstraints() => {
+        if (_micId != null)
+          'optional': [
+            {'sourceId': _micId},
+          ],
         'echoCancellation': _echoCancellation,
         'noiseSuppression': _noiseSuppression,
         'autoGainControl': _autoGain,
@@ -165,34 +229,56 @@ class CallSettings extends ChangeNotifier {
         'frameRate': {'ideal': 24},
       };
 
-  /// Перечислить камеры. Список читается каждый раз заново: камеры втыкают и
-  /// вынимают, и запомненный список быстро врёт.
+  /// Перечислить устройства. Список читается каждый раз заново: наушники
+  /// втыкают и вынимают, и запомненный список быстро врёт.
+  ///
+  /// Микрофоны и динамики берутся у Windows напрямую, а не у библиотеки
+  /// звонков: та перечисляет их, только пока звук уже идёт, и до первого
+  /// разговора её списки пусты. Опознаватели устройств у обеих сторон одни и те
+  /// же, поэтому выбранное здесь библиотека потом принимает.
   static Future<CallDevices> devices() async {
+    final cameras = <CallDevice>[];
     try {
-      final found = await navigator.mediaDevices.enumerateDevices();
-      final cameras = <CallDevice>[];
-      for (final d in found) {
+      for (final d in await navigator.mediaDevices.enumerateDevices()) {
         if (d.kind != 'videoinput') continue;
         final label = d.label.trim();
         cameras.add(CallDevice(id: d.deviceId, label: label.isEmpty ? 'Камера' : label));
       }
-      return CallDevices(cameras: cameras);
     } catch (e) {
       debugPrint('[call] список камер не получен: $e');
-      return CallDevices.empty;
     }
-  }
 
-  /// Узнать, какие микрофон и динамик Windows отдаёт разговорам.
-  static Future<SystemAudioDevices> systemAudioDevices() async {
     try {
-      final res = await _audioDevices.invokeMapMethod<String, dynamic>('communications');
-      return SystemAudioDevices(
-        micLabel: (res?['capture'] as String? ?? '').trim(),
-        speakerLabel: (res?['render'] as String? ?? '').trim(),
+      final res = await _audioDevices.invokeMapMethod<String, dynamic>('list');
+      List<CallDevice> parse(String key, String fallback) {
+        final raw = res?[key];
+        if (raw is! List) return const [];
+        final out = <CallDevice>[];
+        for (final item in raw) {
+          if (item is! Map) continue;
+          final id = item['id'];
+          if (id is! String || id.isEmpty) continue;
+          final label = (item['label'] as String? ?? '').trim();
+          out.add(CallDevice(id: id, label: label.isEmpty ? fallback : label));
+        }
+        return out;
+      }
+
+      String? id(String key) {
+        final v = res?[key];
+        return v is String && v.isNotEmpty ? v : null;
+      }
+
+      return CallDevices(
+        mics: parse('capture', 'Микрофон'),
+        speakers: parse('render', 'Динамик'),
+        cameras: cameras,
+        defaultMicId: id('defaultCapture'),
+        defaultSpeakerId: id('defaultRender'),
       );
-    } catch (_) {
-      return SystemAudioDevices.unknown;
+    } catch (e) {
+      debugPrint('[call] список звуковых устройств не получен: $e');
+      return CallDevices(mics: const [], speakers: const [], cameras: cameras);
     }
   }
 
