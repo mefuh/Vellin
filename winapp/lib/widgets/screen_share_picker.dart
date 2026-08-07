@@ -1,12 +1,19 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
-import '../theme/vellin_theme.dart';
+import '../theme/call_design.dart';
 import '../webrtc/screen_share.dart';
+import 'call/call_bits.dart';
+import 'call/call_glyphs.dart';
 
-/// Что выбрал пользователь в диалоге демонстрации.
-typedef ScreenSharePick = ({ScreenShareSource source, ScreenShareOptions options});
+/// Что выбрал пользователь в окне демонстрации.
+typedef ScreenSharePick = ({
+  ScreenShareSource source,
+  ScreenShareOptions options,
+  bool showPreview,
+});
 
 /// Выбор того, что показать: экран целиком или отдельное окно, со звуком или
 /// без, и с каким качеством.
@@ -18,19 +25,27 @@ class ScreenSharePicker extends StatefulWidget {
   final ValueChanged<ScreenSharePick> onPick;
   final VoidCallback onCancel;
 
+  /// Кому показываем — имя идёт в подзаголовок.
+  final String peerName;
+
   /// Настройка уже идущей демонстрации: показываем её нынешние значения и
   /// заранее отмечаем показываемый источник.
   final ScreenShareOptions? initialOptions;
   final String? initialSourceId;
   final bool adjusting;
 
+  /// Показывается ли сейчас своё превью — переключатель в окне отражает это.
+  final bool showPreview;
+
   const ScreenSharePicker({
     super.key,
     required this.onPick,
     required this.onCancel,
+    required this.peerName,
     this.initialOptions,
     this.initialSourceId,
     this.adjusting = false,
+    this.showPreview = false,
   });
 
   @override
@@ -39,9 +54,9 @@ class ScreenSharePicker extends StatefulWidget {
 
 class _ScreenSharePickerState extends State<ScreenSharePicker> {
   List<ScreenShareSource> _sources = const [];
-  ScreenShareKind _tab = ScreenShareKind.screen;
   String? _selectedId;
   ScreenShareOptions _options = const ScreenShareOptions();
+  late bool _showPreview = widget.showPreview;
   bool _loading = true;
   Timer? _refresh;
 
@@ -52,7 +67,7 @@ class _ScreenSharePickerState extends State<ScreenSharePicker> {
     final initial = widget.initialOptions;
     if (initial != null) _options = initial;
     _load();
-    // Окна открываются и закрываются, пока диалог висит: подновляем список.
+    // Окна открываются и закрываются, пока окно выбора висит: подновляем список.
     _refresh = Timer.periodic(const Duration(seconds: 3), (_) => _load(quiet: true));
   }
 
@@ -75,21 +90,14 @@ class _ScreenSharePickerState extends State<ScreenSharePicker> {
     final list = await ScreenShare.sources();
     if (!mounted) return;
     setState(() {
-      final first = _loading;
       _sources = list;
       _loading = false;
       // Выбор мог указывать на закрытое окно — тогда снимаем его.
       if (_selectedId != null && !list.any((s) => s.id == _selectedId)) _selectedId = null;
-      // Открываемся на той вкладке, где показываемый источник.
-      if (first) {
-        for (final s in list) {
-          if (s.id == _selectedId) _tab = s.kind;
-        }
-      }
+      // Ничего не выбрано — берём первый экран: чаще всего показывают именно его.
+      _selectedId ??= list.isEmpty ? null : list.first.id;
     });
   }
-
-  List<ScreenShareSource> get _visible => _sources.where((s) => s.kind == _tab).toList();
 
   ScreenShareSource? get _selected {
     final id = _selectedId;
@@ -100,72 +108,89 @@ class _ScreenSharePickerState extends State<ScreenSharePicker> {
     return null;
   }
 
+  /// Экраны идут первыми: их показывают чаще, и их всегда единицы.
+  List<ScreenShareSource> get _ordered {
+    final screens = _sources.where((s) => s.kind == ScreenShareKind.screen).toList();
+    final windows = _sources.where((s) => s.kind == ScreenShareKind.window).toList();
+    return [...screens, ...windows];
+  }
+
   @override
   Widget build(BuildContext context) {
     final selected = _selected;
-    return Container(
-      color: Colors.black.withValues(alpha: 0.62),
-      alignment: Alignment.center,
+    return _ModalScrim(
+      onDismiss: widget.onCancel,
       child: Container(
-        width: 780,
-        height: 560,
+        width: 920,
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height - 80),
         decoration: BoxDecoration(
-          color: VellinColors.bg1,
-          borderRadius: BorderRadius.circular(VellinRadius.xl),
-          border: Border.all(color: VellinColors.line2),
+          color: const Color(0xEB0F0E0D),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.95),
+              blurRadius: 140,
+              offset: const Offset(0, 60),
+              spreadRadius: -40,
+            ),
+          ],
         ),
         clipBehavior: Clip.antiAlias,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 20, 16, 12),
-            child: Row(children: [
-              Text(widget.adjusting ? 'Настройка демонстрации' : 'Демонстрация экрана',
-                  style: const TextStyle(
-                      color: VellinColors.text0, fontSize: 18, fontWeight: FontWeight.w600)),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.close, color: VellinColors.text2),
-                tooltip: 'Закрыть',
-                onPressed: widget.onCancel,
+            padding: const EdgeInsets.fromLTRB(32, 28, 32, 20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                widget.adjusting ? 'Настройка демонстрации' : 'Поделиться экраном',
+                style: TextStyle(
+                  fontFamily: CallText.family,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w400,
+                  letterSpacing: 0.22,
+                  color: CallColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Выберите, что увидит ${widget.peerName}',
+                style: TextStyle(
+                  fontFamily: CallText.family,
+                  fontSize: 13,
+                  color: CallColors.textFaint,
+                ),
               ),
             ]),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Row(children: [
-              _Tab(
-                label: 'Экраны',
-                active: _tab == ScreenShareKind.screen,
-                onTap: () => setState(() => _tab = ScreenShareKind.screen),
-              ),
-              const SizedBox(width: 8),
-              _Tab(
-                label: 'Окна',
-                active: _tab == ScreenShareKind.window,
-                onTap: () => setState(() => _tab = ScreenShareKind.window),
-              ),
-            ]),
-          ),
-          const SizedBox(height: 14),
-          Expanded(
+          Flexible(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: VellinColors.accentHi))
-                : _visible.isEmpty
-                    ? const Center(
-                        child: Text('Ничего не найдено',
-                            style: TextStyle(color: VellinColors.text3, fontSize: 14)),
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 60),
+                    child: Center(child: CircularProgressIndicator(color: CallColors.gold)),
+                  )
+                : _ordered.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 60),
+                        child: Center(
+                          child: Text('Показывать нечего',
+                              style: TextStyle(
+                                  fontFamily: CallText.family,
+                                  fontSize: 13,
+                                  color: CallColors.textFaint)),
+                        ),
                       )
                     : GridView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.fromLTRB(32, 0, 32, 22),
                         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 3,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                          childAspectRatio: 16 / 11,
+                          crossAxisSpacing: 16,
+                          mainAxisSpacing: 16,
+                          childAspectRatio: 16 / 12.4,
                         ),
-                        itemCount: _visible.length,
+                        itemCount: _ordered.length,
                         itemBuilder: (_, i) {
-                          final s = _visible[i];
+                          final s = _ordered[i];
                           return _SourceCard(
                             source: s,
                             selected: s.id == _selectedId,
@@ -174,61 +199,69 @@ class _ScreenSharePickerState extends State<ScreenSharePicker> {
                         },
                       ),
           ),
-          const Divider(height: 24, thickness: 1, color: VellinColors.line2),
+          Container(height: 1, margin: const EdgeInsets.symmetric(horizontal: 32), color: CallColors.divider),
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-            child: Row(children: [
-              _Segmented<ScreenResolution>(
-                label: 'Разрешение',
-                value: _options.resolution,
-                items: ScreenResolution.values.map((r) => (value: r, label: r.label)).toList(),
-                onChanged: (v) => setState(() => _options = _options.copyWith(resolution: v)),
-              ),
-              const SizedBox(width: 14),
-              _Segmented<int>(
-                label: 'Частота кадров',
-                value: _options.fps,
-                items: const [(value: 30, label: '30'), (value: 60, label: '60')],
-                onChanged: (v) => setState(() => _options = _options.copyWith(fps: v)),
-              ),
-              const SizedBox(width: 18),
-              // Звук: при захвате экрана уходит весь звук системы, при захвате
-              // окна — только звук этого приложения.
+            padding: const EdgeInsets.fromLTRB(32, 22, 32, 6),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Expanded(
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(VellinRadius.sm),
-                  onTap: () => setState(() => _options = _options.copyWith(withAudio: !_options.withAudio)),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
-                    child: Row(children: [
-                      Checkbox(
-                        value: _options.withAudio,
-                        onChanged: (v) =>
-                            setState(() => _options = _options.copyWith(withAudio: v ?? false)),
-                        activeColor: VellinColors.accent,
-                      ),
-                      Flexible(
-                        child: Text(
-                          _tab == ScreenShareKind.window
-                              ? 'Транслировать звук приложения'
-                              : 'Транслировать звук системы',
-                          style: const TextStyle(color: VellinColors.text1, fontSize: 13.5),
-                        ),
-                      ),
-                    ]),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const CallSectionLabel('Разрешение'),
+                  const SizedBox(height: 10),
+                  CallSegmented<ScreenResolution>(
+                    value: _options.resolution,
+                    items: ScreenResolution.values.map((r) => (value: r, label: r.label)).toList(),
+                    onChanged: (v) => setState(() => _options = _options.copyWith(resolution: v)),
                   ),
-                ),
+                ]),
               ),
-              const SizedBox(width: 14),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: VellinColors.accent,
-                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-                ),
-                onPressed: selected == null
+              const SizedBox(width: 26),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const CallSectionLabel('Частота кадров'),
+                  const SizedBox(height: 10),
+                  CallSegmented<int>(
+                    value: _options.fps,
+                    items: const [(value: 15, label: '15'), (value: 30, label: '30'), (value: 60, label: '60')],
+                    onChanged: (v) => setState(() => _options = _options.copyWith(fps: v)),
+                  ),
+                ]),
+              ),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(32, 18, 32, 4),
+            child: Column(children: [
+              _SettingRow(
+                title: selected?.kind == ScreenShareKind.window
+                    ? 'Передавать звук приложения'
+                    : 'Передавать звук системы',
+                hint: selected?.kind == ScreenShareKind.window
+                    ? 'Собеседник услышит только это окно'
+                    : 'Собеседник услышит звук фильма',
+                value: _options.withAudio,
+                onChanged: (v) => setState(() => _options = _options.copyWith(withAudio: v)),
+              ),
+              _SettingRow(
+                title: 'Показывать превью демонстрации',
+                hint: 'Небольшое окно поверх звонка',
+                value: _showPreview,
+                onChanged: (v) => setState(() => _showPreview = v),
+              ),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(32, 20, 32, 28),
+            child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              _PillButton(label: 'Отмена', onTap: widget.onCancel),
+              const SizedBox(width: 12),
+              _PillButton(
+                label: widget.adjusting ? 'Применить' : 'Начать демонстрацию',
+                primary: true,
+                onTap: selected == null
                     ? null
-                    : () => widget.onPick((source: selected, options: _options)),
-                child: Text(widget.adjusting ? 'Применить' : 'Начать демонстрацию'),
+                    : () => widget.onPick(
+                          (source: selected, options: _options, showPreview: _showPreview),
+                        ),
               ),
             ]),
           ),
@@ -238,81 +271,153 @@ class _ScreenSharePickerState extends State<ScreenSharePicker> {
   }
 }
 
-class _Tab extends StatelessWidget {
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-  const _Tab({required this.label, required this.active, required this.onTap});
+/// Затемнение с размытием и всплывающая карточка: общий вход для модальных
+/// окон звонка.
+class _ModalScrim extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onDismiss;
+  const _ModalScrim({required this.child, required this.onDismiss});
+
+  @override
+  State<_ModalScrim> createState() => _ModalScrimState();
+}
+
+class _ModalScrimState extends State<_ModalScrim> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: CallMotion.slow,
+  )..forward();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: active ? VellinColors.bg3 : Colors.transparent,
-      borderRadius: BorderRadius.circular(VellinRadius.md),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(VellinRadius.md),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: active ? VellinColors.text0 : VellinColors.text2,
-              fontSize: 14,
-              fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        final t = CallMotion.ease.transform(_c.value);
+        return Stack(children: [
+          // Клик мимо карточки закрывает окно — обычное поведение модального.
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: widget.onDismiss,
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 8 * t, sigmaY: 8 * t),
+                child: Container(color: const Color(0x8C040404).withValues(alpha: 0.55 * t)),
+              ),
             ),
           ),
-        ),
-      ),
+          Positioned.fill(
+            child: Center(
+              child: Opacity(
+                opacity: t,
+                child: Transform.translate(
+                  offset: Offset(0, 22 * (1 - t)),
+                  child: Transform.scale(
+                    scale: 0.965 + 0.035 * t,
+                    // Нажатия по самой карточке не должны закрывать окно.
+                    child: GestureDetector(onTap: () {}, child: child),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ]);
+      },
+      child: widget.child,
     );
   }
 }
 
-class _SourceCard extends StatelessWidget {
+/// Карточка источника: миниатюра, имя и пояснение.
+class _SourceCard extends StatefulWidget {
   final ScreenShareSource source;
   final bool selected;
   final VoidCallback onTap;
   const _SourceCard({required this.source, required this.selected, required this.onTap});
 
   @override
+  State<_SourceCard> createState() => _SourceCardState();
+}
+
+class _SourceCardState extends State<_SourceCard> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
-    final thumb = source.raw.thumbnail;
-    return Material(
-      color: VellinColors.bg2,
-      borderRadius: BorderRadius.circular(VellinRadius.md),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(VellinRadius.md),
-        onTap: onTap,
-        child: Container(
+    final thumb = widget.source.raw.thumbnail;
+    final isScreen = widget.source.kind == ScreenShareKind.screen;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: CallMotion.base,
+          curve: CallMotion.ease,
+          padding: const EdgeInsets.all(11),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(VellinRadius.md),
+            borderRadius: BorderRadius.circular(18),
+            color: widget.selected
+                ? CallColors.gold.withValues(alpha: 0.07)
+                : Colors.white.withValues(alpha: _hover ? 0.05 : 0.025),
             border: Border.all(
-              color: selected ? VellinColors.accent : VellinColors.line2,
-              width: selected ? 2 : 1,
+              color: widget.selected ? CallColors.gold.withValues(alpha: 0.42) : CallColors.stroke,
             ),
+            boxShadow: widget.selected
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFFC49E66).withValues(alpha: 0.4),
+                      blurRadius: 40,
+                      spreadRadius: -12,
+                    ),
+                  ]
+                : const [],
           ),
-          padding: const EdgeInsets.all(8),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(VellinRadius.sm),
-                child: thumb != null && thumb.isNotEmpty
-                    ? Image.memory(thumb, fit: BoxFit.cover, gaplessPlayback: true)
-                    : Container(
-                        color: VellinColors.bg3,
-                        child: Icon(
-                          source.kind == ScreenShareKind.screen ? Icons.monitor : Icons.web_asset,
-                          color: VellinColors.text3,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  color: CallColors.surfaceRaised,
+                  child: thumb != null && thumb.isNotEmpty
+                      ? Image.memory(thumb, fit: BoxFit.cover, gaplessPlayback: true)
+                      : Center(
+                          child: CallIcon(
+                            isScreen ? CallGlyphs.monitor : CallGlyphs.split,
+                            size: 22,
+                            color: CallColors.textLabel,
+                          ),
                         ),
-                      ),
+                ),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 11),
             Text(
-              source.name,
+              isScreen ? widget.source.name : 'Окно · ${widget.source.name}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: VellinColors.text1, fontSize: 12.5),
+              style: TextStyle(
+                fontFamily: CallText.family,
+                fontSize: 13,
+                color: Colors.white.withValues(alpha: 0.86),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              isScreen ? 'Экран целиком' : 'Только это приложение',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontFamily: CallText.family,
+                fontSize: 11.5,
+                color: CallColors.textLabel,
+              ),
             ),
           ]),
         ),
@@ -321,64 +426,107 @@ class _SourceCard extends StatelessWidget {
   }
 }
 
-/// Выбор из нескольких значений в один ряд.
-///
-/// Не выпадающий список: его меню открывается через навигатор приложения, а
-/// слой звонка нарисован выше навигатора — меню оказывалось под ним и не
-/// нажималось. Переключатель живёт в том же слое и от навигатора не зависит.
-class _Segmented<T> extends StatelessWidget {
-  final String label;
-  final T value;
-  final List<({T value, String label})> items;
-  final ValueChanged<T> onChanged;
-  const _Segmented({
-    required this.label,
+/// Строка настройки с переключателем.
+class _SettingRow extends StatelessWidget {
+  final String title;
+  final String hint;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  const _SettingRow({
+    required this.title,
+    required this.hint,
     required this.value,
-    required this.items,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: const TextStyle(color: VellinColors.text3, fontSize: 11.5)),
-      const SizedBox(height: 4),
-      Container(
-        padding: const EdgeInsets.all(3),
-        decoration: BoxDecoration(
-          color: VellinColors.bg2,
-          borderRadius: BorderRadius.circular(VellinRadius.sm),
-          border: Border.all(color: VellinColors.line2),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final i in items)
-              Padding(
-                padding: const EdgeInsets.only(right: 3),
-                child: Material(
-                  color: i.value == value ? VellinColors.accent : Colors.transparent,
-                  borderRadius: BorderRadius.circular(VellinRadius.sm - 2),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(VellinRadius.sm - 2),
-                    onTap: () => onChanged(i.value),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-                      child: Text(
-                        i.label,
-                        style: TextStyle(
-                          color: i.value == value ? VellinColors.text0 : VellinColors.text2,
-                          fontSize: 13,
-                          fontWeight: i.value == value ? FontWeight.w600 : FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => onChanged(!value),
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, style: CallText.row.copyWith(color: Colors.white.withValues(alpha: 0.82))),
+                const SizedBox(height: 3),
+                Text(hint, style: CallText.rowHint),
+              ]),
+            ),
+            const SizedBox(width: 16),
+            CallSwitch(value: value, onChanged: onChanged),
+          ]),
         ),
       ),
-    ]);
+    );
+  }
+}
+
+/// Кнопка-пилюля внизу окна. Основная — белая с тёмной надписью.
+class _PillButton extends StatefulWidget {
+  final String label;
+  final VoidCallback? onTap;
+  final bool primary;
+  const _PillButton({required this.label, required this.onTap, this.primary = false});
+
+  @override
+  State<_PillButton> createState() => _PillButtonState();
+}
+
+class _PillButtonState extends State<_PillButton> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onTap != null;
+    return MouseRegion(
+      cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedSlide(
+          offset: Offset(0, _hover && enabled && widget.primary ? -0.05 : 0),
+          duration: CallMotion.fast,
+          curve: CallMotion.ease,
+          child: AnimatedContainer(
+            duration: CallMotion.fast,
+            curve: CallMotion.ease,
+            padding: EdgeInsets.symmetric(horizontal: widget.primary ? 30 : 26, vertical: 13),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              color: widget.primary
+                  ? (enabled ? Colors.white : Colors.white.withValues(alpha: 0.25))
+                  : (_hover ? Colors.white.withValues(alpha: 0.07) : Colors.transparent),
+              border: widget.primary ? null : Border.all(color: CallColors.strokeSoft),
+              boxShadow: widget.primary && enabled
+                  ? [
+                      BoxShadow(
+                        color: Colors.white.withValues(alpha: _hover ? 0.45 : 0.35),
+                        blurRadius: _hover ? 50 : 40,
+                        offset: const Offset(0, 16),
+                        spreadRadius: -14,
+                      ),
+                    ]
+                  : const [],
+            ),
+            child: Text(
+              widget.label,
+              style: TextStyle(
+                fontFamily: CallText.family,
+                fontSize: 13.5,
+                fontWeight: widget.primary ? FontWeight.w600 : FontWeight.w400,
+                color: widget.primary
+                    ? const Color(0xFF141210)
+                    : (_hover ? Colors.white : Colors.white.withValues(alpha: 0.72)),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

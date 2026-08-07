@@ -16,6 +16,21 @@ import '../webrtc/screen_share.dart';
 /// Как показан звонок в окне.
 enum CallUiMode { hidden, minimized, expanded }
 
+/// Состояние связи — им подписана пилюля вверху экрана разговора.
+enum CallNetState {
+  /// Соединение ещё поднимается.
+  connecting,
+
+  /// Всё в порядке.
+  good,
+
+  /// Пакеты теряются, картинка и звук могут подрагивать.
+  weak,
+
+  /// Связь оборвалась, идёт восстановление.
+  lost,
+}
+
 /// Звонки один на один в личных сообщениях.
 ///
 /// Состояние принадлежит серверу: контроллер отражает присланные снапшоты и
@@ -126,6 +141,105 @@ class CallController extends ChangeNotifier {
   /// состояния, а картинка своего же экрана только отвлекает.
   bool showMyScreenPreview = false;
 
+  // ── Кто говорит и как со связью ───────────────────────────────────────────
+
+  /// Опрос звука и сети. Один таймер на оба: статистика соединения читается за
+  /// один проход.
+  Timer? _statsTimer;
+
+  /// Момент, когда голос в последний раз был громче порога. Нужен для
+  /// гистерезиса: кольцо загорается сразу, а гаснет с задержкой, иначе оно
+  /// мигало бы между словами.
+  DateTime? _myVoiceAt;
+  DateTime? _peerVoiceAt;
+
+  bool _iSpeak = false;
+  bool _peerSpeaks = false;
+
+  /// Живо ли соединение по данным самого WebRTC.
+  bool _linkAlive = true;
+
+  /// Счётчики приёма прошлого замера — по их приросту видно, теряются ли пакеты.
+  int _lastLost = 0;
+  int _lastReceived = 0;
+  CallNetState _net = CallNetState.connecting;
+
+  /// Говорю ли я. Выключенный микрофон гасит кольцо сразу: беззвучный голос
+  /// показывать нечестно.
+  bool get iAmSpeaking => _iSpeak && micEnabled;
+  bool get peerSpeaking => _peerSpeaks;
+
+  /// Состояние связи для пилюли вверху экрана.
+  CallNetState get netState {
+    final c = call;
+    if (c == null || c.isRinging || _session == null) return CallNetState.connecting;
+    return _net;
+  }
+
+  /// Порог голоса. Ниже — фон комнаты и дыхание, выше — речь.
+  static const _voiceThreshold = 0.02;
+
+  /// Сколько держать кольцо после того, как голос стих.
+  static const _voiceHold = Duration(milliseconds: 400);
+
+  void _startStatsPolling() {
+    _statsTimer?.cancel();
+    _lastLost = 0;
+    _lastReceived = 0;
+    _net = CallNetState.connecting;
+    _statsTimer = Timer.periodic(const Duration(milliseconds: 200), (_) => _pollStats());
+  }
+
+  void _stopStatsPolling() {
+    _statsTimer?.cancel();
+    _statsTimer = null;
+    _iSpeak = false;
+    _peerSpeaks = false;
+    _myVoiceAt = null;
+    _peerVoiceAt = null;
+    _linkAlive = true;
+    _net = CallNetState.connecting;
+  }
+
+  Future<void> _pollStats() async {
+    final s = _session;
+    if (s == null) return;
+    final stats = await s.audioStats();
+    final now = DateTime.now();
+
+    bool voice(double? level, DateTime? since, void Function(DateTime) remember) {
+      if (level != null && level >= _voiceThreshold) {
+        remember(now);
+        return true;
+      }
+      return since != null && now.difference(since) < _voiceHold;
+    }
+
+    final iSpeak = voice(stats.mine, _myVoiceAt, (t) => _myVoiceAt = t);
+    final peerSpeaks = voice(stats.peer, _peerVoiceAt, (t) => _peerVoiceAt = t);
+
+    // Доля потерь за последний замер. Считаем по приросту, а не по общей сумме:
+    // общая копится с начала разговора и после одной помехи так и остаётся
+    // высокой, хотя связь давно наладилась.
+    final lostDelta = stats.lost - _lastLost;
+    final receivedDelta = stats.received - _lastReceived;
+    _lastLost = stats.lost;
+    _lastReceived = stats.received;
+    final total = lostDelta + receivedDelta;
+    final weak = total > 0 && lostDelta / total > 0.03;
+
+    final net = !_linkAlive
+        ? CallNetState.lost
+        : (weak ? CallNetState.weak : CallNetState.good);
+
+    if (iSpeak != _iSpeak || peerSpeaks != _peerSpeaks || net != _net) {
+      _iSpeak = iSpeak;
+      _peerSpeaks = peerSpeaks;
+      _net = net;
+      notifyListeners();
+    }
+  }
+
   bool get hasRemoteVideo => remoteRenderer.srcObject != null && (call?.media[peerId]?.video ?? false);
 
   /// Собеседник демонстрирует экран, и его картинка уже дошла.
@@ -196,6 +310,7 @@ class CallController extends ChangeNotifier {
   void dispose() {
     _sub?.cancel();
     _settingsSub?.cancel();
+    _statsTimer?.cancel();
     CallTones.instance.stop();
     _session?.dispose();
     localRenderer.dispose();
@@ -423,6 +538,10 @@ class CallController extends ChangeNotifier {
         _socket.send({'t': 'dmcall_connected', 'callId': snapshot.callId});
         _applyChosenAudioDevices();
       },
+      onLinkChanged: (alive) {
+        _linkAlive = alive;
+        notifyListeners();
+      },
       onRemoteStream: (stream, mid) {
         // Потоков от собеседника может быть два — камера и демонстрация.
         // Копим их вместе с приметами, а кто из них кто, решает раскладка.
@@ -440,6 +559,7 @@ class CallController extends ChangeNotifier {
     try {
       await session.start(withVideo: snapshot.video);
       localRenderer.srcObject = session.localStream;
+      _startStatsPolling();
       notifyListeners();
     } catch (e) {
       error = 'Нет доступа к микрофону';
@@ -452,6 +572,7 @@ class CallController extends ChangeNotifier {
   Future<void> _teardownSession() async {
     final s = _session;
     _session = null;
+    _stopStatsPolling();
     final share = screenShare;
     screenShare = null;
     if (share != null) {

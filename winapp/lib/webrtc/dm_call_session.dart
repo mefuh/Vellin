@@ -32,6 +32,10 @@ class DmCallSession {
   /// запоминаются: их меняют посреди разговора.
   final CallSettings settings;
 
+  /// Связь оборвалась или восстановилась. Экран разговора показывает это
+  /// пилюлей состояния, поэтому событие нужно наружу, а не только внутри.
+  final void Function(bool alive)? onLinkChanged;
+
   DmCallSession({
     required this.myUserId,
     required this.peerUserId,
@@ -40,6 +44,7 @@ class DmCallSession {
     required this.settings,
     this.onConnected,
     this.onRemoteStream,
+    this.onLinkChanged,
   });
 
   RTCPeerConnection? _pc;
@@ -75,6 +80,16 @@ class DmCallSession {
   /// Вежливая сторона уступает при столкновении предложений. Правило то же,
   /// что в вебе, иначе стороны разойдутся в решении.
   bool get _polite => myUserId.compareTo(peerUserId) < 0;
+
+  /// Последнее сообщённое состояние связи — чтобы не дёргать экран пилюлей на
+  /// каждое повторяющееся событие.
+  bool? _linkAlive;
+
+  void _reportLink(bool alive) {
+    if (_closed || _linkAlive == alive) return;
+    _linkAlive = alive;
+    onLinkChanged?.call(alive);
+  }
 
   /// Сообщить о состоявшемся соединении ровно один раз.
   void _reportConnected() {
@@ -121,14 +136,24 @@ class DmCallSession {
       if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
         _reportConnected();
+        _reportLink(true);
+      }
+      if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        _reportLink(false);
       }
     };
 
     pc.onConnectionState = (state) {
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _reportConnected();
+        _reportLink(true);
+      }
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+        _reportLink(false);
       }
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+        _reportLink(false);
         pc.restartIce();
       }
     };
@@ -346,20 +371,53 @@ class DmCallSession {
 
   /// Текущий уровень своего микрофона, 0..1 — для проверки звука прямо в
   /// разговоре, где второй раз открыть устройство нельзя.
-  Future<double?> micLevel() async {
+  Future<double?> micLevel() async => (await audioStats()).mine;
+
+  /// Один срез статистики: уровни голоса с обеих сторон и счётчики приёма.
+  ///
+  /// Всё берётся за один проход: и кольцо говорящего, и оценка сети опрашивают
+  /// соединение по нескольку раз в секунду, и два отдельных запроса стоили бы
+  /// вдвое дороже на ровном месте.
+  Future<({double? mine, double? peer, int lost, int received})> audioStats() async {
     final pc = _pc;
-    if (pc == null || _closed) return null;
+    if (pc == null || _closed) return (mine: null, peer: null, lost: 0, received: 0);
+    double? mine;
+    double? peer;
+    var lost = 0;
+    var received = 0;
     try {
       for (final report in await pc.getStats()) {
-        if (report.type != 'media-source') continue;
-        if (report.values['kind'] != 'audio') continue;
-        final level = report.values['audioLevel'];
-        if (level is num) return level.toDouble().clamp(0.0, 1.0);
+        final values = report.values;
+        final level = values['audioLevel'];
+        switch (report.type) {
+          case 'media-source':
+            if (values['kind'] == 'audio' && level is num) {
+              mine = level.toDouble().clamp(0.0, 1.0);
+            }
+          case 'inbound-rtp':
+            if (values['kind'] == 'audio' && level is num) {
+              // Дорожек может быть две (голос и звук демонстрации) — говорящим
+              // считаем по самой громкой.
+              final v = level.toDouble().clamp(0.0, 1.0);
+              if (peer == null || v > peer) peer = v;
+            }
+            final l = values['packetsLost'];
+            final r = values['packetsReceived'];
+            if (l is num) lost += l.toInt();
+            if (r is num) received += r.toInt();
+          case 'track':
+            // Старая раскладка статистики: уровень принятой дорожки лежит здесь.
+            if (values['remoteSource'] == true && level is num) {
+              final v = level.toDouble().clamp(0.0, 1.0);
+              if (peer == null || v > peer) peer = v;
+            }
+        }
       }
     } catch (_) {
-      // Статистика недоступна — покажем шкалу пустой.
+      // Статистика недоступна — пусть шкала будет пустой, а сеть считается
+      // нормальной: пугать пользователя нечем.
     }
-    return null;
+    return (mine: mine, peer: peer, lost: lost, received: received);
   }
 
   /// Приметы идущей демонстрации: номер линии и идентификатор потока.

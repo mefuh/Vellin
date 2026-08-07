@@ -27,6 +27,7 @@ import 'runtime/toast_window.dart';
 import 'runtime/updater_splash.dart';
 import 'widgets/call_overlay.dart';
 import 'widgets/notifications_bell.dart';
+// Заголовок окна и его высота: экран звонка отступает на неё сверху.
 import 'widgets/window_title_bar.dart';
 
 /// Размеры основного окна приложения.
@@ -229,21 +230,24 @@ class _VellinAppState extends State<VellinApp> {
         debugShowCheckedModeBanner: false,
         theme: buildVellinTheme(),
         routerConfig: _router,
-        // Свой заголовок окна поверх всех экранов (нативный скрыт), а над ним —
-        // слой панели уведомлений: она выпадает из колокольчика в заголовке и
-        // должна перекрывать содержимое любого экрана.
+        // Порядок слоёв важен. Снизу — содержимое раздела, над ним экраны
+        // звонка (разговор переживает переходы по разделам), затем свой
+        // заголовок окна: он должен оставаться нажимаемым и во время звонка,
+        // иначе окно не свернуть и не закрыть. Сверху всего — панель
+        // уведомлений: она выпадает из колокольчика в заголовке.
         builder: (context, child) => Stack(children: [
           Column(children: [
-            const WindowTitleBar(),
+            // Место под заголовок: сам он нарисован выше по стопке.
+            const SizedBox(height: kWindowTitleBarHeight),
             // Свёрнутый звонок — полоса под заголовком, над содержимым раздела.
             const CallBarSlot(),
             Expanded(child: child ?? const SizedBox.shrink()),
           ]),
-          const NotificationsPanelOverlay(),
-          // Экраны звонка выше роутера: разговор переживает переходы по
-          // разделам. Positioned.fill обязателен: вложенный Stack без него
-          // схлопнулся бы по содержимому и рисовал экраны не на месте.
+          // Positioned.fill обязателен: вложенный Stack без него схлопнулся бы
+          // по содержимому и рисовал экраны не на месте.
           const Positioned.fill(child: CallLayer()),
+          const Positioned(top: 0, left: 0, right: 0, child: WindowTitleBar()),
+          const NotificationsPanelOverlay(),
         ]),
       );
     }

@@ -3,6 +3,10 @@ import 'package:window_manager/window_manager.dart';
 import '../theme/vellin_theme.dart';
 import 'notifications_bell.dart';
 
+/// Высота заголовка окна. Экран звонка отступает на неё сверху: заголовок
+/// рисуется поверх разговора, и без отступа под ним оказывались бы плашки.
+const double kWindowTitleBarHeight = 36;
+
 /// Собственный заголовок окна (нативный скрыт): бренд слева, перетаскивание за
 /// пустую область, свои кнопки свернуть/развернуть/закрыть — как в Discord/VS
 /// Code. Ставится сверху всего приложения через `MaterialApp.router builder`.
@@ -48,7 +52,7 @@ class _WindowTitleBarState extends State<WindowTitleBar> with WindowListener {
     return Material(
       color: VellinColors.bg0,
       child: SizedBox(
-        height: 36,
+        height: kWindowTitleBarHeight,
         child: Row(children: [
           // Перетаскивание окна за пустую область + бренд слева.
           Expanded(

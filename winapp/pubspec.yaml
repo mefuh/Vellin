@@ -112,6 +112,25 @@ flutter:
   assets:
     - assets/vellin_icon.png
 
+  # Manrope — гарнитура экрана звонка (спецификация дизайна звонков). Лежит в
+  # репозитории, а не тянется из сети: клиент должен рисоваться одинаково и без
+  # интернета. Начертания 200–700 — все, что использует макет.
+  fonts:
+    - family: Manrope
+      fonts:
+        - asset: assets/fonts/Manrope-ExtraLight.ttf
+          weight: 200
+        - asset: assets/fonts/Manrope-Light.ttf
+          weight: 300
+        - asset: assets/fonts/Manrope-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Manrope-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Manrope-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Manrope-Bold.ttf
+          weight: 700
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

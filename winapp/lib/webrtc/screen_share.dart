@@ -8,34 +8,54 @@ enum ScreenShareKind { screen, window }
 
 /// Разрешение картинки. Ограничение задаётся и захвату, и отправителю: без
 /// потолка Full HD 60 забивает канал, и первым начинает рваться звук.
-enum ScreenResolution { low, medium, high }
+///
+/// `auto` — как есть у источника: потолок разрешения не задаётся, ограничен
+/// только битрейт. Так демонстрация не мылится на мониторе с непривычными
+/// пропорциями, где подгон под 16:9 портит картинку.
+enum ScreenResolution { auto, p720, p1080, p1440, p2160 }
 
 extension ScreenResolutionInfo on ScreenResolution {
-  int get width => switch (this) {
-        ScreenResolution.low => 854,
-        ScreenResolution.medium => 1280,
-        ScreenResolution.high => 1920,
+  /// null — потолок не задаём.
+  int? get width => switch (this) {
+        ScreenResolution.auto => null,
+        ScreenResolution.p720 => 1280,
+        ScreenResolution.p1080 => 1920,
+        ScreenResolution.p1440 => 2560,
+        ScreenResolution.p2160 => 3840,
       };
 
-  int get height => switch (this) {
-        ScreenResolution.low => 480,
-        ScreenResolution.medium => 720,
-        ScreenResolution.high => 1080,
+  int? get height => switch (this) {
+        ScreenResolution.auto => null,
+        ScreenResolution.p720 => 720,
+        ScreenResolution.p1080 => 1080,
+        ScreenResolution.p1440 => 1440,
+        ScreenResolution.p2160 => 2160,
       };
 
   String get label => switch (this) {
-        ScreenResolution.low => '480p',
-        ScreenResolution.medium => '720p',
-        ScreenResolution.high => '1080p',
+        ScreenResolution.auto => 'Авто',
+        ScreenResolution.p720 => '720p',
+        ScreenResolution.p1080 => '1080p',
+        ScreenResolution.p1440 => '1440p',
+        ScreenResolution.p2160 => '4K',
       };
 
   /// Потолок битрейта, бит/с. Чем крупнее картинка и чаще кадры, тем больше
   /// нужно, но выше этих значений выигрыш уже незаметен, а канал страдает.
-  int maxBitrate(int fps) => switch (this) {
-        ScreenResolution.low => fps >= 60 ? 2000000 : 1500000,
-        ScreenResolution.medium => fps >= 60 ? 4000000 : 3000000,
-        ScreenResolution.high => fps >= 60 ? 8000000 : 6000000,
-      };
+  /// «Авто» считаем за 1080p: обычно это он и есть.
+  int maxBitrate(int fps) {
+    final base = switch (this) {
+      ScreenResolution.p720 => 3000000,
+      ScreenResolution.auto || ScreenResolution.p1080 => 6000000,
+      ScreenResolution.p1440 => 10000000,
+      ScreenResolution.p2160 => 16000000,
+    };
+    return switch (fps) {
+      <= 15 => (base * 0.6).round(),
+      >= 60 => (base * 1.35).round(),
+      _ => base,
+    };
+  }
 }
 
 /// Настройки, с которыми пользователь запускает демонстрацию.
@@ -45,7 +65,7 @@ class ScreenShareOptions {
   final bool withAudio;
 
   const ScreenShareOptions({
-    this.resolution = ScreenResolution.medium,
+    this.resolution = ScreenResolution.p1080,
     this.fps = 30,
     this.withAudio = true,
   });
@@ -61,18 +81,21 @@ class ScreenShareOptions {
 /// Запомненные между запусками настройки демонстрации: человек выбирает
 /// качество один раз, а потом просто нажимает кнопку.
 class ScreenShareSettings {
-  static const _kResolution = 'vellin_screen_resolution';
+  /// Разрешение храним именем, а не номером в перечислении: набор пресетов
+  /// пополнился, и старые номера означали бы уже не то, что при записи.
+  static const _kResolution = 'vellin_screen_resolution_name';
   static const _kFps = 'vellin_screen_fps';
   static const _kAudio = 'vellin_screen_audio';
 
   static Future<ScreenShareOptions> load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final res = prefs.getInt(_kResolution);
+      final name = prefs.getString(_kResolution);
       return ScreenShareOptions(
-        resolution: res != null && res >= 0 && res < ScreenResolution.values.length
-            ? ScreenResolution.values[res]
-            : ScreenResolution.medium,
+        resolution: ScreenResolution.values.firstWhere(
+          (r) => r.name == name,
+          orElse: () => ScreenResolution.p1080,
+        ),
         fps: prefs.getInt(_kFps) ?? 30,
         withAudio: prefs.getBool(_kAudio) ?? true,
       );
@@ -84,7 +107,7 @@ class ScreenShareSettings {
   static Future<void> save(ScreenShareOptions o) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_kResolution, o.resolution.index);
+      await prefs.setString(_kResolution, o.resolution.name);
       await prefs.setInt(_kFps, o.fps);
       await prefs.setBool(_kAudio, o.withAudio);
     } catch (_) {
@@ -172,14 +195,17 @@ class ScreenShare {
     required ScreenShareOptions options,
   }) async {
     Future<MediaStream> capture({required bool withAudio}) {
+      final width = options.resolution.width;
+      final height = options.resolution.height;
       return navigator.mediaDevices.getDisplayMedia({
         if (withAudio) 'audio': {'deviceId': source.id},
         'video': {
           'deviceId': {'exact': source.id},
           'mandatory': {
             'frameRate': options.fps.toDouble(),
-            'maxWidth': options.resolution.width,
-            'maxHeight': options.resolution.height,
+            // «Авто» потолка не задаёт: картинка идёт как есть у источника.
+            'maxWidth': ?width,
+            'maxHeight': ?height,
           },
         },
       });
