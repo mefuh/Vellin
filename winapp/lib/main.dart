@@ -59,8 +59,8 @@ Future<void> main(List<String> args) async {
   final auth = AuthController(client, authApi, SessionStore());
   final update = UpdateController(client);
 
-  // Устройства и обработка звука для звонков. Читаются заранее: выбранный
-  // динамик нужен ещё до первого звонка — на нём играет рингтон.
+  // Камера, обработка звука и громкости собеседников. Читаются заранее: они
+  // нужны с первого же звонка, а он может прийти сразу после запуска.
   final callSettings = CallSettings();
   callSettings.load();
 

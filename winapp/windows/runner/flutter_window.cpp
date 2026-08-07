@@ -3,6 +3,7 @@
 #include <dwmapi.h>
 #include <optional>
 
+#include "audio_devices.h"
 #include "flutter/generated_plugin_registrant.h"
 
 #ifndef DWMWA_BORDER_COLOR
@@ -49,6 +50,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  RegisterAudioDeviceChannel(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   // Окно показывает window_manager (waitUntilReadyToShow) уже настроенным —

@@ -43,18 +43,14 @@ class CallController extends ChangeNotifier {
     final s = _session;
     if (s == null) return;
     switch (change) {
-      // Устройство захвата и обработка звука живут в источнике: и то, и другое
-      // меняется только перезахватом дорожки.
-      case CallSettingsChange.audioInput:
+      // Обработка звука живёт в источнике: поменять её у работающей дорожки
+      // нельзя, нужен перезахват.
       case CallSettingsChange.processing:
         await s.applyAudioInput();
       case CallSettingsChange.videoInput:
         await s.applyVideoInput();
         localRenderer.srcObject = s.localStream;
         notifyListeners();
-      case CallSettingsChange.audioOutput:
-        // Динамик переключает сам движок, пересобирать нечего.
-        break;
       case CallSettingsChange.volume:
         _applyPeerVolume();
     }

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:record/record.dart';
 
 import '../runtime/media_gate.dart';
-import 'call_settings.dart';
 
 /// Проверка микрофона: живая шкала уровня, по которой видно, что устройство
 /// выбрано верно и голос до него доходит.
@@ -17,10 +16,7 @@ class MicTest {
   /// статистика недоступна.
   final Future<double?> Function()? fromCall;
 
-  /// Какой микрофон слушать вне разговора.
-  final String? micId;
-
-  MicTest({this.fromCall, this.micId});
+  MicTest({this.fromCall});
 
   final _levels = StreamController<double>.broadcast();
   AudioRecorder? _recorder;
@@ -57,12 +53,10 @@ class MicTest {
     try {
       final recorder = AudioRecorder();
       _recorder = recorder;
-      // Устройство ищем по названию: у `record` свои идентификаторы, они не
-      // совпадают с теми, которыми устройства зовёт WebRTC. Не нашли — слушаем
-      // системный микрофон по умолчанию.
-      final device = await _matchDevice(recorder);
+      // Устройство не задаём: звонок всё равно идёт через микрофон связи,
+      // выбранный в Windows, — проверять надо именно его.
       final stream = await recorder.startStream(
-        RecordConfig(encoder: AudioEncoder.pcm16bits, device: device),
+        const RecordConfig(encoder: AudioEncoder.pcm16bits),
       );
       // Сами отсчёты не нужны — важен только уровень, — но поток надо забирать,
       // иначе запись встанет.
@@ -75,25 +69,6 @@ class MicTest {
       await stop();
       return false;
     }
-  }
-
-  Future<InputDevice?> _matchDevice(AudioRecorder recorder) async {
-    final id = micId;
-    if (id == null) return null;
-    try {
-      String? wanted;
-      for (final m in (await CallSettings.devices()).mics) {
-        if (m.id == id) wanted = m.label;
-      }
-      if (wanted == null) return null;
-      final devices = await recorder.listInputDevices();
-      for (final d in devices) {
-        if (d.label.trim() == wanted.trim()) return d;
-      }
-    } catch (_) {
-      // Списка нет — сойдёт устройство по умолчанию.
-    }
-    return null;
   }
 
   /// Из децибел в долю шкалы. Тишина у `record` — около −45 дБ, крик — 0.
