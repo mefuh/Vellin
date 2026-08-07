@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import 'call_settings.dart';
+
 /// Одно соединение звонка один на один.
 ///
 /// Переносит на Flutter ту же схему, что в вебе: «вежливая» сторона (по
@@ -26,11 +28,16 @@ class DmCallSession {
   /// принимающая сторона решает, что из них что.
   final void Function(MediaStream stream, String? mid)? onRemoteStream;
 
+  /// Устройства и обработка звука. Настройки читаются при каждом захвате, а не
+  /// запоминаются: их меняют посреди разговора.
+  final CallSettings settings;
+
   DmCallSession({
     required this.myUserId,
     required this.peerUserId,
     required this.rtcConfig,
     required this.sendSignal,
+    required this.settings,
     this.onConnected,
     this.onRemoteStream,
   });
@@ -38,6 +45,7 @@ class DmCallSession {
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
   RTCRtpSender? _videoSender;
+  RTCRtpSender? _audioSender;
 
   /// Отправители демонстрации экрана и линия, по которой она идёт: её номер
   /// нужен собеседнику, чтобы отличить демонстрацию от камеры.
@@ -80,18 +88,8 @@ class DmCallSession {
   /// Захватить микрофон (и камеру, если [withVideo]) и поднять соединение.
   Future<void> start({required bool withVideo}) async {
     _localStream = await navigator.mediaDevices.getUserMedia({
-      'audio': {
-        'echoCancellation': true,
-        'noiseSuppression': true,
-        'autoGainControl': true,
-      },
-      'video': withVideo
-          ? {
-              'width': {'ideal': 640},
-              'height': {'ideal': 360},
-              'frameRate': {'ideal': 24},
-            }
-          : false,
+      'audio': settings.audioConstraints(),
+      'video': withVideo ? settings.videoConstraints() : false,
     });
 
     final pc = await createPeerConnection(rtcConfig);
@@ -139,7 +137,7 @@ class DmCallSession {
 
     // Аудио отправляем сразу; видео добавится при включении камеры.
     for (final track in _localStream!.getAudioTracks()) {
-      await pc.addTrack(track, _localStream!);
+      _audioSender = await pc.addTrack(track, _localStream!);
     }
     final videoTrack = _localStream!.getVideoTracks().isNotEmpty
         ? _localStream!.getVideoTracks().first
@@ -262,11 +260,7 @@ class DmCallSession {
 
     final camStream = await navigator.mediaDevices.getUserMedia({
       'audio': false,
-      'video': {
-        'width': {'ideal': 640},
-        'height': {'ideal': 360},
-        'frameRate': {'ideal': 24},
-      },
+      'video': settings.videoConstraints(),
     });
     final track = camStream.getVideoTracks().first;
     await stream.addTrack(track);
@@ -283,6 +277,89 @@ class DmCallSession {
     } else {
       await sender.replaceTrack(track);
     }
+  }
+
+  /// Перезахватить микрофон по текущим настройкам: другое устройство или
+  /// другая обработка звука.
+  ///
+  /// И то, и другое живёт в источнике звука, поменять их у работающей дорожки
+  /// нельзя — берётся новая и подменяется в уже согласованной линии, поэтому
+  /// разговор не прерывается.
+  Future<void> applyAudioInput() async {
+    final stream = _localStream;
+    final sender = _audioSender;
+    if (stream == null || sender == null || _closed) return;
+
+    final wasEnabled = micEnabled;
+    MediaStream fresh;
+    try {
+      fresh = await navigator.mediaDevices.getUserMedia({
+        'audio': settings.audioConstraints(),
+        'video': false,
+      });
+    } catch (_) {
+      // Устройство занято или исчезло — остаёмся на прежнем микрофоне.
+      return;
+    }
+    final track = fresh.getAudioTracks().isNotEmpty ? fresh.getAudioTracks().first : null;
+    if (track == null) {
+      await fresh.dispose();
+      return;
+    }
+
+    // Выключенный микрофон должен остаться выключенным: смена устройства не
+    // повод заговорить.
+    track.enabled = wasEnabled;
+    try {
+      await sender.replaceTrack(track);
+    } catch (_) {
+      await fresh.dispose();
+      return;
+    }
+
+    for (final old in stream.getAudioTracks()) {
+      try {
+        await stream.removeTrack(old);
+      } catch (_) {
+        // Дорожка всё равно больше не отправляется.
+      }
+      try {
+        await old.stop();
+      } catch (_) {
+        // Прежнее устройство освободится само.
+      }
+    }
+    try {
+      await stream.addTrack(track);
+    } catch (_) {
+      // В локальном потоке дорожка нужна только для учёта — отправка уже идёт.
+    }
+  }
+
+  /// Перезахватить камеру по текущим настройкам. Если камера выключена, делать
+  /// нечего: новое устройство возьмётся при следующем включении.
+  Future<void> applyVideoInput() async {
+    if (_closed || !videoEnabled) return;
+    await setCameraEnabled(false);
+    await setCameraEnabled(true);
+  }
+
+  /// Текущий уровень своего микрофона, 0..1 — для проверки звука прямо в
+  /// разговоре, где второй раз открыть устройство нельзя.
+  Future<double?> micLevel() async {
+    final pc = _pc;
+    if (pc == null || _closed) return null;
+    try {
+      for (final report in await pc.getStats()) {
+        if (report.type != 'media-source') continue;
+        if (report.values['kind'] != 'audio') continue;
+        final level = report.values['audioLevel'];
+        if (level is num) return level.toDouble().clamp(0.0, 1.0);
+      }
+    } catch (_) {
+      // Статистика недоступна — покажем шкалу пустой.
+    }
+    return null;
   }
 
   /// Приметы идущей демонстрации: номер линии и идентификатор потока.

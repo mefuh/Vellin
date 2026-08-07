@@ -9,6 +9,7 @@ import '../realtime/user_socket.dart';
 import '../runtime/call_tones.dart';
 import '../runtime/media_gate.dart';
 import '../runtime/toast_host.dart';
+import '../webrtc/call_settings.dart';
 import '../webrtc/dm_call_session.dart';
 import '../webrtc/screen_share.dart';
 
@@ -27,9 +28,41 @@ class CallController extends ChangeNotifier {
   /// окно свёрнуто или перекрыто.
   final ToastHost _toasts;
 
-  CallController(this._socket, this._toasts) {
+  /// Устройства, обработка звука и громкость собеседников.
+  final CallSettings settings;
+
+  StreamSubscription<CallSettingsChange>? _settingsSub;
+
+  CallController(this._socket, this._toasts, this.settings) {
     _toasts.onCallAction = _onToastAction;
+    // Настройки меняют посреди разговора — применяем их на ходу.
+    _settingsSub = settings.changes.listen(_onSettingsChanged);
   }
+
+  Future<void> _onSettingsChanged(CallSettingsChange change) async {
+    final s = _session;
+    if (s == null) return;
+    switch (change) {
+      // Устройство захвата и обработка звука живут в источнике: и то, и другое
+      // меняется только перезахватом дорожки.
+      case CallSettingsChange.audioInput:
+      case CallSettingsChange.processing:
+        await s.applyAudioInput();
+      case CallSettingsChange.videoInput:
+        await s.applyVideoInput();
+        localRenderer.srcObject = s.localStream;
+        notifyListeners();
+      case CallSettingsChange.audioOutput:
+        // Динамик переключает сам движок, пересобирать нечего.
+        break;
+      case CallSettingsChange.volume:
+        _applyPeerVolume();
+    }
+  }
+
+  /// Уровень своего микрофона во время разговора — для проверки звука, когда
+  /// открыть устройство второй раз нельзя.
+  Future<double?> micLevel() => _session?.micLevel() ?? Future.value(null);
 
   /// Идентификатор звонка, показанного тостом, — его нужно будет снять.
   String? _toastCallId;
@@ -146,6 +179,7 @@ class CallController extends ChangeNotifier {
   @override
   void dispose() {
     _sub?.cancel();
+    _settingsSub?.cancel();
     CallTones.instance.stop();
     _session?.dispose();
     localRenderer.dispose();
@@ -366,6 +400,7 @@ class CallController extends ChangeNotifier {
       myUserId: _myUserId,
       peerUserId: snapshot.peerIdFor(_myUserId),
       rtcConfig: config,
+      settings: settings,
       sendSignal: (payload) =>
           _socket.send({'t': 'dmcall_signal', 'callId': snapshot.callId, 'payload': payload}),
       onConnected: () => _socket.send({'t': 'dmcall_connected', 'callId': snapshot.callId}),
@@ -434,6 +469,22 @@ class CallController extends ChangeNotifier {
     remoteRenderer.srcObject = camera;
     remoteScreenRenderer.srcObject = null;
     remoteScreenRenderer.srcObject = screen;
+    _applyPeerVolume();
+  }
+
+  /// Задать громкость всему, что слышно от собеседника: и голосу, и звуку его
+  /// демонстрации. Громкость держится на дорожке, поэтому её нужно повторять
+  /// каждый раз, когда дорожка появилась заново.
+  void _applyPeerVolume() {
+    final id = peerId;
+    if (id.isEmpty) return;
+    final volume = settings.volumeFor(id);
+    for (final e in _inbound) {
+      for (final track in e.stream.getAudioTracks()) {
+        // Устройство могло уже отвалиться — тогда громкость просто не ляжет.
+        Helper.setVolume(volume, track).catchError((_) {});
+      }
+    }
   }
 
   // ── Действия пользователя ─────────────────────────────────────────────────

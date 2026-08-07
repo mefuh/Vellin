@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../models/social.dart';
 import '../state/call_controller.dart';
 import '../theme/vellin_theme.dart';
+import 'call_settings_panel.dart';
 import 'common.dart';
 import 'screen_share_picker.dart';
 
@@ -165,6 +166,9 @@ class _CallScreenState extends State<_CallScreen> {
   /// Выбор открыт для настройки уже идущей демонстрации, а не для запуска.
   bool _adjusting = false;
 
+  /// Открыты настройки звонка.
+  bool _settingsOpen = false;
+
   @override
   void initState() {
     super.initState();
@@ -285,6 +289,13 @@ class _CallScreenState extends State<_CallScreen> {
                 ),
                 const SizedBox(width: 14),
                 _RoundButton(
+                  icon: Icons.tune,
+                  color: VellinColors.bg3,
+                  tooltip: 'Настройки звонка',
+                  onTap: () => setState(() => _settingsOpen = true),
+                ),
+                const SizedBox(width: 14),
+                _RoundButton(
                   icon: Icons.call_end,
                   color: VellinColors.accent,
                   tooltip: 'Завершить',
@@ -374,6 +385,67 @@ class _CallScreenState extends State<_CallScreen> {
                 },
               ),
             ),
+
+          // Настройки звонка — тоже в этом слое и по той же причине.
+          if (_settingsOpen)
+            Positioned.fill(
+              child: _CallSettingsSheet(
+                peerId: call.peerId,
+                peerName: peer.username,
+                onClose: () => setState(() => _settingsOpen = false),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Окно настроек звонка поверх разговора.
+class _CallSettingsSheet extends StatelessWidget {
+  final String peerId;
+  final String peerName;
+  final VoidCallback onClose;
+  const _CallSettingsSheet({
+    required this.peerId,
+    required this.peerName,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black.withValues(alpha: 0.62),
+      alignment: Alignment.center,
+      child: Container(
+        width: 520,
+        constraints: const BoxConstraints(maxHeight: 640),
+        decoration: BoxDecoration(
+          color: VellinColors.bg1,
+          borderRadius: BorderRadius.circular(VellinRadius.xl),
+          border: Border.all(color: VellinColors.line2),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 18, 12, 6),
+            child: Row(children: [
+              const Text('Настройки звонка',
+                  style: TextStyle(color: VellinColors.text0, fontSize: 18, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.close, color: VellinColors.text2),
+                tooltip: 'Закрыть',
+                onPressed: onClose,
+              ),
+            ]),
+          ),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 6, 24, 24),
+              child: CallSettingsPanel(peerId: peerId, peerName: peerName),
+            ),
+          ),
         ]),
       ),
     );

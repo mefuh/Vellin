@@ -19,6 +19,7 @@ import 'state/notifications_controller.dart';
 import 'state/presence_controller.dart';
 import 'state/update_controller.dart';
 import 'storage/session_store.dart';
+import 'webrtc/call_settings.dart';
 import 'theme/vellin_theme.dart';
 import 'runtime/auth_window.dart';
 import 'runtime/toast_host.dart';
@@ -57,6 +58,11 @@ Future<void> main(List<String> args) async {
   final socket = UserSocket(dmApi.realtimeTicket);
   final auth = AuthController(client, authApi, SessionStore());
   final update = UpdateController(client);
+
+  // Устройства и обработка звука для звонков. Читаются заранее: выбранный
+  // динамик нужен ещё до первого звонка — на нём играет рингтон.
+  final callSettings = CallSettings();
+  callSettings.load();
 
   // Всплывающие уведомления в фирменном стиле — отдельным окном-процессом.
   // Поднимается лениво, при первом уведомлении.
@@ -102,8 +108,11 @@ Future<void> main(List<String> args) async {
         ChangeNotifierProvider<DmController>(create: (_) => DmController(dmApi, socket)),
         ChangeNotifierProvider<PresenceController>(create: (_) => PresenceController(socket)),
         ChangeNotifierProvider<NotificationsController>.value(value: notifications),
+        ChangeNotifierProvider<CallSettings>.value(value: callSettings),
         // Тостер нужен звонкам: при неактивном окне входящий приходит им.
-        ChangeNotifierProvider<CallController>(create: (_) => CallController(socket, toasts)),
+        ChangeNotifierProvider<CallController>(
+          create: (_) => CallController(socket, toasts, callSettings),
+        ),
         Provider<ToastHost>.value(value: toasts),
         ChangeNotifierProvider<UpdateController>.value(value: update),
       ],

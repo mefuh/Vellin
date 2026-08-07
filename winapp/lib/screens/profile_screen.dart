@@ -12,6 +12,7 @@ import '../models/title.dart';
 import '../state/auth_controller.dart';
 import '../theme/vellin_theme.dart';
 import '../widgets/back_dismiss.dart';
+import '../widgets/call_settings_panel.dart';
 import '../widgets/common.dart';
 
 String? _resolveAvatar(String? url) {
@@ -64,6 +65,8 @@ class ProfileSettingsScreen extends StatelessWidget {
               const SizedBox(height: 16),
               _EmailCard(user: user),
               const SizedBox(height: 16),
+              const _CallDevicesCard(),
+              const SizedBox(height: 16),
               const _PasswordCard(),
               const SizedBox(height: 20),
               Center(
@@ -101,6 +104,23 @@ class _Card extends StatelessWidget {
           ...children,
         ],
       ),
+    );
+  }
+}
+
+// ── Звук и видео звонков ────────────────────────────────────────────────────
+
+/// Устройства и обработка звука. Те же настройки открываются кнопкой прямо в
+/// разговоре — здесь они нужны, чтобы проверить микрофон заранее, а не когда
+/// собеседник уже не слышит.
+class _CallDevicesCard extends StatelessWidget {
+  const _CallDevicesCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _Card(
+      title: 'Звук и видео',
+      children: [CallSettingsPanel()],
     );
   }
 }
