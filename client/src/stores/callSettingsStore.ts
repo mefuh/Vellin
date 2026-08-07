@@ -22,7 +22,20 @@ export interface TilePosition {
 export interface CallSettingsState {
   preferredMicId: string | null;
   preferredCameraId: string | null;
+  /**
+   * Куда играть звук звонка. Работает не везде: выбор устройства вывода
+   * поддерживают браузеры на Chromium, остальным остаётся системное.
+   */
+  preferredSpeakerId: string | null;
   mirrorSelfVideo: boolean;
+  /**
+   * Обработка звука микрофона. Шумоподавление здесь двойное: флаг браузера и
+   * наш собственный слой поверх него — тумблер снимает оба, иначе выключение
+   * ничего бы не меняло на слух.
+   */
+  noiseSuppression: boolean;
+  echoCancellation: boolean;
+  autoGainControl: boolean;
   /**
    * Visual size of the Telegram-style circle tiles + audio-only avatar
    * bubbles in the fullscreen overlay. Doesn't affect the rect tiles in
@@ -39,7 +52,13 @@ export interface CallSettingsState {
 
   setPreferredMicId: (id: string | null) => void;
   setPreferredCameraId: (id: string | null) => void;
+  setPreferredSpeakerId: (id: string | null) => void;
   setMirrorSelfVideo: (on: boolean) => void;
+  setAudioProcessing: (patch: {
+    noiseSuppression?: boolean;
+    echoCancellation?: boolean;
+    autoGainControl?: boolean;
+  }) => void;
   setCircleSize: (size: CircleSize) => void;
   setTilePosition: (userId: string, pos: TilePosition) => void;
   resetTilePositions: () => void;
@@ -54,6 +73,10 @@ export const useCallSettingsStore = create<CallSettingsState>()(
     (set) => ({
       preferredMicId: null,
       preferredCameraId: null,
+      preferredSpeakerId: null,
+      noiseSuppression: true,
+      echoCancellation: true,
+      autoGainControl: true,
       // Off by default — toggling on physically flips the outbound camera
       // track via a canvas pipeline (visible to everyone, not just self).
       mirrorSelfVideo: false,
@@ -63,7 +86,9 @@ export const useCallSettingsStore = create<CallSettingsState>()(
 
       setPreferredMicId: (id) => set({ preferredMicId: id }),
       setPreferredCameraId: (id) => set({ preferredCameraId: id }),
+      setPreferredSpeakerId: (id) => set({ preferredSpeakerId: id }),
       setMirrorSelfVideo: (on) => set({ mirrorSelfVideo: on }),
+      setAudioProcessing: (patch) => set((s) => ({ ...s, ...patch })),
       setCircleSize: (size) => set({ circleSize: size }),
       setTilePosition: (userId, pos) =>
         set((s) => ({

@@ -4,6 +4,7 @@ import { Icon } from '../../shared/Icon';
 import { useDmCallStore } from '../../stores/dmCallStore';
 import { screenKey, type UseCallApi } from '../../hooks/useCall';
 import { startRingbackTone } from '../../utils/sound';
+import { CallDeviceSettings } from './CallDeviceSettings';
 
 /** «5:32» — длительность разговора. */
 function formatDuration(startedAt: number | null): string {
@@ -34,6 +35,7 @@ export function DmCallOverlay({ api }: { api: UseCallApi }): React.ReactElement 
   // Какой поток показан крупно. null — по порядку: демонстрация собеседника,
   // затем его камера. Выбор живёт, пока открыт экран звонка.
   const [mainKey, setMainKey] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const answeredAt = call?.answeredAt ? Date.parse(call.answeredAt) : null;
   const ringing = call?.phase === 'ringing';
@@ -231,7 +233,101 @@ export function DmCallOverlay({ api }: { api: UseCallApi }): React.ReactElement 
           disabled
           onClick={() => {}}
         />
+        <ControlButton
+          label="Настройки звонка"
+          icon="settings"
+          onClick={() => setSettingsOpen(true)}
+        />
         <ControlButton label="Завершить" icon="phoneOff" danger onClick={hangup} />
+      </div>
+
+      {settingsOpen && (
+        <CallSettingsSheet
+          peerId={peer.id}
+          peerName={peer.username}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Настройки звонка поверх разговора. */
+function CallSettingsSheet({
+  peerId,
+  peerName,
+  onClose,
+}: {
+  peerId: string;
+  peerName: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1310,
+        background: 'rgba(10,8,7,0.66)',
+        backdropFilter: 'blur(6px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '24px max(16px, 3vw)',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="Настройки звонка"
+        style={{
+          width: '100%',
+          maxWidth: 520,
+          maxHeight: 'calc(100svh - 48px)',
+          overflow: 'auto',
+          background: 'var(--bg-1)',
+          border: '1px solid var(--line-2)',
+          borderRadius: 'var(--r-2xl)',
+          boxShadow: 'var(--shadow-3)',
+          padding: '20px 22px 22px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 18,
+        }}
+      >
+        <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--text-0)' }}>
+            Настройки звонка
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Закрыть"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-2)',
+              cursor: 'pointer',
+              width: 32,
+              height: 32,
+              display: 'grid',
+              placeItems: 'center',
+              borderRadius: 8,
+            }}
+          >
+            <Icon name="close" size={18} />
+          </button>
+        </header>
+        <CallDeviceSettings peerId={peerId} peerName={peerName} />
       </div>
     </div>
   );
@@ -296,7 +392,7 @@ function ControlButton({
   disabled,
 }: {
   label: string;
-  icon: 'mic' | 'micOff' | 'video' | 'videoOff' | 'phoneOff' | 'cast';
+  icon: 'mic' | 'micOff' | 'video' | 'videoOff' | 'phoneOff' | 'cast' | 'settings';
   onClick: () => void;
   danger?: boolean;
   disabled?: boolean;
