@@ -1146,70 +1146,72 @@ class _SelfPip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 256,
-      height: 144,
-      decoration: BoxDecoration(
-        color: const Color(0xFF0E0D0C),
-        borderRadius: BorderRadius.circular(CallGeometry.radiusCard),
-        border: Border.all(color: CallColors.stroke),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.9),
-            blurRadius: 60,
-            offset: const Offset(0, 30),
-            spreadRadius: -24,
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(children: [
-        if (cameraOn)
-          Positioned.fill(
-            child: RTCVideoView(
-              renderer,
-              mirror: true,
-              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+    return SpeakingRect(
+      active: speaking,
+      radius: CallGeometry.radiusCard,
+      child: Container(
+        width: 256,
+        height: 144,
+        decoration: BoxDecoration(
+          color: const Color(0xFF0E0D0C),
+          borderRadius: BorderRadius.circular(CallGeometry.radiusCard),
+          border: Border.all(color: CallColors.stroke),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.9),
+              blurRadius: 60,
+              offset: const Offset(0, 30),
+              spreadRadius: -24,
             ),
-          )
-        else
-          Positioned.fill(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFF131110), Color(0xFF0B0A09)],
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(children: [
+          if (cameraOn)
+            Positioned.fill(
+              child: RTCVideoView(
+                renderer,
+                mirror: true,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+              ),
+            )
+          else
+            Positioned.fill(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF131110), Color(0xFF0B0A09)],
+                  ),
+                ),
+                child: Center(
+                  child: CallAvatar(username: username, avatarUrl: avatarUrl, size: 48, dim: true),
                 ),
               ),
-              child: Center(
-                child: CallAvatar(username: username, avatarUrl: avatarUrl, size: 48, dim: true),
-              ),
             ),
+          Positioned(
+            left: 12,
+            bottom: 10,
+            child: Row(children: [
+              Text(
+                'Вы',
+                style: TextStyle(
+                  fontFamily: CallText.family,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white.withValues(alpha: 0.8),
+                  shadows: const [Shadow(color: Colors.black87, blurRadius: 6, offset: Offset(0, 1))],
+                ),
+              ),
+              if (muted) ...[
+                const SizedBox(width: 7),
+                CallIcon(CallGlyphs.micMutedSmall, size: 11, color: Colors.white.withValues(alpha: 0.7)),
+              ],
+            ]),
           ),
-        if (speaking)
-          const Positioned.fill(child: SpeakingFrame(radius: CallGeometry.radiusCard)),
-        Positioned(
-          left: 12,
-          bottom: 10,
-          child: Row(children: [
-            Text(
-              'Вы',
-              style: TextStyle(
-                fontFamily: CallText.family,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w500,
-                color: Colors.white.withValues(alpha: 0.8),
-                shadows: const [Shadow(color: Colors.black87, blurRadius: 6, offset: Offset(0, 1))],
-              ),
-            ),
-            if (muted) ...[
-              const SizedBox(width: 7),
-              CallIcon(CallGlyphs.micMutedSmall, size: 11, color: Colors.white.withValues(alpha: 0.7)),
-            ],
-          ]),
-        ),
-      ]),
+        ]),
+      ),
     );
   }
 }
@@ -1234,46 +1236,49 @@ class _Thumb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: const Color(0xFF0E0D0C),
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: CallColors.stroke),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.9),
-            blurRadius: 54,
-            offset: const Offset(0, 26),
-            spreadRadius: -22,
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(children: [
-        Positioned.fill(
-          child: RTCVideoView(
-            renderer,
-            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-          ),
+    return SpeakingRect(
+      active: speaking,
+      radius: radius,
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: const Color(0xFF0E0D0C),
+          borderRadius: BorderRadius.circular(radius),
+          border: Border.all(color: CallColors.stroke),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.9),
+              blurRadius: 54,
+              offset: const Offset(0, 26),
+              spreadRadius: -22,
+            ),
+          ],
         ),
-        if (speaking) Positioned.fill(child: SpeakingFrame(radius: radius)),
-        Positioned(
-          left: 11,
-          bottom: 9,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontFamily: CallText.family,
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: Colors.white.withValues(alpha: 0.82),
-              shadows: const [Shadow(color: Colors.black87, blurRadius: 6, offset: Offset(0, 1))],
+        clipBehavior: Clip.antiAlias,
+        child: Stack(children: [
+          Positioned.fill(
+            child: RTCVideoView(
+              renderer,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
             ),
           ),
-        ),
-      ]),
+          Positioned(
+            left: 11,
+            bottom: 9,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontFamily: CallText.family,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: Colors.white.withValues(alpha: 0.82),
+                shadows: const [Shadow(color: Colors.black87, blurRadius: 6, offset: Offset(0, 1))],
+              ),
+            ),
+          ),
+        ]),
+      ),
     );
   }
 }

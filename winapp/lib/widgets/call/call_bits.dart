@@ -271,7 +271,10 @@ class _CallButtonState extends State<CallButton> {
                   color: _hover && enabled ? CallColors.surfaceHover : CallColors.surface,
                   border: Border.all(color: CallColors.stroke),
                 ),
-                child: Stack(alignment: Alignment.center, children: [
+                child: Stack(alignment: Alignment.center, clipBehavior: Clip.none, children: [
+                  // Кольцо говорящего — позади кнопки, а не поверх неё: иначе
+                  // свечение ложится пеленой на саму иконку.
+                  if (widget.speaking) const _SpeakingHalo(radius: 33),
                   // Подложка состояния поверх обычной заливки — тогда переход
                   // «включено → выключено» проявляется, а не перекрашивается
                   // рывком.
@@ -284,7 +287,6 @@ class _CallButtonState extends State<CallButton> {
                       border: Border.all(color: overlay.ring),
                     ),
                   ),
-                  if (widget.speaking) const _SpeakingHalo(radius: 33),
                   AnimatedSwitcher(
                     duration: CallMotion.base,
                     switchInCurve: CallMotion.ease,
@@ -693,6 +695,9 @@ class CallAvatar extends StatelessWidget {
       width: size + 24,
       height: size + 24,
       child: Stack(alignment: Alignment.center, children: [
+        // Кольцо говорящего рисуется ПОД аватаром: поверх оно затягивало лицо
+        // золотой пеленой от внутреннего свечения.
+        if (speaking) _SpeakingHalo(radius: size / 2 + 12),
         Container(
           width: size,
           height: size,
@@ -724,7 +729,6 @@ class CallAvatar extends StatelessWidget {
                 ),
           child: url == null ? _initial(initial) : null,
         ),
-        if (speaking) _SpeakingHalo(radius: size / 2 + 12),
       ]),
     );
   }
@@ -744,17 +748,27 @@ class CallAvatar extends StatelessWidget {
       );
 }
 
-/// Кольцо говорящего вокруг прямоугольного кадра — то же свечение, но по
-/// границе плитки.
-class SpeakingFrame extends StatefulWidget {
+/// Кадр говорящего: свечение вокруг плитки и тонкая обводка по её краю.
+///
+/// Свечение лежит ПОД кадром и видно только тем, что выходит за его границы.
+/// Поверх остаётся одна обводка: тень, положенная сверху, размывалась внутрь и
+/// затягивала картинку жёлтой пеленой.
+class SpeakingRect extends StatefulWidget {
+  final Widget child;
   final double radius;
-  const SpeakingFrame({super.key, required this.radius});
+  final bool active;
+  const SpeakingRect({
+    super.key,
+    required this.child,
+    required this.radius,
+    required this.active,
+  });
 
   @override
-  State<SpeakingFrame> createState() => _SpeakingFrameState();
+  State<SpeakingRect> createState() => _SpeakingRectState();
 }
 
-class _SpeakingFrameState extends State<SpeakingFrame> with SingleTickerProviderStateMixin {
+class _SpeakingRectState extends State<SpeakingRect> with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1900),
@@ -768,25 +782,50 @@ class _SpeakingFrameState extends State<SpeakingFrame> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: AnimatedBuilder(
-        animation: _c,
-        builder: (context, _) {
-          final opacity = 0.6 + 0.4 * Curves.easeInOut.transform(_c.value);
-          return Opacity(
-            opacity: opacity,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(widget.radius),
-                border: Border.all(color: const Color(0xFFE8CF9E).withValues(alpha: 0.9), width: 2.5),
-                boxShadow: [
-                  BoxShadow(color: const Color(0xFFCEA668).withValues(alpha: 0.45), blurRadius: 44),
-                ],
+    if (!widget.active) return widget.child;
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        final opacity = 0.6 + 0.4 * Curves.easeInOut.transform(_c.value);
+        return Stack(children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Opacity(
+                opacity: opacity,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(widget.radius),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFCEA668).withValues(alpha: 0.45),
+                        blurRadius: 44,
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-          );
-        },
-      ),
+          ),
+          child!,
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Opacity(
+                opacity: opacity,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(widget.radius),
+                    border: Border.all(
+                      color: const Color(0xFFE8CF9E).withValues(alpha: 0.9),
+                      width: 2.5,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ]);
+      },
+      child: widget.child,
     );
   }
 }
