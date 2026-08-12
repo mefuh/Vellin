@@ -287,8 +287,17 @@ class DmCallSession {
       'audio': false,
       'video': settings.videoConstraints(),
     });
-    final track = camStream.getVideoTracks().first;
+    final tracks = camStream.getVideoTracks();
+    if (tracks.isEmpty) {
+      // Устройство открылось, но картинки не дало — держать пустой поток незачем.
+      await camStream.dispose();
+      throw StateError('камера не отдала видеодорожку');
+    }
+    final track = tracks.first;
     await stream.addTrack(track);
+    // Дорожка переехала в поток разговора, а временную обёртку надо отпустить:
+    // иначе каждое включение камеры оставляет за собой нативный объект.
+    await _disposeShell(camStream);
 
     final sender = _videoSender;
     if (sender == null) {
@@ -358,6 +367,20 @@ class DmCallSession {
       await stream.addTrack(track);
     } catch (_) {
       // В локальном потоке дорожка нужна только для учёта — отправка уже идёт.
+    }
+    await _disposeShell(fresh);
+  }
+
+  /// Отпустить временный поток, из которого дорожка уже переехала в разговор.
+  ///
+  /// Дорожку при этом не трогаем: она живёт дальше в соединении. Освобождается
+  /// только сама обёртка — без этого каждая смена устройства или обработки
+  /// звука оставляла за собой нативный объект.
+  Future<void> _disposeShell(MediaStream shell) async {
+    try {
+      await shell.dispose();
+    } catch (_) {
+      // Уже освобождён.
     }
   }
 
@@ -588,11 +611,28 @@ class DmCallSession {
     _closed = true;
     _offerWatchdog?.cancel();
     for (final t in _localStream?.getTracks() ?? const <MediaStreamTrack>[]) {
-      await t.stop();
+      try {
+        await t.stop();
+      } catch (_) {
+        // Дорожка уже мертва — остальные всё равно надо освободить.
+      }
     }
-    await _localStream?.dispose();
+    try {
+      await _localStream?.dispose();
+    } catch (_) {
+      // Поток уже освобождён.
+    }
     _localStream = null;
-    await _pc?.close();
+    final pc = _pc;
     _pc = null;
+    try {
+      await pc?.close();
+      // Закрыть и освободить — разные вещи: `close` разрывает соединение, а
+      // нативный объект и подписку на его события снимает только `dispose`.
+      // Без него каждый звонок оставлял за собой и то, и другое.
+      await pc?.dispose();
+    } catch (_) {
+      // Соединение уже освобождено.
+    }
   }
 }

@@ -176,16 +176,33 @@ class CallController extends ChangeNotifier {
     return _net;
   }
 
+  /// Идёт дозвон: собеседник ещё не ответил.
+  ///
+  /// Отделено от «подключения»: на дозвоне надо показывать лицо и имя того,
+  /// кому звонишь, а безликий скелет уместен только после ответа, пока
+  /// поднимается соединение.
+  bool get isRinging => call?.isRinging ?? false;
+
   /// Порог голоса. Ниже — фон комнаты и дыхание, выше — речь.
   static const _voiceThreshold = 0.02;
 
   /// Сколько держать кольцо после того, как голос стих.
   static const _voiceHold = Duration(milliseconds: 400);
 
+  /// Счётчик тактов опроса: сеть считаем не на каждом.
+  int _statsTick = 0;
+
+  /// Через сколько тактов пересчитывать качество связи. Голос нужен часто —
+  /// кольцо говорящего должно загораться сразу; потери пакетов так часто
+  /// считать незачем, а каждый лишний срез статистики стоит перехода через
+  /// платформенный канал.
+  static const _netEvery = 10;
+
   void _startStatsPolling() {
     _statsTimer?.cancel();
     _lastLost = 0;
     _lastReceived = 0;
+    _statsTick = 0;
     _net = CallNetState.connecting;
     _statsTimer = Timer.periodic(const Duration(milliseconds: 200), (_) => _pollStats());
   }
@@ -218,19 +235,21 @@ class CallController extends ChangeNotifier {
     final iSpeak = voice(stats.mine, _myVoiceAt, (t) => _myVoiceAt = t);
     final peerSpeaks = voice(stats.peer, _peerVoiceAt, (t) => _peerVoiceAt = t);
 
-    // Доля потерь за последний замер. Считаем по приросту, а не по общей сумме:
+    // Доля потерь за окно замера. Считаем по приросту, а не по общей сумме:
     // общая копится с начала разговора и после одной помехи так и остаётся
     // высокой, хотя связь давно наладилась.
-    final lostDelta = stats.lost - _lastLost;
-    final receivedDelta = stats.received - _lastReceived;
-    _lastLost = stats.lost;
-    _lastReceived = stats.received;
-    final total = lostDelta + receivedDelta;
-    final weak = total > 0 && lostDelta / total > 0.03;
-
-    final net = !_linkAlive
-        ? CallNetState.lost
-        : (weak ? CallNetState.weak : CallNetState.good);
+    _statsTick++;
+    var net = _net;
+    if (!_linkAlive) {
+      net = CallNetState.lost;
+    } else if (_statsTick % _netEvery == 0 || _net == CallNetState.connecting) {
+      final lostDelta = stats.lost - _lastLost;
+      final receivedDelta = stats.received - _lastReceived;
+      _lastLost = stats.lost;
+      _lastReceived = stats.received;
+      final total = lostDelta + receivedDelta;
+      net = total > 0 && lostDelta / total > 0.03 ? CallNetState.weak : CallNetState.good;
+    }
 
     if (iSpeak != _iSpeak || peerSpeaks != _peerSpeaks || net != _net) {
       _iSpeak = iSpeak;
@@ -365,7 +384,9 @@ class CallController extends ChangeNotifier {
         // собеседника обновляем сами, иначе включённая камера не появится.
         final from = msg['fromUserId'] as String?;
         final current = call;
-        if (from != null && current != null && current.callId == msg['callId']) {
+        // Только от собеседника: состояние от кого-то ещё в звонке один на один
+        // взяться не может, а записанное вслепую попадало в состав звонка.
+        if (from != null && from == peerId && current != null && current.callId == msg['callId']) {
           final screen = msg['screen'] as bool? ?? false;
           call = current.withMedia(
             from,
@@ -455,7 +476,11 @@ class CallController extends ChangeNotifier {
       if (peerChanged || wasCallId != snapshot.callId) {
         await _teardownSession();
       }
-      if (_session == null) await _startSession(snapshot);
+      // Флаг, а не проверка `_session == null`: сессия присваивается уже после
+      // захвата устройств, и два состояния подряд успевали поднять две — с
+      // двумя микрофонами и двумя соединениями, одно из которых оставалось без
+      // владельца.
+      if (_session == null && !_startingSession) await _startSession(snapshot);
     }
 
     notifyListeners();
@@ -483,6 +508,11 @@ class CallController extends ChangeNotifier {
   /// Показать звонок тостом, если главное окно не в фокусе. Иначе достаточно
   /// экрана входящего — тост показан не будет, и снимать нечего.
   Future<void> _showCallToast(DmCallSnapshot snapshot, PublicUser from) async {
+    // Идентификатор запоминаем ДО показа: окно тостов — отдельный процесс, он
+    // поднимается не мгновенно, и звонок успевал оборваться внутри этой паузы.
+    // Раньше снятие тоста в этот момент не находило идентификатора, и тост
+    // всплывал уже после отмены — навсегда.
+    _toastCallId = snapshot.callId;
     final shown = await _toasts.showIncomingCall(
       callId: snapshot.callId,
       username: from.username,
@@ -490,7 +520,13 @@ class CallController extends ChangeNotifier {
       avatarUrl: from.avatarUrl,
       avatarSeed: from.avatarSeed,
     );
-    if (shown) _toastCallId = snapshot.callId;
+    // Показать не вышло (окно в фокусе или тостер не поднялся) — снимать нечего.
+    if (!shown) {
+      if (_toastCallId == snapshot.callId) _toastCallId = null;
+      return;
+    }
+    // Пока тостер поднимался, звонок мог закончиться — снимаем сразу.
+    if (incoming?.call.callId != snapshot.callId) _hideCallToast();
   }
 
   void _hideCallToast() {
@@ -523,10 +559,28 @@ class CallController extends ChangeNotifier {
   Future<void> _startSession(DmCallSnapshot snapshot) async {
     final config = _rtcConfig;
     if (config == null) return;
+    // Занимаем место под сессию синхронно, до первого await.
+    _startingSession = true;
+    try {
+      await _bringUpSession(snapshot, config);
+    } finally {
+      _startingSession = false;
+    }
+  }
+
+  /// Сессия уже поднимается: второй заход не нужен.
+  bool _startingSession = false;
+
+  Future<void> _bringUpSession(DmCallSnapshot snapshot, Map<String, dynamic> config) async {
     // Микрофон и камера монопольны: если сейчас пишется голосовое или кружок,
     // запись прерывается — иначе звонок остался бы без звука.
     await MediaGate.instance.acquireForCall();
     await _ensureRenderers();
+    // Пока поднимались устройства, звонок мог закончиться.
+    if (call == null || !isMine) {
+      MediaGate.instance.releaseFromCall();
+      return;
+    }
     final session = DmCallSession(
       myUserId: _myUserId,
       peerUserId: snapshot.peerIdFor(_myUserId),
@@ -699,12 +753,17 @@ class CallController extends ChangeNotifier {
     final next = !s.videoEnabled;
     try {
       await s.setCameraEnabled(next);
+    } catch (_) {
+      // Камеру занял кто-то другой или её отключили. Сказать об этом надо: без
+      // сообщения человек жмёт кнопку и не понимает, почему ничего не вышло.
+      if (next) error = 'Камера недоступна — возможно, её занял другой сеанс';
     } finally {
-      // Сообщить собеседнику нужно в любом случае: сорвись переключение на
-      // полпути — он всё равно перестанет получать картинку, и без этого
-      // сообщения у него останется висеть застывший кадр.
+      // Сообщить собеседнику нужно в любом случае, но ФАКТИЧЕСКОЕ состояние, а
+      // не намерение: при сорвавшемся включении он раньше начинал ждать
+      // картинку, которой не будет. При выключении это тем более важно — иначе
+      // у него останется висеть застывший кадр.
       localRenderer.srcObject = s.localStream;
-      _sendMedia(video: next);
+      _sendMedia(video: s.videoEnabled);
       notifyListeners();
     }
   }

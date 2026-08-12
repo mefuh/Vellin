@@ -260,7 +260,11 @@ class _CallScreenState extends State<_CallScreen> {
     // безымянный кружок с буквой.
     final me = context.watch<AuthController>().user;
 
-    final connecting = call.netState == CallNetState.connecting;
+    // Дозвон и подключение — разные вещи. На дозвоне кадр занят собеседником
+    // (лицо и имя), скелет показывается только после ответа, пока поднимается
+    // соединение.
+    final ringing = call.isRinging;
+    final connecting = !ringing && call.netState == CallNetState.connecting;
     final sharing = call.sharingScreen;
     final peerSharing = call.hasRemoteScreen;
     final peerCam = call.hasRemoteVideo;
@@ -276,9 +280,10 @@ class _CallScreenState extends State<_CallScreen> {
         !connecting && peerSharing && (!sharing || _focus == _Focus.peer);
     final bothSharing = !connecting && sharing && peerSharing && _focus == _Focus.none;
     // Кадр свободен под собеседника: ни одна демонстрация его не занимает.
-    final stageFree = !connecting && !peerSharing && !myScreenBig;
+    final stageFree = !connecting && !ringing && !peerSharing && !myScreenBig;
 
     final selfPipVisible = !connecting &&
+        !ringing &&
         !(!peerSharing && !peerCam && !myCam) &&
         !bothSharing;
     final peerCamThumb = !connecting && peerCam && (myScreenBig || peerScreenBig);
@@ -296,6 +301,8 @@ class _CallScreenState extends State<_CallScreen> {
           child: Stack(children: [
             if (connecting)
               const _ConnectingStage()
+            else if (ringing)
+              _RingingStage(peer: peer, video: snapshot.video)
             else if (bothSharing)
               _BothSharingStage(
                 mine: call.localScreenRenderer,
@@ -371,8 +378,10 @@ class _CallScreenState extends State<_CallScreen> {
 
             if (sharing)
               Positioned(
-                left: 62,
-                top: 12,
+                // Второй ряд: в узком окне плашка иначе налезала на пилюлю
+                // состояния, которая стоит по центру первого ряда.
+                left: 26,
+                top: 56,
                 child: _MyShareBadge(
                   title: call.screenShare!.source.name,
                   quality: _qualityLabel(call),
@@ -403,12 +412,13 @@ class _CallScreenState extends State<_CallScreen> {
                 ),
               ),
 
-            // Вернуться к двум трансляциям.
+            // Вернуться к двум трансляциям. Третий ряд: второй занят плашкой
+            // «вы демонстрируете», которая в этом состоянии видна всегда.
             if (sharing && peerSharing && _focus != _Focus.none)
               Positioned(
                 left: 0,
                 right: 0,
-                top: 60,
+                top: 104,
                 child: Center(
                   child: GlassPill(
                     padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
@@ -641,6 +651,31 @@ class _ConnectingStage extends StatelessWidget {
         const SizedBox(height: 26),
         Text('ПОДКЛЮЧЕНИЕ…',
             style: CallText.plaque.copyWith(color: Colors.white.withValues(alpha: 0.30))),
+      ]),
+    );
+  }
+}
+
+/// Дозвон: кому звоним. Лицо и имя — чтобы было видно, что набран тот человек.
+class _RingingStage extends StatelessWidget {
+  final PublicUser peer;
+  final bool video;
+  const _RingingStage({required this.peer, required this.video});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        CallAvatar(username: peer.username, avatarUrl: peer.avatarUrl, size: 148),
+        const SizedBox(height: 10),
+        Text(peer.username, style: CallText.displayName),
+        const SizedBox(height: 10),
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          const PulseDot(color: CallColors.gold, period: Duration(milliseconds: 1200)),
+          const SizedBox(width: 9),
+          Text(video ? 'Видеозвонок · дозвон' : 'Дозвон',
+              style: CallText.pill.copyWith(color: CallColors.textFaint)),
+        ]),
       ]),
     );
   }
