@@ -53,8 +53,14 @@ import { dmCallHub, toSnapshot } from '../calls/DmCallHub.js';
 // (typical 8–12 KB; some Chromium builds clear 16 KB).
 const MAX_MESSAGE_BYTES = 32 * 1024;
 
-/** Тот же потолок для пользовательского канала — там теперь тоже ходит SDP. */
-const MAX_USER_MESSAGE_BYTES = 64 * 1024;
+/**
+ * Потолок кадра пользовательского канала — там ходит SDP.
+ *
+ * Держим вдвое выше потолка на само SDP (48 КБ в `userCallDispatch`), чтобы
+ * обвязка JSON никогда не выталкивала законный офер за границу: превышение
+ * рвёт соединение, а рвать его посреди звонка нельзя.
+ */
+const MAX_USER_MESSAGE_BYTES = 96 * 1024;
 
 export async function registerWebSocket(app: FastifyInstance): Promise<void> {
   // ── Пользовательский realtime-канал (личные уведомления + presence) ─────
