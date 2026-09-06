@@ -1,4 +1,3 @@
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
@@ -7,6 +6,7 @@ import '../models/notification.dart';
 import '../router.dart';
 import '../state/dm_controller.dart';
 import '../state/notifications_controller.dart';
+import '../state/shell_controller.dart';
 
 /// Куда ведёт уведомление: общий переход и для панели колокольчика, и для
 /// клика по системному тосту Windows. Работает через корневой навигатор,
@@ -24,7 +24,9 @@ Future<void> openNotification(AppNotification n) async {
       if (publicId == null || publicId.isEmpty) return;
       // Прочтение диалога снимет уведомление через WS; убираем и локально сразу.
       context.read<NotificationsController>().dismiss(n.id);
-      context.go('/messages');
+      final shell = context.read<ShellController>();
+      shell.selectSection(RailSection.messages);
+      shell.showChat();
       await context.read<DmController>().openThread(publicId);
       break;
 
@@ -40,7 +42,7 @@ Future<void> openNotification(AppNotification n) async {
       // Заявки в друзья и подтверждения — на профиль автора.
       final publicId = n.actor?.publicId;
       if (publicId == null || publicId.isEmpty) return;
-      context.go('/u/$publicId');
+      context.read<ShellController>().showProfile(publicId);
   }
 }
 

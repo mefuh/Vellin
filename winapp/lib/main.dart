@@ -17,9 +17,11 @@ import 'state/dm_controller.dart';
 import 'state/call_controller.dart';
 import 'state/notifications_controller.dart';
 import 'state/presence_controller.dart';
+import 'state/shell_controller.dart';
 import 'state/update_controller.dart';
 import 'storage/session_store.dart';
 import 'webrtc/call_settings.dart';
+import 'theme/vellin_design.dart';
 import 'theme/vellin_theme.dart';
 import 'runtime/auth_window.dart';
 import 'runtime/toast_host.dart';
@@ -116,6 +118,8 @@ Future<void> main(List<String> args) async {
         ),
         Provider<ToastHost>.value(value: toasts),
         ChangeNotifierProvider<UpdateController>.value(value: update),
+        // Состояние оболочки: раздел рейла, правая область, фрейм настроек.
+        ChangeNotifierProvider<ShellController>(create: (_) => ShellController()),
       ],
       child: const VellinApp(),
     ),
@@ -235,7 +239,15 @@ class _VellinAppState extends State<VellinApp> {
         // заголовок окна: он должен оставаться нажимаемым и во время звонка,
         // иначе окно не свернуть и не закрыть. Сверху всего — панель
         // уведомлений: она выпадает из колокольчика в заголовке.
-        builder: (context, child) => Stack(children: [
+        // Один Material на всё приложение и общий стиль текста. Экраны
+        // собраны на своих виджетах, но Material-предок всё равно нужен: без
+        // него у текста нет стиля по умолчанию (жёлтое подчёркивание отладки),
+        // а полям ввода негде рисовать выделение и меню.
+        builder: (context, child) => Material(
+          type: MaterialType.transparency,
+          child: DefaultTextStyle(
+            style: VellinType.body,
+            child: Stack(children: [
           Column(children: [
             // Место под заголовок: сам он нарисован выше по стопке.
             const SizedBox(height: kWindowTitleBarHeight),
@@ -248,7 +260,9 @@ class _VellinAppState extends State<VellinApp> {
           const Positioned.fill(child: CallLayer()),
           const Positioned(top: 0, left: 0, right: 0, child: WindowTitleBar()),
           const NotificationsPanelOverlay(),
-        ]),
+            ]),
+          ),
+        ),
       );
     }
 

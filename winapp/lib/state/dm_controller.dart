@@ -30,6 +30,10 @@ class DmController extends ChangeNotifier {
   bool activeHasMore = false;
   bool loadingOlder = false;
 
+  /// До какого момента собеседник прочитал активный тред (ISO). По нему в
+  /// ленте зажигаются вторые галочки у своих сообщений.
+  String? peerLastReadAt;
+
   /// Что делает собеседник прямо сейчас в активном треде: null / 'text'
   /// (печатает) / 'voice' (записывает голосовое) / 'video' (записывает кружок).
   String? peerActivity;
@@ -103,6 +107,7 @@ class DmController extends ChangeNotifier {
       activePeer = t.peer;
       activeMessages = t.messages;
       activeHasMore = t.hasMore;
+      peerLastReadAt = t.peerLastReadAt;
       threadLoading = false;
       notifyListeners();
       // Отметить прочитанным (если диалог уже существует).
@@ -127,6 +132,7 @@ class DmController extends ChangeNotifier {
     activePeer = null;
     activeMessages = [];
     activeHasMore = false;
+    peerLastReadAt = null;
     notifyListeners();
   }
 
@@ -335,7 +341,37 @@ class DmController extends ChangeNotifier {
       case 'dm_typing':
         _onTyping(msg);
         break;
+      case 'dm_read':
+        // Двигаем отметку, только если прочитал собеседник: своё эхо приходит
+        // тем же сообщением и к чужим галочкам отношения не имеет.
+        if (msg['byUserId'] == _activePeerUserId && msg['readAt'] is String) {
+          peerLastReadAt = msg['readAt'] as String;
+          notifyListeners();
+        }
+        break;
+      case 'dm_voice_played':
+        _onVoicePlayed(msg['messageId'] as String?);
+        break;
     }
+  }
+
+  /// Собеседник дослушал моё голосовое — гасим точку «не прослушано».
+  void _onVoicePlayed(String? messageId) {
+    if (messageId == null) return;
+    final idx = activeMessages.indexWhere((m) => m.id == messageId);
+    if (idx < 0) return;
+    activeMessages[idx] = activeMessages[idx].copyWith(voicePlayed: true);
+    notifyListeners();
+  }
+
+  /// Отметить чужое голосовое прослушанным. Шлём один раз: повторные
+  /// проигрывания собеседнику ничего не сообщают.
+  void markVoicePlayed(String messageId) {
+    final idx = activeMessages.indexWhere((m) => m.id == messageId);
+    if (idx < 0 || activeMessages[idx].voicePlayed) return;
+    activeMessages[idx] = activeMessages[idx].copyWith(voicePlayed: true);
+    _socket.send({'t': 'dm_voice_played', 'messageId': messageId});
+    notifyListeners();
   }
 
   /// Обновление существующего сообщения (напр. видео-кружок processing→ready).
@@ -382,6 +418,7 @@ class DmController extends ChangeNotifier {
                 id: c.id,
                 peer: c.peer,
                 lastBody: c.lastBody,
+                lastKind: c.lastKind,
                 lastSenderId: c.lastSenderId,
                 unreadCount: 0,
                 online: c.online,

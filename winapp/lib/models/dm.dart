@@ -14,6 +14,9 @@ class DirectMessage {
   final String? voiceUrl;
   final int? voiceDurationSec;
   final List<int>? voicePeaks;
+
+  /// Голосовое прослушано получателем — точка рядом с таймером.
+  final bool voicePlayed;
   final String? videoStatus;
   final String? videoUrl;
   final String? videoThumbUrl;
@@ -47,6 +50,7 @@ class DirectMessage {
     this.voiceUrl,
     this.voiceDurationSec,
     this.voicePeaks,
+    this.voicePlayed = false,
     this.videoStatus,
     this.videoUrl,
     this.videoThumbUrl,
@@ -63,6 +67,34 @@ class DirectMessage {
   /// Сообщение — запись о звонке, а не переписка.
   bool get isCallRecord => callId != null && callId!.isNotEmpty;
 
+  /// Копия с изменённой отметкой «прослушано»: остальные поля сообщения после
+  /// отправки не меняются, поэтому общего copyWith на все поля не нужно.
+  DirectMessage copyWith({bool? voicePlayed}) => DirectMessage(
+        id: id,
+        conversationId: conversationId,
+        senderId: senderId,
+        body: body,
+        createdAt: createdAt,
+        imageUrl: imageUrl,
+        imageWidth: imageWidth,
+        imageHeight: imageHeight,
+        voiceUrl: voiceUrl,
+        voiceDurationSec: voiceDurationSec,
+        voicePeaks: voicePeaks,
+        voicePlayed: voicePlayed ?? this.voicePlayed,
+        videoStatus: videoStatus,
+        videoUrl: videoUrl,
+        videoThumbUrl: videoThumbUrl,
+        videoDurationSec: videoDurationSec,
+        inviteRoomId: inviteRoomId,
+        callId: callId,
+        callKind: callKind,
+        callOutcome: callOutcome,
+        callDurationSec: callDurationSec,
+        nonce: nonce,
+        pending: pending,
+      );
+
   factory DirectMessage.fromJson(Map<String, dynamic> j) => DirectMessage(
         id: j['id'] as String? ?? '',
         conversationId: j['conversationId'] as String? ?? '',
@@ -75,6 +107,7 @@ class DirectMessage {
         voiceUrl: j['voiceUrl'] as String?,
         voiceDurationSec: (j['voiceDurationSec'] as num?)?.toInt(),
         voicePeaks: (j['voicePeaks'] as List?)?.map((e) => (e as num).toInt()).toList(),
+        voicePlayed: j['voicePlayed'] as bool? ?? false,
         videoStatus: j['videoStatus'] as String?,
         videoUrl: j['videoUrl'] as String?,
         videoThumbUrl: j['videoThumbUrl'] as String?,
@@ -108,11 +141,17 @@ class DirectMessage {
   }
 }
 
+/// Чем была последняя реплика в диалоге. Список рисует перед превью глиф,
+/// а не эмодзи: эмодзи приходят из системного шрифта и в тёмном интерфейсе
+/// с обводочными иконками выглядят наклейками.
+enum DmPreviewKind { text, image, voice, video, invite, call, callMissed }
+
 /// Диалог в списке (shared: DmConversation).
 class DmConversation {
   final String id;
   final PublicUser peer;
   final String? lastBody;
+  final DmPreviewKind lastKind;
   final String? lastSenderId;
   final int unreadCount;
   final bool online;
@@ -126,31 +165,40 @@ class DmConversation {
     required this.unreadCount,
     required this.online,
     required this.lastMessageAt,
+    this.lastKind = DmPreviewKind.text,
   });
 
   factory DmConversation.fromJson(Map<String, dynamic> j) {
     final last = j['lastMessage'] as Map<String, dynamic>?;
     String? preview;
+    var kind = DmPreviewKind.text;
     if (last != null) {
       final body = last['body'] as String? ?? '';
       if (body.isNotEmpty) {
         preview = body;
       } else if (last['hasImage'] == true) {
-        preview = '📷 Изображение';
+        preview = 'Изображение';
+        kind = DmPreviewKind.image;
       } else if (last['hasVoice'] == true) {
-        preview = '🎤 Голосовое';
+        preview = 'Голосовое';
+        kind = DmPreviewKind.voice;
       } else if (last['hasVideo'] == true) {
-        preview = '⭕ Видеосообщение';
+        preview = 'Видеосообщение';
+        kind = DmPreviewKind.video;
       } else if (last['hasRoomInvite'] == true) {
-        preview = '🎬 Приглашение';
+        preview = 'Приглашение в комнату';
+        kind = DmPreviewKind.invite;
       } else if (last['hasCall'] == true) {
-        preview = last['callOutcome'] == 'missed' ? '📞 Пропущенный звонок' : '📞 Звонок';
+        final missed = last['callOutcome'] == 'missed';
+        preview = missed ? 'Пропущенный звонок' : 'Звонок';
+        kind = missed ? DmPreviewKind.callMissed : DmPreviewKind.call;
       }
     }
     return DmConversation(
       id: j['id'] as String? ?? '',
       peer: PublicUser.fromJson(j['peer'] as Map<String, dynamic>),
       lastBody: preview,
+      lastKind: kind,
       lastSenderId: last?['senderId'] as String?,
       unreadCount: (j['unreadCount'] as num?)?.toInt() ?? 0,
       online: j['online'] as bool? ?? false,
@@ -167,12 +215,17 @@ class ConversationThread {
   final bool hasMore;
   final bool online;
 
+  /// До какого момента собеседник прочитал переписку (ISO). По нему в ленте
+  /// проставляются галочки «прочитано» у своих сообщений.
+  final String? peerLastReadAt;
+
   const ConversationThread({
     required this.conversationId,
     required this.peer,
     required this.messages,
     required this.hasMore,
     required this.online,
+    this.peerLastReadAt,
   });
 
   factory ConversationThread.fromJson(Map<String, dynamic> j) => ConversationThread(
@@ -183,5 +236,6 @@ class ConversationThread {
             .toList(),
         hasMore: j['hasMore'] as bool? ?? false,
         online: j['online'] as bool? ?? false,
+        peerLastReadAt: j['peerLastReadAt'] as String?,
       );
 }
