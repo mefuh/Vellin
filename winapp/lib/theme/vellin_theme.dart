@@ -53,7 +53,9 @@ ThemeData buildVellinTheme() {
     brightness: Brightness.dark,
     scaffoldBackgroundColor: VellinColors.bg0,
     colorScheme: scheme,
-    fontFamily: 'Segoe UI',
+    // Шрифт один на весь клиент. Segoe UI снят: он был системной подменой и
+    // рядом с экраном звонка читался как чужой.
+    fontFamily: 'Manrope',
     textTheme: const TextTheme(
       bodyMedium: TextStyle(color: VellinColors.text0, fontSize: 15),
       bodySmall: TextStyle(color: VellinColors.text1, fontSize: 13),
