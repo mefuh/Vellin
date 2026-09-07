@@ -173,6 +173,10 @@ class _ProfilePaneState extends State<ProfilePane> {
   }
 }
 
+/// Боковой отступ содержимого: на узком окне колонка прижимается к краям.
+double _pad(BuildContext context) =>
+    MediaQuery.sizeOf(context).width < VellinLayout.breakpoint ? 24 : VellinLayout.padProfile;
+
 /// Неподвижная полоса поверх скролла: назад и — после прокрутки — имя.
 class _TopBar extends StatelessWidget {
   final PublicProfile profile;
@@ -276,14 +280,20 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // На узком окне шапка ужимается: иначе имя в 38 пунктов и аватар 104
+    // вытесняют строку фактов за край.
+    final narrow = MediaQuery.sizeOf(context).width < VellinLayout.breakpoint;
+    final avatar = narrow ? 84.0 : 104.0;
+    final pad = narrow ? 24.0 : VellinLayout.padProfile;
+
     return SizedBox(
-      height: 300,
+      height: narrow ? 264 : 300,
       child: Stack(
         fit: StackFit.expand,
         children: [
           _Backdrop(titles: profile.favoriteTitles),
           Padding(
-            padding: const EdgeInsets.fromLTRB(36, 92, 36, 0),
+            padding: EdgeInsets.fromLTRB(pad, narrow ? 76 : 92, pad, 0),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -296,7 +306,7 @@ class _Header extends StatelessWidget {
                   child: VellinAvatar(
                     username: profile.user.username,
                     avatarUrl: profile.user.avatarUrl,
-                    size: 104,
+                    size: avatar,
                     bedColor: const Color(0xFF0F0D0C),
                   ),
                 ),
@@ -328,7 +338,7 @@ class _Header extends StatelessWidget {
                         profile.user.username,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: VellinType.displayName,
+                        style: VellinType.displayName.copyWith(fontSize: narrow ? 30 : 38),
                       ),
                       const SizedBox(height: 6),
                       Text(
@@ -489,7 +499,7 @@ class _Actions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(36, 26, 36, 0),
+      padding: EdgeInsets.fromLTRB(_pad(context), 26, _pad(context), 0),
       child: Row(
         children: [
           if (isSelf) ...[
@@ -552,7 +562,7 @@ class _Stats extends StatelessWidget {
     ];
 
     return Container(
-      margin: const EdgeInsets.fromLTRB(36, 34, 36, 0),
+      margin: EdgeInsets.fromLTRB(_pad(context), 34, _pad(context), 0),
       decoration: const BoxDecoration(
         border: Border(
           top: BorderSide(color: VellinColors.line05),
@@ -601,7 +611,7 @@ class _About extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(36, 34, 36, 0),
+      padding: EdgeInsets.fromLTRB(_pad(context), 34, _pad(context), 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -638,16 +648,16 @@ class _Favorites extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 36),
-            child: VellinSectionTitle('Любимое кино'),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: _pad(context)),
+            child: const VellinSectionTitle('Любимое кино'),
           ),
           const SizedBox(height: 16),
           SizedBox(
             height: 240,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 36),
+              padding: EdgeInsets.symmetric(horizontal: _pad(context)),
               itemCount: titles.length,
               separatorBuilder: (_, _) => const SizedBox(width: 14),
               itemBuilder: (context, i) => _Poster(title: titles[i]),
