@@ -72,6 +72,9 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
 
   final _focus = FocusNode();
 
+  /// Смещение кадра при увеличении — им же двигают снимок мышью.
+  final _view = TransformationController();
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +87,7 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
     _open.dispose();
     _page.dispose();
     _focus.dispose();
+    _view.dispose();
     super.dispose();
   }
 
@@ -101,10 +105,21 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
       _slide = delta;
       _zoom = 100;
     });
+    // Новый снимок показываем целиком: масштаб и смещение прежнего к нему
+    // отношения не имеют.
+    _view.value = Matrix4.identity();
     _page.forward(from: 0);
   }
 
-  void _setZoom(int value) => setState(() => _zoom = value.clamp(100, 300));
+  void _setZoom(int value) {
+    final before = _zoom / 100;
+    final next = value.clamp(100, 300);
+    setState(() => _zoom = next);
+    // После перестроения кадра — иначе смещение считалось бы по старому размеру.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _recenter(before, next / 100);
+    });
+  }
 
   Future<void> _download() async {
     final url = widget.images[_index];
@@ -174,11 +189,9 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
                 Positioned.fill(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(72, 64, 72, 64),
-                    child: Center(
-                      child: Transform.scale(
-                        scale: 0.92 + 0.08 * t,
-                        child: _image(),
-                      ),
+                    child: Transform.scale(
+                      scale: 0.92 + 0.08 * t,
+                      child: _image(),
                     ),
                   ),
                 ),
@@ -220,21 +233,57 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
           ),
         );
       },
-      child: InteractiveViewer(
-        minScale: 1,
-        maxScale: 3,
-        panEnabled: _zoom > 100,
-        scaleEnabled: false,
-        child: Transform.scale(
-          scale: _zoom / 100,
-          child: Image.network(
-            widget.images[_index],
-            fit: BoxFit.contain,
-            errorBuilder: (_, _, _) => const SizedBox.shrink(),
-          ),
-        ),
+      // Растёт само изображение, а не картинка внутри неподвижной рамки:
+      // масштаб задаётся размером кадра, поэтому при 175 % снимок становится
+      // больше окна и по нему можно возить, а не смотреть в обрезанный кусок.
+      child: LayoutBuilder(
+        builder: (context, box) {
+          _viewport = Size(box.maxWidth, box.maxHeight);
+          final scale = _zoom / 100;
+          return SizedBox.expand(
+            child: InteractiveViewer(
+              transformationController: _view,
+              constrained: false,
+              panEnabled: _zoom > 100,
+              scaleEnabled: false,
+              minScale: 1,
+              maxScale: 1,
+              child: SizedBox(
+                width: box.maxWidth * scale,
+                height: box.maxHeight * scale,
+                child: Image.network(
+                  widget.images[_index],
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
+  }
+
+  /// Размер видимого кадра — по нему считается смещение при увеличении.
+  Size _viewport = Size.zero;
+
+  /// Оставить в центре ту же точку снимка при смене масштаба: без этого
+  /// увеличенный кадр показывался бы своим левым верхним углом.
+  void _recenter(double before, double after) {
+    if (_viewport == Size.zero) return;
+    if (after <= 1) {
+      _view.value = Matrix4.identity();
+      return;
+    }
+    // Центр кадра в координатах снимка при прежнем масштабе.
+    final t = _view.value.getTranslation();
+    final centerX = (-t.x + _viewport.width / 2) / before;
+    final centerY = (-t.y + _viewport.height / 2) / before;
+    final maxX = _viewport.width * after - _viewport.width;
+    final maxY = _viewport.height * after - _viewport.height;
+    final x = (centerX * after - _viewport.width / 2).clamp(0.0, maxX);
+    final y = (centerY * after - _viewport.height / 2).clamp(0.0, maxY);
+    _view.value = Matrix4.identity()..translateByDouble(-x, -y, 0, 1);
   }
 
   Widget _counter() {
