@@ -16,6 +16,7 @@ import '../state/playback_controller.dart';
 import '../state/presence_controller.dart';
 import '../state/shell_controller.dart';
 import '../theme/vellin_design.dart';
+import 'profile_pane.dart';
 import '../widgets/calls/calls_panel.dart';
 import '../widgets/dm/chat_pane.dart';
 import '../widgets/dm/dm_list.dart';
@@ -328,7 +329,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         Column(
           children: [
             if (item != null && !own) MiniPlayer(openPeerPublicId: dm.activePeerPublicId),
-            Expanded(child: _rightArea(shell, dm)),
+            Expanded(
+              // Профиль и переписка сменяют друг друга в две фазы, как разделы
+              // рейла: прежнее уезжает, и лишь потом монтируется новое.
+              child: PhaseSwitch(
+                phaseKey: '${shell.pane}:${shell.profilePublicId ?? dm.activePeerPublicId ?? ''}',
+                out: VellinMotion.short,
+                inDuration: VellinMotion.state,
+                shift: -18,
+                child: _rightArea(shell, dm),
+              ),
+            ),
           ],
         ),
         if (own)
@@ -363,6 +374,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           },
         );
       case RightPaneKind.profile:
+        return ProfilePane(
+          key: ValueKey(shell.profilePublicId ?? 'me'),
+          publicId: shell.profilePublicId,
+          onClose: () => shell.closeProfile(hasOpenChat: dm.activePeerPublicId != null),
+          onMessage: _openChat,
+          onOpenSettings: shell.openSettings,
+        );
       case RightPaneKind.empty:
         return const _EmptyRight();
     }
