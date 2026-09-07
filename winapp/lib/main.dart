@@ -17,6 +17,7 @@ import 'state/dm_controller.dart';
 import 'state/call_controller.dart';
 import 'state/notifications_controller.dart';
 import 'state/presence_controller.dart';
+import 'state/playback_controller.dart';
 import 'state/shell_controller.dart';
 import 'state/update_controller.dart';
 import 'storage/session_store.dart';
@@ -120,6 +121,9 @@ Future<void> main(List<String> args) async {
         ChangeNotifierProvider<UpdateController>.value(value: update),
         // Состояние оболочки: раздел рейла, правая область, фрейм настроек.
         ChangeNotifierProvider<ShellController>(create: (_) => ShellController()),
+        // Один плеер голосовых на приложение: запись продолжает играть, когда
+        // ушли из переписки.
+        ChangeNotifierProvider<PlaybackController>(create: (_) => PlaybackController()),
       ],
       child: const VellinApp(),
     ),

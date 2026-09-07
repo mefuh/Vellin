@@ -4,17 +4,21 @@ import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
 import '../api/friends_api.dart';
+import '../app_config.dart';
 import '../models/social.dart';
 import '../state/auth_controller.dart';
 import '../state/call_controller.dart';
 import '../state/dm_controller.dart';
 import '../state/friends_controller.dart';
+import '../state/playback_controller.dart';
 import '../state/presence_controller.dart';
 import '../state/shell_controller.dart';
 import '../theme/vellin_design.dart';
 import '../widgets/dm/chat_pane.dart';
 import '../widgets/dm/dm_list.dart';
+import '../widgets/dm/mini_player.dart';
 import '../widgets/friends/friends_panel.dart';
+import '../widgets/media/lightbox.dart';
 import '../widgets/shell/me_card.dart';
 import '../widgets/shell/nav_rail.dart';
 import '../widgets/shell/panel_header.dart';
@@ -156,7 +160,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               ),
             ),
           ),
-          Expanded(child: _rightArea(shell, dm)),
+          Expanded(child: _rightWithPlayer(shell, dm)),
         ],
       ),
     );
@@ -264,6 +268,34 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  /// Правая область вместе с мини-плеером: в своём чате он висит пилюлей над
+  /// лентой, вне его — доком, который сдвигает содержимое вниз.
+  Widget _rightWithPlayer(ShellController shell, DmController dm) {
+    final playback = context.watch<PlaybackController>();
+    final item = playback.item;
+    final own = item != null &&
+        shell.pane == RightPaneKind.chat &&
+        item.peerPublicId == dm.activePeerPublicId;
+
+    return Stack(
+      children: [
+        Column(
+          children: [
+            if (item != null && !own) MiniPlayer(openPeerPublicId: dm.activePeerPublicId),
+            Expanded(child: _rightArea(shell, dm)),
+          ],
+        ),
+        if (own)
+          Positioned(
+            top: VellinLayout.chatHeader + 8,
+            left: 0,
+            right: 0,
+            child: MiniPlayer(openPeerPublicId: dm.activePeerPublicId),
+          ),
+      ],
+    );
+  }
+
   Widget _rightArea(ShellController shell, DmController dm) {
     switch (shell.pane) {
       case RightPaneKind.chat:
@@ -272,7 +304,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           key: ValueKey(dm.activePeerPublicId),
           dm: dm,
           onOpenProfile: () => shell.showProfile(dm.activePeerPublicId),
-          onOpenImage: (_) {},
+          onOpenImage: (url) {
+            // Листать можно по всем картинкам переписки, а не только по той,
+            // на которую нажали.
+            final images = dm.activeMessages
+                .where((m) => m.imageUrl != null)
+                .map((m) => AppConfig.mediaUrl(m.imageUrl))
+                .whereType<String>()
+                .toList();
+            final at = images.indexOf(url);
+            showVellinLightbox(context, images: images, index: at < 0 ? 0 : at);
+          },
         );
       case RightPaneKind.profile:
       case RightPaneKind.empty:

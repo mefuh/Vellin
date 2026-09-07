@@ -117,11 +117,15 @@ class MessageRow extends StatelessWidget {
         mine: mine,
         padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
         child: VoiceBubble(
+          messageId: message.id,
           url: AppConfig.mediaUrl(message.voiceUrl)!,
           durationSec: message.voiceDurationSec ?? 0,
           peaks: message.voicePeaks ?? const [],
           mine: mine,
           played: message.voicePlayed,
+          peerPublicId: peer?.publicId ?? '',
+          peerName: mine ? myUsername : (peer?.username ?? ''),
+          peerAvatarUrl: mine ? myAvatarUrl : peer?.avatarUrl,
           onFirstPlay: mine ? null : () => onVoicePlayed?.call(message.id),
         ),
       );

@@ -1,23 +1,21 @@
-import 'dart:async';
 import 'dart:math' as math;
-import 'dart:io';
+
 import 'package:flutter/widgets.dart';
-import 'package:http/http.dart' as http;
-import 'package:media_kit/media_kit.dart';
-import 'package:visibility_detector/visibility_detector.dart';
+import 'package:provider/provider.dart';
+
+import '../state/playback_controller.dart';
 import '../theme/vellin_design.dart';
 import '../theme/vellin_glyphs.dart';
 import 'ui/vellin_icon.dart';
 
-/// Плеер голосового сообщения: кнопка play/pause, дорожка из пиков с прогрессом,
+/// Голосовое сообщение в ленте: кнопка воспроизведения, дорожка из пиков,
 /// длительность и точка «прослушано».
 ///
-/// Чтобы старт был мгновенным, для видимых голосовых файл заранее скачивается
-/// во временный, а плеер открывается **на паузе** ещё до тапа — тап сводится к
-/// `play()`. Сетевой стрим mpv на Windows тут не используется: он и медленный,
-/// и падает с «Failed to create file cache». Ушло с экрана — плеер
-/// освобождается, чтобы не держать движок на каждый бабл.
-class VoiceBubble extends StatefulWidget {
+/// Самого плеера здесь нет — он один на приложение (`PlaybackController`),
+/// иначе звук обрывался бы при уходе из переписки, а мини-плееру нечего было
+/// бы показывать.
+class VoiceBubble extends StatelessWidget {
+  final String messageId;
   final String url;
   final int durationSec;
   final List<int> peaks;
@@ -26,34 +24,113 @@ class VoiceBubble extends StatefulWidget {
   /// Прослушано ли голосовое (у своих — собеседником, у чужих — мной).
   final bool played;
 
+  /// Собеседник и диалог — чтобы мини-плеер знал, чью запись он тянет.
+  final String peerPublicId;
+  final String peerName;
+  final String? peerAvatarUrl;
+
   /// Первый запуск чужого голосового — повод сказать об этом собеседнику.
   final VoidCallback? onFirstPlay;
 
   const VoiceBubble({
     super.key,
+    required this.messageId,
     required this.url,
     required this.durationSec,
     required this.peaks,
     required this.mine,
+    required this.peerPublicId,
+    required this.peerName,
+    required this.peerAvatarUrl,
     this.played = false,
     this.onFirstPlay,
   });
 
   @override
-  State<VoiceBubble> createState() => _VoiceBubbleState();
+  Widget build(BuildContext context) {
+    final playback = context.watch<PlaybackController>();
+    final current = playback.isCurrent(messageId);
+    final playing = current && playback.playing;
+    final progress = current ? playback.progress : 0.0;
+    final shown = current && playback.position > Duration.zero
+        ? playback.position.inSeconds
+        : durationSec;
+    final idle = mine ? const Color(0x47E2C99B) : VellinColors.ink24;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _PlayButton(
+          playing: playing,
+          onTap: () {
+            onFirstPlay?.call();
+            context.read<PlaybackController>().play(
+                  PlaybackItem(
+                    messageId: messageId,
+                    peerPublicId: peerPublicId,
+                    peerName: peerName,
+                    peerAvatarUrl: peerAvatarUrl,
+                    url: url,
+                    durationSec: durationSec,
+                    peaks: peaks,
+                  ),
+                );
+          },
+        ),
+        const SizedBox(width: 10),
+        _Wave(
+          peaks: peaks,
+          progress: progress,
+          playing: playing,
+          inactive: idle,
+          onSeek: current ? (f) => context.read<PlaybackController>().seekFraction(f) : null,
+        ),
+        const SizedBox(width: 10),
+        // Фиксированная ширина: цифры не «прыгают» при смене 0:09 → 0:10.
+        SizedBox(
+          width: 30,
+          child: Text(
+            _fmt(shown),
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              fontFamily: VellinType.family,
+              fontSize: 11,
+              color: mine ? const Color(0xA8E2C99B) : VellinColors.ink34,
+              fontFeatures: VellinType.tabular,
+            ),
+          ),
+        ),
+        const SizedBox(width: 7),
+        _PlayedDot(played: played),
+      ],
+    );
+  }
+
+  static String _fmt(int totalSec) =>
+      '${(totalSec ~/ 60).toString().padLeft(1, '0')}:${(totalSec % 60).toString().padLeft(2, '0')}';
 }
 
-class _VoiceBubbleState extends State<VoiceBubble> with SingleTickerProviderStateMixin {
-  final _visibilityKey = UniqueKey();
-  Player? _player;
-  final _subs = <StreamSubscription>[];
-  Future<String>? _download;
-  bool _preparing = false;
-  bool _playing = false;
-  bool _reported = false;
-  Duration _pos = Duration.zero;
+/// Дорожка: 34 полоски, пройденные золотые и дышащие во время игры.
+class _Wave extends StatefulWidget {
+  final List<int> peaks;
+  final double progress;
+  final bool playing;
+  final Color inactive;
+  final ValueChanged<double>? onSeek;
 
-  /// Дыхание пройденных полосок во время игры.
+  const _Wave({
+    required this.peaks,
+    required this.progress,
+    required this.playing,
+    required this.inactive,
+    this.onSeek,
+  });
+
+  @override
+  State<_Wave> createState() => _WaveState();
+}
+
+class _WaveState extends State<_Wave> with SingleTickerProviderStateMixin {
   late final AnimationController _breath = AnimationController(
     vsync: this,
     duration: VellinMotion.voiceBars,
@@ -62,169 +139,51 @@ class _VoiceBubbleState extends State<VoiceBubble> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
-    _prefetch();
+    if (widget.playing) _breath.repeat();
+  }
+
+  @override
+  void didUpdateWidget(_Wave old) {
+    super.didUpdateWidget(old);
+    if (widget.playing && !_breath.isAnimating) {
+      _breath.repeat();
+    } else if (!widget.playing && _breath.isAnimating) {
+      _breath.stop();
+    }
   }
 
   @override
   void dispose() {
     _breath.dispose();
-    _teardown();
     super.dispose();
   }
 
-  void _teardown() {
-    for (final s in _subs) {
-      s.cancel();
-    }
-    _subs.clear();
-    _player?.dispose();
-    _player = null;
-    _playing = false;
-    _pos = Duration.zero;
-  }
-
-  void _prefetch() {
-    if (_download != null) return;
-    _download = _ensureLocal(widget.url);
-    _download!.catchError((Object e) {
-      _download = null; // повторим позже
-      return '';
-    });
-  }
-
-  Future<String> _ensureLocal(String url) async {
-    final f = File('${Directory.systemTemp.path}${Platform.pathSeparator}vellin_voice_${url.hashCode}.audio');
-    if (await f.exists() && await f.length() > 0) return f.path;
-    final res = await http.get(Uri.parse(url));
-    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
-    await f.writeAsBytes(res.bodyBytes);
-    return f.path;
-  }
-
-  void _onVisibilityChanged(VisibilityInfo info) {
-    if (!mounted) return;
-    if (info.visibleFraction > 0.3) {
-      _prepare();
-    } else if (_player != null && !_playing) {
-      // Играющее не трогаем: звук должен продолжаться при прокрутке.
-      setState(_teardown);
-    }
-  }
-
-  /// Заранее открыть плеер на паузе, чтобы тап стартовал мгновенно.
-  Future<void> _prepare() async {
-    if (_player != null || _preparing) return;
-    _preparing = true;
-    try {
-      _prefetch();
-      final path = await _download!;
-      if (path.isEmpty || !mounted) return;
-
-      final p = Player();
-      _player = p;
-      _subs.add(p.stream.playing.listen((v) {
-        if (!mounted) return;
-        setState(() => _playing = v);
-        if (v) {
-          _breath.repeat(reverse: true);
-        } else {
-          _breath.stop();
-        }
-      }));
-      _subs.add(p.stream.position.listen((v) {
-        if (mounted) setState(() => _pos = v);
-      }));
-      _subs.add(p.stream.completed.listen((done) {
-        if (done && mounted) setState(() => _pos = Duration.zero);
-      }));
-
-      final platform = p.platform;
-      if (platform is NativePlayer) {
-        try { await platform.setProperty('cache-on-disk', 'no'); } catch (_) {}
-      }
-      await p.open(Media(path), play: false); // готов к мгновенному старту
-      if (mounted) setState(() {});
-    } catch (_) {
-      // Останется ленивый старт по тапу.
-    } finally {
-      _preparing = false;
-    }
-  }
-
-  Future<void> _toggle() async {
-    if (!_reported) {
-      _reported = true;
-      widget.onFirstPlay?.call();
-    }
-    final p = _player;
-    if (p == null) {
-      await _prepare();
-      await _player?.play();
-      return;
-    }
-    if (_playing) {
-      await p.pause();
-    } else {
-      // Доиграл до конца — начинаем сначала.
-      if (widget.durationSec > 0 && _pos.inSeconds >= widget.durationSec) {
-        await p.seek(Duration.zero);
-      }
-      await p.play();
-    }
-  }
-
-  String _fmt(int totalSec) =>
-      '${(totalSec ~/ 60).toString().padLeft(1, '0')}:${(totalSec % 60).toString().padLeft(2, '0')}';
-
   @override
   Widget build(BuildContext context) {
-    final total = widget.durationSec > 0 ? widget.durationSec : 0;
-    final progress = total > 0 ? (_pos.inMilliseconds / (total * 1000)).clamp(0.0, 1.0) : 0.0;
-    final label = _playing || _pos > Duration.zero ? _fmt(_pos.inSeconds) : _fmt(total);
-    final idle = widget.mine ? const Color(0x47E2C99B) : VellinColors.ink24;
+    const width = 170.0;
 
-    return VisibilityDetector(
-      key: _visibilityKey,
-      onVisibilityChanged: _onVisibilityChanged,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _PlayButton(playing: _playing, onTap: _toggle),
-          const SizedBox(width: 10),
-          AnimatedBuilder(
-            animation: _breath,
-            builder: (context, _) => SizedBox(
-              width: 170,
-              height: 24,
-              child: CustomPaint(
-                painter: _WavePainter(
-                  peaks: widget.peaks,
-                  progress: progress,
-                  breath: _playing ? _breath.value : null,
-                  active: VellinColors.accent,
-                  inactive: idle,
-                ),
+    return GestureDetector(
+      onTapDown: widget.onSeek == null
+          ? null
+          : (d) => widget.onSeek!((d.localPosition.dx / width).clamp(0.0, 1.0)),
+      child: MouseRegion(
+        cursor: widget.onSeek == null ? MouseCursor.defer : SystemMouseCursors.click,
+        child: AnimatedBuilder(
+          animation: _breath,
+          builder: (context, _) => SizedBox(
+            width: width,
+            height: 24,
+            child: CustomPaint(
+              painter: _WavePainter(
+                peaks: widget.peaks,
+                progress: widget.progress,
+                breath: widget.playing ? _breath.value : null,
+                active: VellinColors.accent,
+                inactive: widget.inactive,
               ),
             ),
           ),
-          const SizedBox(width: 10),
-          // Фиксированная ширина: цифры не «прыгают» при смене 0:09 → 0:10.
-          SizedBox(
-            width: 30,
-            child: Text(
-              label,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontFamily: VellinType.family,
-                fontSize: 11,
-                color: widget.mine ? const Color(0xA8E2C99B) : VellinColors.ink34,
-                fontFeatures: VellinType.tabular,
-              ),
-            ),
-          ),
-          const SizedBox(width: 7),
-          _PlayedDot(played: widget.played),
-        ],
+        ),
       ),
     );
   }
@@ -328,7 +287,7 @@ class _WavePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Дорожка из макета: 34 полоски шириной 2.5 с шагом 5.
+    // Дорожка из макета: полоски шириной 2.5 с шагом 5.
     const barW = 2.5;
     const pitch = 5.0;
     final count = (size.width / pitch).floor().clamp(12, 34);
@@ -345,8 +304,7 @@ class _WavePainter extends CustomPainter {
       if (isPlayed && breath != null) {
         // Пройденные полоски дышат врозь: сдвиг фазы по (i % 7).
         final phase = (breath! + (i % 7) / 7) % 1.0;
-        final wave = 0.62 + 0.66 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi));
-        h *= wave;
+        h *= 0.62 + 0.66 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi));
       }
       final x = i * pitch + barW / 2;
       final y0 = (size.height - h) / 2;
