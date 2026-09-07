@@ -23,6 +23,8 @@ import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../theme/avatar_tint.dart';
+import '../theme/vellin_glyphs.dart';
+import '../widgets/ui/vellin_icon.dart';
 
 /// Размер карточки уведомления (и всего окна — оно ровно по ней).
 const double kToastWidth = 384;
@@ -48,9 +50,12 @@ const Duration _leaveDuration = Duration(milliseconds: 180);
 
 /// Фон карточки — тот же тёмный тон, что у окна входа и апдейтера. Окно
 /// прозрачное, поэтому фон есть только у самих карточек.
-const Color _card = Color(0xFF0B0908);
+const Color _card = Color(0xFF131110);
 const Color _paper = Color(0xFFF7F6F4);
-const Color _accent = Color(0xFFD1271B);
+/// Золото — общий акцент клиента; красный остался только у сброса звонка.
+const Color _accent = Color(0xFFE2C99B);
+const Color _declineRed = Color(0xFFBA423A);
+const Color _acceptGreen = Color(0xFF93B08A);
 
 TextStyle _t({
   double size = 13,
@@ -59,8 +64,7 @@ TextStyle _t({
   double? height,
   double? spacing,
 }) => TextStyle(
-  fontFamily: 'Onest',
-  fontFamilyFallback: const ['Segoe UI Variable Display', 'Segoe UI'],
+  fontFamily: 'Manrope',
   fontSize: size,
   fontWeight: weight,
   height: height,
@@ -575,14 +579,15 @@ class _ToastCardState extends State<_ToastCard> {
                     if (call) ...[
                       const SizedBox(width: 8),
                       _CallActionButton(
-                        icon: Icons.call_end,
-                        color: _accent,
+                        glyph: VellinGlyphs.calls,
+                        rotate: true,
+                        color: _declineRed,
                         onTap: () => widget.onCallAction('decline'),
                       ),
                       const SizedBox(width: 8),
                       _CallActionButton(
-                        icon: Icons.call,
-                        color: const Color(0xFF2E9E5B),
+                        glyph: VellinGlyphs.calls,
+                        color: _acceptGreen,
                         onTap: () => widget.onCallAction('accept'),
                       ),
                     ],
@@ -642,10 +647,20 @@ class _ToastAvatar extends StatelessWidget {
 
 /// Круглая кнопка ответа или отказа в тосте входящего звонка.
 class _CallActionButton extends StatefulWidget {
-  final IconData icon;
+  final List<String> glyph;
   final Color color;
   final VoidCallback onTap;
-  const _CallActionButton({required this.icon, required this.color, required this.onTap});
+
+  /// Отказ — та же трубка, повёрнутая: отдельного глифа сброса в наборе нет, а
+  /// поворот читается однозначно.
+  final bool rotate;
+
+  const _CallActionButton({
+    required this.glyph,
+    required this.color,
+    required this.onTap,
+    this.rotate = false,
+  });
   @override
   State<_CallActionButton> createState() => _CallActionButtonState();
 }
@@ -671,7 +686,11 @@ class _CallActionButtonState extends State<_CallActionButton> {
             shape: BoxShape.circle,
             color: _hover ? widget.color : widget.color.withValues(alpha: 0.85),
           ),
-          child: Icon(widget.icon, size: 18, color: _paper),
+          alignment: Alignment.center,
+          child: Transform.rotate(
+            angle: widget.rotate ? 2.36 : 0,
+            child: VellinIcon(widget.glyph, size: 17, color: const Color(0xFF14100B)),
+          ),
         ),
       ),
     );

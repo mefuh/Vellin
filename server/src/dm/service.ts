@@ -484,6 +484,7 @@ export async function getRoomInviteInfo(meId: string, messageId: string): Promis
   if (!room) {
     return {
       roomName: m.inviteRoomName ?? 'Комната',
+      slug: null,
       videoTitle: m.inviteVideoTitle,
       videoPoster: m.inviteVideoPoster,
       ownerUsername: '',
@@ -495,6 +496,7 @@ export async function getRoomInviteInfo(meId: string, messageId: string): Promis
   const { videoTitle, videoPoster } = videoCardInfo(room);
   return {
     roomName: room.name,
+    slug: room.slug,
     videoTitle,
     videoPoster,
     ownerUsername: room.owner.username,

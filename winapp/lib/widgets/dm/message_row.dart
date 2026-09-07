@@ -9,6 +9,7 @@ import '../ui/vellin_avatar.dart';
 import '../ui/vellin_icon.dart';
 import '../video_bubble.dart';
 import '../voice_bubble.dart';
+import 'room_invite_card.dart';
 
 /// Реплика в ленте: аватар слева, строка автора, баббл.
 ///
@@ -136,7 +137,12 @@ class MessageRow extends StatelessWidget {
         status: message.videoStatus,
         videoUrl: AppConfig.mediaUrl(message.videoUrl),
         thumbUrl: AppConfig.mediaUrl(message.videoThumbUrl),
+        mine: mine,
       );
+    }
+
+    if (message.inviteRoomId != null) {
+      return RoomInviteCard(messageId: message.id, mine: mine);
     }
 
     if (message.imageUrl != null) {

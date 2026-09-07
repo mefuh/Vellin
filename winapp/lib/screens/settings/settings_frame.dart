@@ -10,6 +10,7 @@ import '../../widgets/ui/vellin_hover.dart';
 import '../../widgets/ui/vellin_icon.dart';
 import 'settings_account.dart';
 import 'settings_devices.dart';
+import 'settings_privacy.dart';
 import 'settings_profile.dart';
 import 'settings_showcase.dart';
 
@@ -25,6 +26,7 @@ const _groups = <(String, List<SettingsTab>)>[
     SettingsTab('profile', 'Мой профиль'),
     SettingsTab('showcase', 'Витрина кино'),
     SettingsTab('account', 'Аккаунт и пароль'),
+    SettingsTab('privacy', 'Приватность'),
   ]),
   ('Приложение', [
     SettingsTab('devices', 'Звук и видео'),
@@ -115,6 +117,7 @@ class _SettingsFrameState extends State<SettingsFrame> with SingleTickerProvider
           child: switch (tab) {
             'showcase' => const SettingsShowcase(),
             'account' => const SettingsAccount(),
+            'privacy' => const SettingsPrivacy(),
             'devices' => const SettingsDevices(),
             'about' => const _AboutPanel(),
             _ => const SettingsProfile(),

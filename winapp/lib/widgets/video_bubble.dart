@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 import '../app_config.dart';
-import '../theme/vellin_theme.dart';
+import '../theme/vellin_design.dart';
+import '../theme/vellin_glyphs.dart';
+import 'ui/vellin_icon.dart';
 
 /// Круглый бабл видео-кружка (поведение как в мессенджерах):
 /// * пока кружок виден в диалоге — крутится по кругу **без звука**;
@@ -23,14 +25,22 @@ class VideoBubble extends StatefulWidget {
   final String? videoUrl;
   final String? thumbUrl;
 
-  const VideoBubble({super.key, required this.status, required this.videoUrl, required this.thumbUrl});
+  /// Мой кружок или чужой — от этого зависит цвет подложки кольца.
+  final bool mine;
+
+  const VideoBubble({
+    super.key,
+    required this.status,
+    required this.videoUrl,
+    required this.thumbUrl,
+    this.mine = false,
+  });
 
   @override
   State<VideoBubble> createState() => _VideoBubbleState();
 }
 
 class _VideoBubbleState extends State<VideoBubble> {
-  static const double _size = 190;
   final _visibilityKey = UniqueKey();
 
   Player? _player;
@@ -42,6 +52,10 @@ class _VideoBubbleState extends State<VideoBubble> {
   bool _sound = false; // играет со звуком (после тапа)
   bool _paused = false; // поставлен на паузу тапом
   bool _failed = false;
+
+  /// Позиция и длина — для кольца прогресса.
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
 
   @override
   void initState() {
@@ -138,6 +152,14 @@ class _VideoBubbleState extends State<VideoBubble> {
     _subs.add(p.stream.completed.listen((done) {
       if (done && mounted && _sound) _backToSilentLoop();
     }));
+    // Позиция нужна только для кольца прогресса и только со звуком: в
+    // беззвучном цикле кольцо мельтешило бы на каждом обороте.
+    _subs.add(p.stream.position.listen((v) {
+      if (mounted && _sound) setState(() => _position = v);
+    }));
+    _subs.add(p.stream.duration.listen((v) {
+      if (mounted) setState(() => _duration = v);
+    }));
 
     // Дисковый кэш mpv не нужен для локального файла (и его создание падает).
     final platform = p.platform;
@@ -187,73 +209,171 @@ class _VideoBubbleState extends State<VideoBubble> {
 
   @override
   Widget build(BuildContext context) {
-    Widget inner;
-    if (widget.status == 'processing') {
-      inner = _circleOverlay(const CircularProgressIndicator(color: Colors.white, strokeWidth: 2), 'обрабатывается');
-    } else if (widget.status == 'failed' || _failed) {
-      inner = _circleOverlay(const Icon(Icons.error_outline, color: Colors.white70, size: 28), 'ошибка');
-    } else if (_controller != null) {
-      inner = Stack(fit: StackFit.expand, children: [
-        Video(controller: _controller!, fit: BoxFit.cover, controls: NoVideoControls),
-        if (_paused)
-          Container(
-            color: Colors.black.withValues(alpha: 0.3),
-            child: const Center(child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 46)),
-          )
-        else if (!_sound)
-          // Беззвучный цикл — ненавязчивый значок «без звука». По центру снизу:
-          // в углах круга ничего не поместить, ClipOval их срезает.
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 12,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.all(5),
-                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.45), shape: BoxShape.circle),
-                child: const Icon(Icons.volume_off_rounded, color: Colors.white, size: 15),
-              ),
-            ),
-          ),
-      ]);
-    } else {
-      // Постер, пока плеер не готов.
-      final thumb = AppConfig.mediaUrl(widget.thumbUrl);
-      inner = Stack(fit: StackFit.expand, children: [
-        if (thumb != null)
-          Image.network(thumb, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(color: VellinColors.bg3))
-        else
-          Container(color: VellinColors.bg3),
-        Container(color: Colors.black.withValues(alpha: 0.25)),
-        const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 44)),
-      ]);
-    }
+    // Кадр всегда круглый и одного размера: бокс 140 с отступом 9 под кольцо
+    // прогресса — так кружки в ленте стоят ровной колонкой.
+    const box = 140.0;
+    const inset = 9.0;
+
+    final playing = _sound && !_paused;
 
     return VisibilityDetector(
       key: _visibilityKey,
       onVisibilityChanged: _onVisibilityChanged,
-      child: GestureDetector(
-        onTap: widget.status == 'ready' ? _onTap : null,
-        child: ClipOval(
-          child: Container(
-            width: _size,
-            height: _size,
-            color: VellinColors.bg3,
-            child: inner,
+      child: Padding(
+        // Играющий кружок вырастает — оставляем ему воздух снизу заранее,
+        // иначе лента дёргалась бы на каждом запуске.
+        padding: EdgeInsets.only(bottom: playing ? 22 : 0),
+        child: MouseRegion(
+          cursor: widget.status == 'ready' ? SystemMouseCursors.click : MouseCursor.defer,
+          child: GestureDetector(
+            onTap: widget.status == 'ready' ? _onTap : null,
+            child: AnimatedScale(
+              duration: const Duration(milliseconds: 550),
+              curve: VellinMotion.standard,
+              scale: playing ? 1.14 : 1,
+              alignment: Alignment.bottomCenter,
+              child: AnimatedContainer(
+                duration: VellinMotion.state,
+                curve: VellinMotion.standard,
+                width: box,
+                height: box,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: playing
+                      ? const [
+                          BoxShadow(color: Color(0xB3000000), blurRadius: 34, offset: Offset(0, 12), spreadRadius: -10),
+                        ]
+                      : null,
+                ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // Кольцо прогресса поверх всего: оно и рамка кадра.
+                    CustomPaint(
+                      painter: _RingPainter(
+                        progress: _progress,
+                        mine: widget.mine,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(inset),
+                      child: ClipOval(child: _frame()),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _circleOverlay(Widget icon, String label) {
-    return Container(
-      color: VellinColors.bg3,
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        SizedBox(width: 28, height: 28, child: icon),
-        const SizedBox(height: 8),
-        Text(label, style: const TextStyle(color: VellinColors.text2, fontSize: 12)),
-      ]),
+  /// Доля проигранного: считается только когда кружок играет со звуком —
+  /// беззвучный цикл кольцо не крутит, иначе оно мельтешило бы в ленте.
+  double get _progress {
+    if (!_sound || _duration.inMilliseconds <= 0) return 0;
+    return (_position.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0);
+  }
+
+  Widget _frame() {
+    if (widget.status == 'processing') {
+      return _placeholder('обрабатывается');
+    }
+    if (widget.status == 'failed' || _failed) {
+      return _placeholder('не получилось');
+    }
+
+    final thumb = AppConfig.mediaUrl(widget.thumbUrl);
+    final playing = _sound && !_paused;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (_controller != null)
+          Video(controller: _controller!, fit: BoxFit.cover, controls: NoVideoControls)
+        else if (thumb != null)
+          Image.network(thumb, fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => const ColoredBox(color: VellinColors.bg5))
+        else
+          const ColoredBox(color: VellinColors.bg5),
+        // Пока не играет со звуком, кадр под вуалью с треугольником: беззвучный
+        // цикл — это ещё не воспроизведение, и путать их не нужно.
+        AnimatedOpacity(
+          duration: VellinMotion.state,
+          curve: VellinMotion.standard,
+          opacity: playing ? 0 : 1,
+          child: ColoredBox(
+            color: const Color(0x57080706),
+            child: Center(
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: VellinColors.glassPill,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: VellinColors.accentLine),
+                ),
+                alignment: Alignment.center,
+                child: VellinIcon.filled(
+                  VellinGlyphs.playFilled,
+                  size: 13,
+                  box: const Size(12, 12),
+                  color: VellinColors.accent,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
+
+  Widget _placeholder(String label) {
+    return ColoredBox(
+      color: VellinColors.skeleton,
+      child: Center(
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: VellinType.caption.copyWith(fontSize: 11.5),
+        ),
+      ),
+    );
+  }
+}
+
+/// Кольцо вокруг кадра: подложка и золотой прогресс от верхней точки.
+class _RingPainter extends CustomPainter {
+  final double progress;
+  final bool mine;
+
+  _RingPainter({required this.progress, required this.mine});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const stroke = 2.5;
+    final rect = Rect.fromCircle(
+      center: Offset(size.width / 2, size.height / 2),
+      radius: size.width / 2 - stroke / 2,
+    );
+
+    final base = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..color = mine ? const Color(0x33E2C99B) : const Color(0x24FFFFFF);
+    canvas.drawArc(rect, 0, 6.2831853, false, base);
+
+    if (progress <= 0) return;
+    final done = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..color = VellinColors.accent;
+    // Старт сверху: у дуги нулевой угол справа, поэтому смещаем на четверть.
+    canvas.drawArc(rect, -1.5707963, 6.2831853 * progress, false, done);
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter old) => old.progress != progress || old.mine != mine;
 }

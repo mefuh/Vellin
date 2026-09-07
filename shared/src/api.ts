@@ -226,6 +226,8 @@ export type RoomInviteRespondResponse =
 /** Живая инфо-сводка комнаты для попапа по тапу на карточку-приглашение. */
 export interface RoomInviteInfoResponse {
   roomName: string;
+  /** Слаг комнаты для ссылки на сайт: десктоп-клиент открывает её в браузере. */
+  slug: string | null;
   videoTitle: string | null;
   videoPoster: string | null;
   ownerUsername: string;
