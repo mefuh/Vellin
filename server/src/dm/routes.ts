@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
   ConversationThreadResponse,
+  ListCallHistoryResponse,
   ListConversationsResponse,
   RoomInviteInfoResponse,
   RoomInviteRespondRequest,
@@ -11,7 +12,13 @@ import type {
 import type { Principal } from '../auth/jwt.js';
 import { requireAuth } from '../auth/middleware.js';
 import { assertUploadsEnabled, assertDirectMessagesEnabled } from '../admin/platform/gate.js';
-import { getRoomInviteInfo, getThreadByPublicId, listConversations, respondRoomInvite } from './service.js';
+import {
+  getRoomInviteInfo,
+  getThreadByPublicId,
+  listCallHistory,
+  listConversations,
+  respondRoomInvite,
+} from './service.js';
 import { broadcastRoomInviteUpdate } from './realtime.js';
 import { ALLOWED_DM_IMAGE_MIME, MAX_DM_IMAGE_BYTES, processAndSaveDmImage } from './image.js';
 import { ALLOWED_DM_VOICE_MIME, MAX_DM_VOICE_BYTES, saveDmVoice } from './voice.js';
@@ -42,6 +49,13 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
     const p = requireUser(req, reply);
     if (!p) return;
     reply.send((await listConversations(p.userId)) satisfies ListConversationsResponse);
+  });
+
+  // История звонков — сквозная по всем диалогам (раздел «Звонки» в клиенте).
+  app.get<{ Querystring: { before?: string } }>('/dm/calls', async (req, reply) => {
+    const p = requireUser(req, reply);
+    if (!p) return;
+    reply.send((await listCallHistory(p.userId, req.query.before)) satisfies ListCallHistoryResponse);
   });
 
   app.get<{ Params: { publicId: string }; Querystring: { before?: string } }>(

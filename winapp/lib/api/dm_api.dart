@@ -1,3 +1,4 @@
+import '../models/call_history.dart';
 import '../models/dm.dart';
 import 'api_client.dart';
 
@@ -20,6 +21,18 @@ class DmApi {
           .map((e) => DmConversation.fromJson(e as Map<String, dynamic>))
           .toList(),
       unreadTotal: (j['unreadTotal'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  /// История звонков по всем диалогам (before — ISO для подгрузки старых).
+  Future<({List<CallHistoryEntry> calls, bool hasMore})> callHistory({String? before}) async {
+    final q = before != null ? '?before=${Uri.encodeQueryComponent(before)}' : '';
+    final j = await _c.get('/dm/calls$q') as Map<String, dynamic>;
+    return (
+      calls: (j['calls'] as List? ?? [])
+          .map((e) => CallHistoryEntry.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      hasMore: j['hasMore'] as bool? ?? false,
     );
   }
 

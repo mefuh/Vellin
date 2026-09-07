@@ -53,7 +53,9 @@ class DmList extends StatelessWidget {
         return DmListRow(
           conversation: c,
           active: c.peer.publicId == activePublicId,
-          online: presence.of(c.peer.id)?.online ?? c.online,
+          presence: presenceFromStatus(
+            presence.of(c.peer.id)?.status ?? (c.online ? 'online' : 'offline'),
+          ),
           onTap: () => onOpen(c),
         );
       },
@@ -65,14 +67,14 @@ class DmList extends StatelessWidget {
 class DmListRow extends StatelessWidget {
   final DmConversation conversation;
   final bool active;
-  final bool online;
+  final VellinPresence presence;
   final VoidCallback onTap;
 
   const DmListRow({
     super.key,
     required this.conversation,
     required this.active,
-    required this.online,
+    required this.presence,
     required this.onTap,
   });
 
@@ -111,7 +113,7 @@ class DmListRow extends StatelessWidget {
                   username: c.peer.username,
                   avatarUrl: c.peer.avatarUrl,
                   size: 42,
-                  presence: online ? VellinPresence.online : VellinPresence.offline,
+                  presence: presence,
                   bedColor: VellinColors.panel,
                 ),
                 const SizedBox(width: 11),

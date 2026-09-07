@@ -64,7 +64,7 @@ class FriendsPanel extends StatelessWidget {
               _PersonRow(
                 user: r.user,
                 subtitle: 'хочет добавить вас в друзья',
-                online: presence.of(r.user.id)?.online ?? false,
+                presence: presenceFromStatus(presence.of(r.user.id)?.status),
                 onTap: () => onOpenProfile(r.user),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -96,7 +96,7 @@ class FriendsPanel extends StatelessWidget {
               _PersonRow(
                 user: r.user,
                 subtitle: 'заявка отправлена',
-                online: presence.of(r.user.id)?.online ?? false,
+                presence: presenceFromStatus(presence.of(r.user.id)?.status),
                 onTap: () => onOpenProfile(r.user),
                 trailing: const _WaitingPill(),
               ),
@@ -105,8 +105,12 @@ class FriendsPanel extends StatelessWidget {
       );
     }
 
+    // «В сети» — только зелёный статус: отошедших этот таб не показывает,
+    // иначе он ничем не отличался бы от «Все».
     final list = tab == FriendsTab.online
-        ? friends.friends.where((f) => presence.of(f.user.id)?.online ?? f.online).toList()
+        ? friends.friends
+            .where((f) => (presence.of(f.user.id)?.status ?? (f.online ? 'online' : 'offline')) == 'online')
+            .toList()
         : friends.friends;
 
     if (friends.loading && friends.friends.isEmpty) return const _FriendsSkeleton();
@@ -119,11 +123,17 @@ class FriendsPanel extends StatelessWidget {
       itemCount: list.length,
       itemBuilder: (context, i) {
         final f = list[i];
-        final online = presence.of(f.user.id)?.online ?? f.online;
+        final info = presence.of(f.user.id);
+        final state = presenceFromStatus(info?.status ?? (f.online ? 'online' : 'offline'));
         return _PersonRow(
           user: f.user,
-          subtitle: online ? 'в сети' : presenceLabel(online: false, lastSeenAt: f.lastSeenAt),
-          online: online,
+          subtitle: switch (state) {
+            VellinPresence.online => 'в сети',
+            VellinPresence.away => 'недавно',
+            VellinPresence.offline =>
+              presenceLabel(online: false, lastSeenAt: info?.lastSeenAt ?? f.lastSeenAt),
+          },
+          presence: state,
           onTap: () => onOpenProfile(f.user),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
@@ -162,7 +172,7 @@ class FriendsPanel extends StatelessWidget {
         return _PersonRow(
           user: r.user,
           subtitle: _relationLabel(r.relationship),
-          online: presence.of(r.user.id)?.online ?? false,
+          presence: presenceFromStatus(presence.of(r.user.id)?.status),
           onTap: () => onOpenProfile(r.user),
           trailing: r.relationship == 'none'
               ? VellinIconButton(
@@ -231,14 +241,14 @@ class FriendsTabs extends StatelessWidget {
 class _PersonRow extends StatelessWidget {
   final PublicUser user;
   final String subtitle;
-  final bool online;
+  final VellinPresence presence;
   final Widget? trailing;
   final VoidCallback onTap;
 
   const _PersonRow({
     required this.user,
     required this.subtitle,
-    required this.online,
+    required this.presence,
     required this.onTap,
     this.trailing,
   });
@@ -268,7 +278,7 @@ class _PersonRow extends StatelessWidget {
                   username: user.username,
                   avatarUrl: user.avatarUrl,
                   size: 40,
-                  presence: online ? VellinPresence.online : VellinPresence.offline,
+                  presence: presence,
                   bedColor: VellinColors.panel,
                 ),
                 const SizedBox(width: 11),

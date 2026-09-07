@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
+import '../api/dm_api.dart';
 import '../api/friends_api.dart';
 import '../app_config.dart';
+import '../models/call_history.dart';
 import '../models/social.dart';
 import '../state/auth_controller.dart';
 import '../state/call_controller.dart';
@@ -14,6 +16,7 @@ import '../state/playback_controller.dart';
 import '../state/presence_controller.dart';
 import '../state/shell_controller.dart';
 import '../theme/vellin_design.dart';
+import '../widgets/calls/calls_panel.dart';
 import '../widgets/dm/chat_pane.dart';
 import '../widgets/dm/dm_list.dart';
 import '../widgets/dm/mini_player.dart';
@@ -49,6 +52,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _searching = false;
   Timer? _searchDebounce;
 
+  final _callsSearch = TextEditingController();
+  String _callsQuery = '';
+  List<CallHistoryEntry> _calls = [];
+  bool _callsLoading = false;
+  bool _callsLoaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -76,6 +85,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _searchDebounce?.cancel();
     _dmSearch.dispose();
     _friendsSearch.dispose();
+    _callsSearch.dispose();
     _dm?.stop();
     _presence?.stop();
     super.dispose();
@@ -108,9 +118,39 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
+  /// История звонков грузится при первом заходе в раздел, а не на старте:
+  /// большинству сеансов она не нужна.
+  Future<void> _loadCalls({bool force = false}) async {
+    if (_callsLoading || (_callsLoaded && !force)) return;
+    setState(() => _callsLoading = true);
+    try {
+      final res = await context.read<DmApi>().callHistory();
+      if (mounted) {
+        setState(() {
+          _calls = res.calls;
+          _callsLoaded = true;
+        });
+      }
+    } catch (_) {
+      // Раздел покажет пустое состояние — отдельного экрана ошибки у панели нет.
+    } finally {
+      if (mounted) setState(() => _callsLoading = false);
+    }
+  }
+
   void _openChat(String publicId) {
     context.read<DmController>().openThread(publicId);
     context.read<ShellController>().showChat();
+  }
+
+  /// Выход: сначала гасим живые каналы, потом сбрасываем сессию — иначе
+  /// сокет успевает отвалиться уже после смены окна и роняет лишние ошибки.
+  Future<void> _logout() async {
+    await context.read<PlaybackController>().stop();
+    await _dm?.stop();
+    await _presence?.stop();
+    if (!mounted) return;
+    await context.read<AuthController>().logout();
   }
 
   @override
@@ -129,7 +169,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         children: [
           VellinNavRail(
             section: shell.section,
-            onSelect: shell.selectSection,
+            onSelect: (s) {
+              shell.selectSection(s);
+              if (s == RailSection.calls) _loadCalls();
+            },
             unreadMessages: dm.unreadTotal,
             pendingRequests: friends.incoming.length,
           ),
@@ -155,6 +198,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       user: user,
                       onOpenSettings: () => shell.openSettings(),
                       onOpenProfile: () => shell.showProfile(null),
+                      onSelectStatus: (s) => context.read<AuthController>().setPresenceStatus(s),
+                      onLogout: _logout,
                     ),
                 ],
               ),
@@ -241,26 +286,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         );
 
       case RailSection.calls:
+        final list = _callsQuery.isEmpty
+            ? _calls
+            : _calls
+                .where((c) => c.peer.username.toLowerCase().contains(_callsQuery.toLowerCase()))
+                .toList();
         return Column(
           key: const ValueKey('calls'),
           children: [
             PanelHeader(
               title: 'Звонки',
-              searchController: TextEditingController(),
+              counter: _calls.isNotEmpty ? '${_calls.length} записей' : null,
+              searchController: _callsSearch,
               searchPlaceholder: 'Поиск по звонкам',
+              onSearch: (q) => setState(() => _callsQuery = q.trim()),
             ),
-            const Expanded(
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 20),
-                child: Text(
-                  'История звонков появится здесь',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontFamily: VellinType.family,
-                    fontSize: 12.5,
-                    color: VellinColors.ink32,
-                  ),
-                ),
+            Expanded(
+              child: CallsPanel(
+                calls: list,
+                loading: _callsLoading,
+                onCallBack: (u) => context.read<CallController>().invite(u.id, video: false),
+                onOpenProfile: (u) => context.read<ShellController>().showProfile(u.publicId),
               ),
             ),
           ],

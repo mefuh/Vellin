@@ -1,5 +1,12 @@
 import type { Conversation, DirectMessage, Room } from '@prisma/client';
-import type { DirectMessageDTO, DmConversation, DmEligibility, Gender, PublicUser } from '@vellin/shared';
+import type {
+  CallHistoryEntry,
+  DirectMessageDTO,
+  DmConversation,
+  DmEligibility,
+  Gender,
+  PublicUser,
+} from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 import { canSee, parsePrivacy } from '../privacy/privacy.js';
 import { PUBLIC_USER_SELECT, toPublicUser } from '../friends/mappers.js';
@@ -763,4 +770,61 @@ export async function getThreadByPublicId(
     peerGender,
     eligibility,
   };
+}
+
+/** Сколько записей о звонках отдаём за раз. */
+const CALLS_PAGE = 40;
+
+/**
+ * История звонков по всем диалогам сразу.
+ *
+ * Записи о звонках лежат обычными сообщениями с проставленным `callId` —
+ * отдельной таблицы у них нет. Разделу «Звонки» нужен сквозной список, поэтому
+ * выбираем их по всем диалогам пользователя одним запросом, а не собираем на
+ * клиенте из открытых переписок: так в списке будут и те разговоры, чью
+ * переписку ни разу не открывали.
+ */
+export async function listCallHistory(
+  meId: string,
+  before?: string,
+): Promise<{ calls: CallHistoryEntry[]; hasMore: boolean }> {
+  const beforeDate = before ? new Date(before) : null;
+  const rows = await prisma.directMessage.findMany({
+    where: {
+      callId: { not: null },
+      conversation: { OR: [{ userAId: meId }, { userBId: meId }] },
+      ...(beforeDate && !Number.isNaN(beforeDate.getTime()) ? { createdAt: { lt: beforeDate } } : {}),
+    },
+    orderBy: { createdAt: 'desc' },
+    take: CALLS_PAGE + 1,
+    include: {
+      conversation: {
+        select: {
+          userA: { select: PUBLIC_USER_SELECT },
+          userB: { select: PUBLIC_USER_SELECT },
+        },
+      },
+    },
+  });
+
+  const hasMore = rows.length > CALLS_PAGE;
+  const calls = rows.slice(0, CALLS_PAGE).map((m) => {
+    // Отправителем записи всегда числится звонивший — по нему и определяется
+    // направление, отдельного поля для этого не нужно.
+    const outgoing = m.senderId === meId;
+    const a = m.conversation.userA;
+    const b = m.conversation.userB;
+    const peer = a.id === meId ? b : a;
+    return {
+      id: m.id,
+      peer: toPublicUser(peer),
+      direction: outgoing ? 'outgoing' : 'incoming',
+      kind: m.callKind === 'video' ? 'video' : 'audio',
+      outcome: (m.callOutcome ?? 'completed') as CallHistoryEntry['outcome'],
+      durationSec: m.callDurationSec ?? 0,
+      createdAt: m.createdAt.toISOString(),
+    } satisfies CallHistoryEntry;
+  });
+
+  return { calls, hasMore };
 }

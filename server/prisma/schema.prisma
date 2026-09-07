@@ -30,6 +30,9 @@ model User {
   createdAt    DateTime  @default(now())
   /// Момент последнего ухода в офлайн (для «был в сети …»). Null — ещё не уходил.
   lastSeenAt   DateTime?
+  /// Выбранный статус присутствия: online | away | offline. Показывается
+  /// собеседникам, только пока есть живое соединение.
+  presenceStatus String @default("online")
   /// JSON настроек приватности (PrivacySettings). Пусто/невалидно → всё видно
   /// всем (текущее поведение). Категории: online, friends, personalInfo, favorites.
   privacyJson  String    @default("{}")

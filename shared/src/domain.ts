@@ -112,6 +112,8 @@ export interface AuthUser extends PublicUser {
   /** Город. Null — не указан. */
   city: string | null;
   createdAt: string;
+  /** Выбранный статус присутствия (не то же, что реальная связь). */
+  presenceStatus: PresenceStatus;
   /** True only for the single user whose email matches ADMIN_EMAIL on the server. */
   isAdmin: boolean;
 }
@@ -601,6 +603,27 @@ export interface DmConversation {
   lastMessageAt: string;
 }
 
+/**
+ * Строка истории звонков: одна на состоявшийся или несостоявшийся разговор.
+ *
+ * Записи живут сообщениями внутри переписок (у них проставлен `callId`), но
+ * разделу «Звонки» нужен сквозной список по всем диалогам, а не по одному.
+ */
+export interface CallHistoryEntry {
+  /** Идентификатор сообщения-записи. */
+  id: string;
+  /** С кем был разговор. */
+  peer: PublicUser;
+  /** Звонил я (исходящий) или мне (входящий). */
+  direction: 'outgoing' | 'incoming';
+  kind: 'audio' | 'video';
+  outcome: 'completed' | 'missed' | 'declined' | 'cancelled' | 'failed';
+  /** Длительность разговора в секундах; 0 — не состоялся. */
+  durationSec: number;
+  /** Когда (ISO). */
+  createdAt: string;
+}
+
 /** Можно ли писать данному пользователю + причина запрета (для UI чата). */
 export interface DmEligibility {
   canMessage: boolean;
@@ -608,9 +631,19 @@ export interface DmEligibility {
 }
 
 /** Live-присутствие друга, рассылается по пользовательскому WS-каналу. */
+/**
+ * Присутствие: «в сети» / «недавно» / «не в сети».
+ *
+ * Первые два состояния возможны только при живом соединении: статус, выбранный
+ * руками, показывается собеседникам лишь пока человек на связи.
+ */
+export type PresenceStatus = 'online' | 'away' | 'offline';
+
 export interface FriendPresence {
   userId: string;
   online: boolean;
+  /** Что показывать в списках: учитывает и связь, и выбранный статус. */
+  status: PresenceStatus;
   currentRoom: RoomRef | null;
   /** ISO-время последнего захода (момент ухода в офлайн). Null, если онлайн или неизвестно. */
   lastSeenAt: string | null;

@@ -228,6 +228,15 @@ export async function buildApp(): Promise<FastifyInstance> {
     });
     return parsePrivacy(u?.privacyJson).online;
   });
+  // Статус, выбранный руками («в сети» / «недавно» / «не в сети»), читается
+  // один раз при подключении и дальше живёт в памяти хаба.
+  userHub.setPresenceStatusResolver(async (userId) => {
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { presenceStatus: true },
+    });
+    return u?.presenceStatus === 'away' || u?.presenceStatus === 'offline' ? u.presenceStatus : 'online';
+  });
 
   await registerWebSocket(app);
 

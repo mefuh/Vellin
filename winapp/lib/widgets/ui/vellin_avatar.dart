@@ -7,6 +7,13 @@ import '../../theme/vellin_design.dart';
 /// «недавно» нужно и списку, и меню статуса в карточке «я».
 enum VellinPresence { online, away, offline }
 
+/// Статус с сервера ('online' | 'away' | 'offline') → присутствие для вида.
+VellinPresence presenceFromStatus(String? status) => switch (status) {
+      'online' => VellinPresence.online,
+      'away' => VellinPresence.away,
+      _ => VellinPresence.offline,
+    };
+
 extension VellinPresenceColor on VellinPresence {
   Color get color => switch (this) {
         VellinPresence.online => VellinColors.online,

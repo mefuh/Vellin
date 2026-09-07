@@ -2,6 +2,7 @@ import type {
   AdminRoomSummary,
   AppNotification,
   AuthUser,
+  CallHistoryEntry,
   DeviceSession,
   FavoriteTitle,
   FriendRequest,
@@ -291,6 +292,12 @@ export interface ListConversationsResponse {
   conversations: DmConversation[];
   /** Суммарно непрочитанных ЛС по всем диалогам — для бейджа в навбаре. */
   unreadTotal: number;
+}
+/** История звонков по всем диалогам — раздел «Звонки». */
+export interface ListCallHistoryResponse {
+  calls: CallHistoryEntry[];
+  /** Есть ли записи раньше последней в выдаче (для подгрузки). */
+  hasMore: boolean;
 }
 /** Тред переписки с одним собеседником (последняя страница сообщений). */
 export interface ConversationThreadResponse {

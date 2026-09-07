@@ -444,6 +444,7 @@ class _ChatHeader extends StatelessWidget {
     final peer = dm.activePeer;
     final peerId = dm.activePeerUserId;
     final info = peerId != null ? presence.of(peerId) : null;
+    final state = presenceFromStatus(info?.status);
     final busy = call.call != null;
 
     return Container(
@@ -476,7 +477,7 @@ class _ChatHeader extends StatelessWidget {
                       const SizedBox(height: 2),
                       _StatusLine(
                         activity: dm.peerActivity,
-                        online: info?.online ?? false,
+                        presence: state,
                         lastSeenAt: info?.lastSeenAt,
                       ),
                     ],
@@ -507,10 +508,10 @@ class _ChatHeader extends StatelessWidget {
 /// Строка состояния: «печатает…» с точками либо присутствие.
 class _StatusLine extends StatelessWidget {
   final String? activity;
-  final bool online;
+  final VellinPresence presence;
   final String? lastSeenAt;
 
-  const _StatusLine({required this.activity, required this.online, required this.lastSeenAt});
+  const _StatusLine({required this.activity, required this.presence, required this.lastSeenAt});
 
   @override
   Widget build(BuildContext context) {
@@ -531,9 +532,17 @@ class _StatusLine extends StatelessWidget {
     }
 
     return Text(
-      presenceLabel(online: online, lastSeenAt: lastSeenAt),
+      switch (presence) {
+        VellinPresence.online => 'в сети',
+        VellinPresence.away => 'недавно',
+        VellinPresence.offline => presenceLabel(online: false, lastSeenAt: lastSeenAt),
+      },
       style: VellinType.caption.copyWith(
-        color: online ? const Color(0xE693B08A) : VellinColors.ink28,
+        color: switch (presence) {
+          VellinPresence.online => const Color(0xE693B08A),
+          VellinPresence.away => const Color(0xCCD6AE6E),
+          VellinPresence.offline => VellinColors.ink28,
+        },
       ),
     );
   }

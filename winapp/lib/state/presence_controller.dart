@@ -2,11 +2,16 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../realtime/user_socket.dart';
 
-/// Живое присутствие пользователя (online + время последнего захода).
+/// Живое присутствие пользователя.
+///
+/// [status] — то, что показывать в списках: «в сети», «недавно» или «не в
+/// сети». Он учитывает и связь, и выбранный человеком статус, поэтому
+/// `online` из него выводится, а не наоборот.
 class PresenceInfo {
   final bool online;
+  final String status; // online | away | offline
   final String? lastSeenAt;
-  const PresenceInfo({required this.online, required this.lastSeenAt});
+  const PresenceInfo({required this.online, required this.status, required this.lastSeenAt});
 }
 
 /// Хранит presence всех пользователей, о которых сервер прислал данные:
@@ -81,8 +86,12 @@ class PresenceController extends ChangeNotifier {
   void _apply(Map<String, dynamic> p) {
     final id = p['userId'] as String?;
     if (id == null) return;
+    final online = p['online'] as bool? ?? false;
     _map[id] = PresenceInfo(
-      online: p['online'] as bool? ?? false,
+      online: online,
+      // Сервер старой версии статуса не присылает — тогда выводим его из
+      // «онлайн да/нет», чтобы клиент работал и с ним.
+      status: p['status'] as String? ?? (online ? 'online' : 'offline'),
       lastSeenAt: p['lastSeenAt'] as String?,
     );
   }

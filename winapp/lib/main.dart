@@ -107,6 +107,7 @@ Future<void> main(List<String> args) async {
         Provider<AuthApi>.value(value: authApi),
         Provider<FriendsApi>.value(value: friendsApi),
         Provider<CatalogApi>.value(value: catalogApi),
+        Provider<DmApi>.value(value: dmApi),
         ChangeNotifierProvider<AuthController>.value(value: auth),
         ChangeNotifierProvider<FriendsController>(create: (_) => FriendsController(friendsApi)),
         ChangeNotifierProvider<DmController>(create: (_) => DmController(dmApi, socket)),
