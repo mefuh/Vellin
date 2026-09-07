@@ -28,6 +28,7 @@ import 'runtime/auth_window.dart';
 import 'runtime/toast_host.dart';
 import 'runtime/toast_window.dart';
 import 'runtime/updater_splash.dart';
+import 'screens/settings/settings_layer.dart';
 import 'widgets/call_overlay.dart';
 import 'widgets/notifications_bell.dart';
 // Заголовок окна и его высота: экран звонка отступает на неё сверху.
@@ -260,6 +261,15 @@ class _VellinAppState extends State<VellinApp> {
             const CallBarSlot(),
             Expanded(child: child ?? const SizedBox.shrink()),
           ]),
+          // Настройки — фрейм НИЖЕ заголовка окна: кнопки свернуть, развернуть
+          // и закрыть остаются доступными, пока настройки открыты.
+          const Positioned(
+            top: kWindowTitleBarHeight,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SettingsLayer(),
+          ),
           // Positioned.fill обязателен: вложенный Stack без него схлопнулся бы
           // по содержимому и рисовал экраны не на месте.
           const Positioned.fill(child: CallLayer()),
