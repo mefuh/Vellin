@@ -30,9 +30,16 @@ class ToastHost {
   /// Подписывается контроллер звонков.
   void Function(String callId, String action)? onCallAction;
 
+  /// Показывать ли всплывающие уведомления вообще — задаётся настройками.
+  bool Function()? enabled;
+
+  /// Показывать ли в них текст сообщения.
+  bool Function()? preview;
+
   /// Показать уведомление, если главное окно сейчас не в фокусе: при активном
   /// окне пользователю достаточно колокольчика.
   Future<void> show(AppNotification n) async {
+    if (enabled?.call() == false) return;
     try {
       if (await windowManager.isFocused()) return;
     } catch (_) {
@@ -44,7 +51,8 @@ class ToastHost {
       'cmd': 'show',
       'id': n.id,
       'title': n.toastTitle,
-      'body': n.toastBody,
+      // Без превью в уведомлении остаётся только факт: кто написал.
+      'body': preview?.call() == false ? 'Новое сообщение' : n.toastBody,
       'avatarUrl': AppConfig.mediaUrl(n.actor?.avatarUrl),
       'avatarSeed': n.actor?.avatarSeed ?? '',
     });

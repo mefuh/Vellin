@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:window_manager/window_manager.dart';
 import '../api/dm_api.dart';
 import '../models/dm.dart';
 import '../models/social.dart';
 import '../realtime/user_socket.dart';
+import '../runtime/call_tones.dart';
 
 /// Состояние личных сообщений: WebSocket-канал, список диалогов и активный тред.
 /// Отправка — по WS (dm_send с nonce + оптимистичный бабл), приём — dm_message.
@@ -386,6 +388,9 @@ class DmController extends ChangeNotifier {
 
   void _onDmMessage(DirectMessage m) {
     final isActive = _activeConversationId != null && m.conversationId == _activeConversationId;
+    // Звук новой реплики — только чужой и только когда окно не в фокусе: при
+    // открытом окне человек и так видит, что пришло.
+    if (m.senderId != _myUserId) _chimeIfAway();
     // Первый ответ создаёт диалог — привяжем conversationId к активному треду,
     // если сообщение от текущего собеседника, а треда ещё не было.
     if (_activeConversationId == null && (m.senderId == _activePeerUserId || (m.nonce != null && m.senderId == _myUserId))) {
@@ -409,6 +414,20 @@ class DmController extends ChangeNotifier {
     }
     // Обновляем список диалогов (превью/порядок/непрочитанные) из источника истины.
     loadConversations();
+  }
+
+  /// Настройки уведомлений задаются в оболочке; контроллер о них знает через
+  /// этот хук, чтобы не тянуть за собой провайдеры.
+  bool Function()? soundEnabled;
+
+  Future<void> _chimeIfAway() async {
+    if (soundEnabled?.call() == false) return;
+    try {
+      if (await windowManager.isFocused()) return;
+    } catch (_) {
+      // Состояние окна неизвестно — лучше звякнуть, чем пропустить.
+    }
+    CallTones.instance.playMessage();
   }
 
   void _clearUnread(String publicId) {

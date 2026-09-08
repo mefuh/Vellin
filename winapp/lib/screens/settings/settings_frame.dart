@@ -9,7 +9,9 @@ import '../../widgets/shell/phase_switch.dart';
 import '../../widgets/ui/vellin_hover.dart';
 import '../../widgets/ui/vellin_icon.dart';
 import 'settings_account.dart';
+import 'settings_appearance.dart';
 import 'settings_devices.dart';
+import 'settings_notifications.dart';
 import 'settings_privacy.dart';
 import 'settings_profile.dart';
 import 'settings_showcase.dart';
@@ -30,6 +32,8 @@ const _groups = <(String, List<SettingsTab>)>[
   ]),
   ('Приложение', [
     SettingsTab('devices', 'Звук и видео'),
+    SettingsTab('notifications', 'Уведомления'),
+    SettingsTab('appearance', 'Оформление'),
   ]),
   ('Прочее', [
     SettingsTab('about', 'О программе'),
@@ -119,6 +123,8 @@ class _SettingsFrameState extends State<SettingsFrame> with SingleTickerProvider
             'account' => const SettingsAccount(),
             'privacy' => const SettingsPrivacy(),
             'devices' => const SettingsDevices(),
+            'notifications' => const SettingsNotifications(),
+            'appearance' => const SettingsAppearance(),
             'about' => const _AboutPanel(),
             _ => const SettingsProfile(),
           },

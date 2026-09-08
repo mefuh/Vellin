@@ -24,6 +24,28 @@ class CallTones {
   /// Гудки дозвона: длинный сигнал раз в четыре секунды.
   Future<void> startRingback() => _loop('ringback', _ringbackWav);
 
+  /// Короткий сигнал новой реплики. Разовый и на своём плеере, чтобы не сбить
+  /// идущую трель звонка.
+  Future<void> playMessage() async {
+    try {
+      final file = File(
+        '${Directory.systemTemp.path}${Platform.pathSeparator}vellin_message.wav',
+      );
+      if (!await file.exists()) await file.writeAsBytes(_messageWav());
+      final player = Player();
+      await player.setVolume(45);
+      await player.open(Media(file.path));
+      // Отпускаем движок сами: ждать события окончания ради полусекунды незачем.
+      Future.delayed(const Duration(seconds: 2), () async {
+        try {
+          await player.dispose();
+        } catch (_) {}
+      });
+    } catch (_) {
+      // Молча: сообщение и так видно в списке диалогов.
+    }
+  }
+
   Future<void> stop() async {
     _playing = null;
     final player = _player;
@@ -64,6 +86,16 @@ class CallTones {
   static Uint8List _ringbackWav() => _wav(4.0, (t) {
         if (t >= 1.0) return 0;
         return math.sin(2 * math.pi * 425 * t) * _fade(t, 1.0) * 0.7;
+      });
+
+  /// Полсекунды: две быстрые ноты вверх — так сигнал не путается с трелью.
+  static Uint8List _messageWav() => _wav(0.5, (t) {
+        if (t < 0.11) return math.sin(2 * math.pi * 660 * t) * _fade(t, 0.11);
+        if (t >= 0.13 && t < 0.28) {
+          final u = t - 0.13;
+          return math.sin(2 * math.pi * 880 * u) * _fade(u, 0.15) * 0.9;
+        }
+        return 0;
       });
 
   /// Плавные края сигнала: резкий обрыв синуса даёт щелчок.

@@ -48,6 +48,9 @@ class CallController extends ChangeNotifier {
 
   StreamSubscription<CallSettingsChange>? _settingsSub;
 
+  /// Играть ли мелодию входящего — настройка оболочки, задаётся при старте.
+  bool Function()? ringtoneEnabled;
+
   CallController(this._socket, this._toasts, this.settings) {
     _toasts.onCallAction = _onToastAction;
     // Настройки меняют посреди разговора — применяем их на ходу.
@@ -365,7 +368,8 @@ class CallController extends ChangeNotifier {
         _rtcConfig = _toRtcConfig(msg['rtc']);
         incoming = IncomingDmCall(snapshot, from);
         error = null;
-        CallTones.instance.startRingtone();
+        // Мелодию можно выключить в настройках — экран входящего остаётся.
+        if (ringtoneEnabled?.call() != false) CallTones.instance.startRingtone();
         _showCallToast(snapshot, from);
         notifyListeners();
         break;

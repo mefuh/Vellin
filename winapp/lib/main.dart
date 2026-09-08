@@ -17,6 +17,7 @@ import 'state/dm_controller.dart';
 import 'state/call_controller.dart';
 import 'state/notifications_controller.dart';
 import 'state/presence_controller.dart';
+import 'state/app_settings.dart';
 import 'state/playback_controller.dart';
 import 'state/shell_controller.dart';
 import 'state/update_controller.dart';
@@ -69,11 +70,19 @@ Future<void> main(List<String> args) async {
   final callSettings = CallSettings();
   callSettings.load();
 
+  // Уведомления и оформление — настройки этого компьютера, а не аккаунта.
+  final appSettings = AppSettings();
+  appSettings.load();
+
   // Всплывающие уведомления в фирменном стиле — отдельным окном-процессом.
   // Поднимается лениво, при первом уведомлении.
   final toasts = ToastHost();
   final notifications = NotificationsController(notificationsApi, friendsApi, socket);
   notifications.onIncoming = toasts.show;
+  // Тостер спрашивает настройки в момент показа, а не запоминает их: человек
+  // мог передумать между двумя уведомлениями.
+  toasts.enabled = () => appSettings.toasts;
+  toasts.preview = () => appSettings.toastPreview;
 
   // Старт: сценарий обновления и восстановление сессии идут параллельно.
   update.run();
@@ -111,13 +120,24 @@ Future<void> main(List<String> args) async {
         Provider<DmApi>.value(value: dmApi),
         ChangeNotifierProvider<AuthController>.value(value: auth),
         ChangeNotifierProvider<FriendsController>(create: (_) => FriendsController(friendsApi)),
-        ChangeNotifierProvider<DmController>(create: (_) => DmController(dmApi, socket)),
+        ChangeNotifierProvider<DmController>(
+          create: (_) {
+            final dm = DmController(dmApi, socket);
+            dm.soundEnabled = () => appSettings.messageSound;
+            return dm;
+          },
+        ),
         ChangeNotifierProvider<PresenceController>(create: (_) => PresenceController(socket)),
         ChangeNotifierProvider<NotificationsController>.value(value: notifications),
         ChangeNotifierProvider<CallSettings>.value(value: callSettings),
+        ChangeNotifierProvider<AppSettings>.value(value: appSettings),
         // Тостер нужен звонкам: при неактивном окне входящий приходит им.
         ChangeNotifierProvider<CallController>(
-          create: (_) => CallController(socket, toasts, callSettings),
+          create: (_) {
+            final calls = CallController(socket, toasts, callSettings);
+            calls.ringtoneEnabled = () => appSettings.ringtone;
+            return calls;
+          },
         ),
         Provider<ToastHost>.value(value: toasts),
         ChangeNotifierProvider<UpdateController>.value(value: update),
@@ -249,7 +269,12 @@ class _VellinAppState extends State<VellinApp> {
         // собраны на своих виджетах, но Material-предок всё равно нужен: без
         // него у текста нет стиля по умолчанию (жёлтое подчёркивание отладки),
         // а полям ввода негде рисовать выделение и меню.
-        builder: (context, child) => Material(
+        builder: (context, child) => MediaQuery.withClampedTextScaling(
+          // Размер текста из настроек оформления. Ставится здесь, над всем
+          // содержимым, чтобы одинаково касался и панелей, и наложений.
+          minScaleFactor: context.watch<AppSettings>().textScale,
+          maxScaleFactor: context.watch<AppSettings>().textScale,
+          child: Material(
           type: MaterialType.transparency,
           child: DefaultTextStyle(
             style: VellinType.body,
@@ -276,6 +301,7 @@ class _VellinAppState extends State<VellinApp> {
           const Positioned(top: 0, left: 0, right: 0, child: WindowTitleBar()),
           const NotificationsPanelOverlay(),
             ]),
+          ),
           ),
         ),
       );
