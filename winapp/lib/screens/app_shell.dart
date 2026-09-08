@@ -19,6 +19,7 @@ import '../theme/vellin_design.dart';
 import 'profile_pane.dart';
 import '../widgets/calls/calls_panel.dart';
 import '../widgets/dm/chat_pane.dart';
+import '../widgets/dm/circle_pip.dart';
 import '../widgets/dm/dm_list.dart';
 import '../widgets/dm/mini_player.dart';
 import '../widgets/friends/friends_panel.dart';
@@ -349,6 +350,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             right: 0,
             child: MiniPlayer(openPeerPublicId: dm.activePeerPublicId),
           ),
+        // Кружок, уехавший из видимой части ленты, — окошком справа сверху,
+        // под шапкой чата.
+        const Positioned(
+          top: VellinLayout.chatHeader + 14,
+          right: 18,
+          child: CirclePip(),
+        ),
       ],
     );
   }

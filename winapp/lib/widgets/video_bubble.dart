@@ -6,6 +6,8 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 import '../app_config.dart';
+import 'package:provider/provider.dart';
+import '../state/circle_playback_controller.dart';
 import '../theme/vellin_design.dart';
 import '../theme/vellin_glyphs.dart';
 import 'ui/vellin_icon.dart';
@@ -21,6 +23,9 @@ import 'ui/vellin_icon.dart';
 /// mpv на Windows падает с «Failed to create file cache», а предзагрузка ещё и
 /// убирает задержку старта.
 class VideoBubble extends StatefulWidget {
+  /// Сообщение: по нему общий плеер понимает, чей кружок сейчас звучит.
+  final String messageId;
+
   final String? status; // processing | ready | failed
   final String? videoUrl;
   final String? thumbUrl;
@@ -30,6 +35,7 @@ class VideoBubble extends StatefulWidget {
 
   const VideoBubble({
     super.key,
+    required this.messageId,
     required this.status,
     required this.videoUrl,
     required this.thumbUrl,
@@ -49,18 +55,36 @@ class _VideoBubbleState extends State<VideoBubble> {
   Future<String>? _download;
 
   bool _starting = false; // идёт создание плеера
-  bool _sound = false; // играет со звуком (после тапа)
-  bool _paused = false; // поставлен на паузу тапом
   bool _failed = false;
 
-  /// Позиция и длина — для кольца прогресса.
-  Duration _position = Duration.zero;
-  Duration _duration = Duration.zero;
+  /// Общий плеер озвученных кружков.
+  CirclePlaybackController? _circles;
+
+  /// Звучал ли этот кружок на прошлой перерисовке — по спаду возвращаем
+  /// беззвучный цикл: события видимости в этот момент не приходит.
+  bool _wasCurrent = false;
 
   @override
   void initState() {
     super.initState();
     _prefetch();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final circles = context.read<CirclePlaybackController>();
+    if (identical(circles, _circles)) return;
+    _circles?.removeListener(_onCirclesChanged);
+    _circles = circles..addListener(_onCirclesChanged);
+  }
+
+  void _onCirclesChanged() {
+    if (!mounted) return;
+    final current = _circles?.isCurrent(widget.messageId) ?? false;
+    if (_wasCurrent && !current) _startSilentLoop();
+    _wasCurrent = current;
+    setState(() {});
   }
 
   @override
@@ -72,6 +96,7 @@ class _VideoBubbleState extends State<VideoBubble> {
 
   @override
   void dispose() {
+    _circles?.removeListener(_onCirclesChanged);
     _teardown();
     super.dispose();
   }
@@ -105,17 +130,19 @@ class _VideoBubbleState extends State<VideoBubble> {
     _player?.dispose();
     _player = null;
     _controller = null;
-    _sound = false;
-    _paused = false;
   }
 
   /// Кружок появился/скрылся в списке: видимый — крутим беззвучно, скрытый —
   /// освобождаем плеер.
+  ///
+  /// Кружок, включённый со звуком, живёт не здесь, а в общем плеере: ему уход
+  /// строки за край экрана не помеха — картинка просто переезжает в окошко.
   void _onVisibilityChanged(VisibilityInfo info) {
     if (!mounted) return;
     final visible = info.visibleFraction > 0.3;
+    _circles?.setBubbleVisible(widget.messageId, visible);
     if (visible) {
-      _startSilentLoop();
+      if (_circles?.isCurrent(widget.messageId) != true) _startSilentLoop();
     } else if (_player != null) {
       setState(_teardown);
     }
@@ -148,18 +175,8 @@ class _VideoBubbleState extends State<VideoBubble> {
     _player = p;
     _controller = c;
 
-    // Доиграл со звуком → возвращаемся к беззвучному циклу.
-    _subs.add(p.stream.completed.listen((done) {
-      if (done && mounted && _sound) _backToSilentLoop();
-    }));
-    // Позиция нужна только для кольца прогресса и только со звуком: в
-    // беззвучном цикле кольцо мельтешило бы на каждом обороте.
-    _subs.add(p.stream.position.listen((v) {
-      if (mounted && _sound) setState(() => _position = v);
-    }));
-    _subs.add(p.stream.duration.listen((v) {
-      if (mounted) setState(() => _duration = v);
-    }));
+    // Подписок на позицию и окончание здесь нет: этот плеер только крутит
+    // беззвучный цикл, а всё, что показывает кольцо, считает общий плеер.
 
     // Дисковый кэш mpv не нужен для локального файла (и его создание падает).
     final platform = p.platform;
@@ -174,37 +191,34 @@ class _VideoBubbleState extends State<VideoBubble> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _backToSilentLoop() async {
-    final p = _player;
-    if (p == null) return;
-    setState(() { _sound = false; _paused = false; });
-    await p.setVolume(0);
-    await p.setPlaylistMode(PlaylistMode.single);
-    await p.seek(Duration.zero);
-    await p.play();
-  }
-
-  /// Тап: беззвучный цикл → играть с начала со звуком; со звуком → пауза;
-  /// на паузе → продолжить.
+  /// Тап: беззвучный цикл → играть с начала со звуком в общем плеере;
+  /// уже звучит → пауза; на паузе → продолжить.
   Future<void> _onTap() async {
-    final p = _player;
-    if (p == null) {
-      _startSilentLoop();
+    final circles = _circles;
+    if (circles == null) return;
+
+    if (circles.isCurrent(widget.messageId)) {
+      await circles.toggle();
       return;
     }
-    if (!_sound) {
-      setState(() { _sound = true; _paused = false; });
-      await p.setPlaylistMode(PlaylistMode.none); // со звуком — один раз
-      await p.seek(Duration.zero);
-      await p.setVolume(100);
-      await p.play();
-    } else if (!_paused) {
-      setState(() => _paused = true);
-      await p.pause();
-    } else {
-      setState(() => _paused = false);
-      await p.play();
+
+    if (_download == null) {
+      _prefetch();
+      if (_download == null) return;
     }
+    String path;
+    try {
+      path = await _download!;
+      if (path.isEmpty) throw Exception('download failed');
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+      return;
+    }
+    if (!mounted) return;
+
+    // Свой беззвучный цикл гасим: иначе один кружок звучал бы из двух плееров.
+    setState(_teardown);
+    await circles.play(CircleItem(messageId: widget.messageId, path: path));
   }
 
   @override
@@ -214,7 +228,7 @@ class _VideoBubbleState extends State<VideoBubble> {
     const box = 140.0;
     const inset = 9.0;
 
-    final playing = _sound && !_paused;
+    final playing = _playingWithSound;
 
     return VisibilityDetector(
       key: _visibilityKey,
@@ -269,12 +283,15 @@ class _VideoBubbleState extends State<VideoBubble> {
     );
   }
 
+  /// Этот ли кружок сейчас в общем плеере.
+  bool get _isCurrent => _circles?.isCurrent(widget.messageId) ?? false;
+
+  /// Играет со звуком: воспроизведение идёт в общем плеере и не на паузе.
+  bool get _playingWithSound => _isCurrent && (_circles?.playing ?? false);
+
   /// Доля проигранного: считается только когда кружок играет со звуком —
   /// беззвучный цикл кольцо не крутит, иначе оно мельтешило бы в ленте.
-  double get _progress {
-    if (!_sound || _duration.inMilliseconds <= 0) return 0;
-    return (_position.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0);
-  }
+  double get _progress => _isCurrent ? (_circles?.progress ?? 0) : 0;
 
   Widget _frame() {
     if (widget.status == 'processing') {
@@ -285,12 +302,17 @@ class _VideoBubbleState extends State<VideoBubble> {
     }
 
     final thumb = AppConfig.mediaUrl(widget.thumbUrl);
-    final playing = _sound && !_paused;
+    final playing = _playingWithSound;
+    // Звучащий кружок рисуется из общего плеера — своего у баббла в этот
+    // момент нет, он его отдал вместе с воспроизведением.
+    final shared = _isCurrent ? _circles?.controller : null;
 
     return Stack(
       fit: StackFit.expand,
       children: [
-        if (_controller != null)
+        if (shared != null)
+          Video(controller: shared, fit: BoxFit.cover, controls: NoVideoControls)
+        else if (_controller != null)
           Video(controller: _controller!, fit: BoxFit.cover, controls: NoVideoControls)
         else if (thumb != null)
           Image.network(thumb, fit: BoxFit.cover,

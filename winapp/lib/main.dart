@@ -18,6 +18,7 @@ import 'state/call_controller.dart';
 import 'state/notifications_controller.dart';
 import 'state/presence_controller.dart';
 import 'state/app_settings.dart';
+import 'state/circle_playback_controller.dart';
 import 'state/playback_controller.dart';
 import 'state/shell_controller.dart';
 import 'state/update_controller.dart';
@@ -146,6 +147,9 @@ Future<void> main(List<String> args) async {
         // Один плеер голосовых на приложение: запись продолжает играть, когда
         // ушли из переписки.
         ChangeNotifierProvider<PlaybackController>(create: (_) => PlaybackController()),
+        // Кружок, включённый со звуком, живёт вне ленты: прокрутка не должна
+        // обрывать то, что смотрят.
+        ChangeNotifierProvider<CirclePlaybackController>(create: (_) => CirclePlaybackController()),
       ],
       child: const VellinApp(),
     ),

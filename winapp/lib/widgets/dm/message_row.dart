@@ -134,6 +134,7 @@ class MessageRow extends StatelessWidget {
 
     if (message.videoStatus != null) {
       return VideoBubble(
+        messageId: message.id,
         status: message.videoStatus,
         videoUrl: AppConfig.mediaUrl(message.videoUrl),
         thumbUrl: AppConfig.mediaUrl(message.videoThumbUrl),
