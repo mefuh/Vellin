@@ -1,64 +1,39 @@
 import 'package:flutter/material.dart';
 
-/// Дизайн-токены Vellin (тёмная палитра — основная), перенесённые из
-/// design/tokens.css. Единый источник цветов/радиусов для всего клиента.
-class VellinColors {
-  static const bg0 = Color(0xFF0A0807);
-  static const bg1 = Color(0xFF0E0B0A);
-  static const bg2 = Color(0xFF14100E);
-  static const bg3 = Color(0xFF1A1614);
-  static const bg4 = Color(0xFF221C19);
-  static const bg5 = Color(0xFF2B2421);
+import 'vellin_design.dart';
 
-  static const line1 = Color(0x0FFFF5EB); // rgba(255,245,235,0.06)
-  static const line2 = Color(0x1AFFF5EB); // 0.10
-  static const line3 = Color(0x29FFF5EB); // 0.16
-
-  static const text0 = Color(0xFFF6F1ED);
-  static const text1 = Color(0xFFC8BDB5);
-  static const text2 = Color(0xFF8A7F78);
-  static const text3 = Color(0xFF5A504A);
-
-  static const accent = Color(0xFFD1271B);
-  static const accentHi = Color(0xFFE8462A);
-  static const accentLo = Color(0xFFA01A12);
-  static const accentSoft = Color(0x24D1271B); // 0.14
-  static const accentGlow = Color(0x59D1271B); // 0.35
-
-  static const ok = Color(0xFF4ADE80);
-  static const warn = Color(0xFFFACC15);
-}
-
-/// Радиусы (r-* токены).
-class VellinRadius {
-  static const xs = 6.0;
-  static const sm = 8.0;
-  static const md = 12.0;
-  static const lg = 16.0;
-  static const xl = 22.0;
-  static const xxl = 28.0;
-}
-
+/// Тема Material — только для служебной обвязки: выделение текста, контекстное
+/// меню поля ввода, подсказки, полосы прокрутки.
+///
+/// Интерфейс собран на своих виджетах и берёт цвета из [VellinColors]; здесь
+/// задаётся лишь то, что Flutter рисует сам и мимо наших примитивов не пройдёт.
+/// Своих цветов эта тема не заводит — иначе язык разъехался бы на два набора.
 ThemeData buildVellinTheme() {
   const scheme = ColorScheme.dark(
     surface: VellinColors.bg1,
-    primary: VellinColors.accentHi,
-    onPrimary: Colors.white,
-    error: VellinColors.accentHi,
-    onSurface: VellinColors.text0,
+    primary: VellinColors.accent,
+    onPrimary: VellinColors.onAccent,
+    error: VellinColors.danger,
+    onSurface: VellinColors.ink92,
   );
 
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
-    scaffoldBackgroundColor: VellinColors.bg0,
+    scaffoldBackgroundColor: VellinColors.bg1,
     colorScheme: scheme,
     // Шрифт один на весь клиент. Segoe UI снят: он был системной подменой и
     // рядом с экраном звонка читался как чужой.
-    fontFamily: 'Manrope',
+    fontFamily: VellinType.family,
     textTheme: const TextTheme(
-      bodyMedium: TextStyle(color: VellinColors.text0, fontSize: 15),
-      bodySmall: TextStyle(color: VellinColors.text1, fontSize: 13),
+      bodyMedium: TextStyle(color: VellinColors.ink92, fontSize: 13.5),
+      bodySmall: TextStyle(color: VellinColors.ink62, fontSize: 12),
+    ),
+    // Выделение и курсор в полях ввода — золотом, как всё выбранное.
+    textSelectionTheme: const TextSelectionThemeData(
+      cursorColor: VellinColors.accent,
+      selectionColor: VellinColors.accentWash,
+      selectionHandleColor: VellinColors.accent,
     ),
     splashFactory: InkRipple.splashFactory,
     // Подсказки Material по умолчанию светлые — на тёмном интерфейсе они
@@ -66,12 +41,12 @@ ThemeData buildVellinTheme() {
     // чтобы это не приходилось повторять на каждой кнопке.
     tooltipTheme: TooltipThemeData(
       waitDuration: const Duration(milliseconds: 400),
-      textStyle: const TextStyle(color: VellinColors.text0, fontSize: 12.5),
+      textStyle: VellinType.caption.copyWith(fontSize: 12.5, color: VellinColors.ink88),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: VellinColors.bg3,
-        borderRadius: BorderRadius.circular(VellinRadius.sm),
-        border: Border.all(color: VellinColors.line2),
+        color: VellinColors.surface,
+        borderRadius: BorderRadius.circular(VellinRadius.chip),
+        border: Border.all(color: VellinColors.line10),
       ),
     ),
   );

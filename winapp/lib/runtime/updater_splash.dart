@@ -344,8 +344,7 @@ class _VellinUpdaterSplashState extends State<VellinUpdaterSplash> with TickerPr
               child: Text(
                 'VELLIN',
                 style: TextStyle(
-                  fontFamily: 'Onest',
-                  fontFamilyFallback: const ['Segoe UI Variable Display', 'Segoe UI'],
+                  fontFamily: 'Manrope',
                   fontSize: 26,
                   height: 1,
                   fontWeight: FontWeight.w500,
@@ -392,8 +391,7 @@ class _VellinUpdaterSplashState extends State<VellinUpdaterSplash> with TickerPr
                 // Кроссфейд остаётся только на смене фазы.
                 key: ValueKey(widget.status ?? widget.phase.name),
                 style: TextStyle(
-                  fontFamily: 'Onest',
-                  fontFamilyFallback: const ['Segoe UI Variable Display', 'Segoe UI'],
+                  fontFamily: 'Manrope',
                   fontSize: 12.5,
                   letterSpacing: 0.09 * 12.5,
                   color: widget.phase == SplashPhase.error
@@ -479,8 +477,7 @@ class _VellinUpdaterSplashState extends State<VellinUpdaterSplash> with TickerPr
         child: Text(
           'v${widget.version.replaceFirst(RegExp(r'^v'), '')}',
           style: TextStyle(
-            fontFamily: 'Onest',
-            fontFamilyFallback: const ['Segoe UI Variable Display', 'Segoe UI'],
+            fontFamily: 'Manrope',
             fontSize: 10.5,
             letterSpacing: 0.07 * 10.5,
             color: _paper.withValues(alpha: 0.26),
@@ -589,8 +586,7 @@ class _RetryButtonState extends State<_RetryButton> {
           child: Text(
             'Повторить',
             style: TextStyle(
-              fontFamily: 'Onest',
-              fontFamilyFallback: const ['Segoe UI Variable Display', 'Segoe UI'],
+              fontFamily: 'Manrope',
               fontSize: 12,
               letterSpacing: 0.06 * 12,
               color: _paper,

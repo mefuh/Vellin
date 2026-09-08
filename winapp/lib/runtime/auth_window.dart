@@ -54,8 +54,7 @@ TextStyle _t({
   double? height,
   Color color = _paper,
 }) => TextStyle(
-  fontFamily: 'Onest',
-  fontFamilyFallback: const ['Segoe UI Variable Display', 'Segoe UI'],
+  fontFamily: 'Manrope',
   fontSize: size,
   fontWeight: weight,
   height: height,
