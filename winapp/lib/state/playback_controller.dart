@@ -20,6 +20,9 @@ class PlaybackItem {
   final int durationSec;
   final List<int> peaks;
 
+  /// Своя запись — в плеере она подписана «Вы».
+  final bool mine;
+
   const PlaybackItem({
     required this.messageId,
     required this.peerPublicId,
@@ -28,6 +31,7 @@ class PlaybackItem {
     required this.url,
     required this.durationSec,
     required this.peaks,
+    required this.mine,
   });
 }
 

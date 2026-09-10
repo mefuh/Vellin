@@ -11,6 +11,7 @@ import { resetDmCount } from '../push/grouping.js';
 import {
   DmError,
   markRead,
+  markVideoPlayed,
   markVoicePlayed,
   sendMessage,
   syncRoomInviteSnapshots,
@@ -229,6 +230,21 @@ export async function handleDmVoicePlayed(meId: string, messageId: string): Prom
     });
   } catch (err) {
     logger.error({ err, meId, messageId }, 'dm voice played failed');
+  }
+}
+
+/** Получатель посмотрел кружок — уведомить автора (индикатор «просмотрено»). */
+export async function handleDmVideoPlayed(meId: string, messageId: string): Promise<void> {
+  try {
+    const r = await markVideoPlayed(meId, messageId);
+    if (!r) return;
+    userHub.pushTo(r.senderId, {
+      t: 'dm_video_played',
+      conversationId: r.conversationId,
+      messageId: r.messageId,
+    });
+  } catch (err) {
+    logger.error({ err, meId, messageId }, 'dm video played failed');
   }
 }
 

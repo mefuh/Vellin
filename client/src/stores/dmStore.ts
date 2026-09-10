@@ -83,6 +83,8 @@ interface DmState {
   markVoicePlayed: (messageId: string) => void;
   /** Собеседник прослушал моё голосовое (из WS) — обновить индикатор. */
   applyVoicePlayed: (messageId: string) => void;
+  /** Собеседник посмотрел мой кружок. */
+  applyVideoPlayed: (messageId: string) => void;
   /** Кто-то прочитал (своё эхо или собеседник). */
   applyRead: (
     payload: { conversationId: string; byUserId: string; readAt: string; unreadTotal?: number },
@@ -365,6 +367,22 @@ export const useDmStore = create<DmState>((set, get) => ({
           changed = true;
           const msgs = t.messages.slice();
           msgs[idx] = { ...msgs[idx], voicePlayed: true };
+          threads[pid] = { ...t, messages: msgs };
+        }
+      }
+      return changed ? { threads } : s;
+    }),
+
+  applyVideoPlayed: (messageId) =>
+    set((s) => {
+      const threads = { ...s.threads };
+      let changed = false;
+      for (const [pid, t] of Object.entries(threads)) {
+        const idx = t.messages.findIndex((m) => m.id === messageId);
+        if (idx >= 0 && !t.messages[idx].videoPlayed) {
+          changed = true;
+          const msgs = t.messages.slice();
+          msgs[idx] = { ...msgs[idx], videoPlayed: true };
           threads[pid] = { ...t, messages: msgs };
         }
       }

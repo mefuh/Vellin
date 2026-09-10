@@ -35,7 +35,7 @@ class _MeCardState extends State<MeCard> {
   bool _menuOpen = false;
 
   VellinPresence get _presence => switch (widget.user.presenceStatus) {
-        'away' => VellinPresence.away,
+        'dnd' || 'away' => VellinPresence.dnd,
         'offline' => VellinPresence.offline,
         _ => VellinPresence.online,
       };
@@ -228,7 +228,7 @@ class _StatusMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     const rows = [
       ('online', 'В сети', 'Видно всем друзьям', VellinColors.online),
-      ('away', 'Недавно', 'Показывать как отошедшего', VellinColors.away),
+      ('dnd', 'Не беспокоить', 'Без звука и всплывающих окон', VellinColors.dnd),
       ('offline', 'Не в сети', 'Никто не видит вас в сети', VellinColors.offline),
     ];
 
@@ -244,6 +244,8 @@ class _StatusMenu extends StatelessWidget {
             _MenuRow(
               index: i,
               dotColor: rows[i].$4,
+              // Месяц вместо точки — тот же знак, что стоит на аватаре.
+              moon: rows[i].$1 == 'dnd',
               title: rows[i].$2,
               hint: rows[i].$3,
               selected: current == rows[i].$1,
@@ -264,6 +266,9 @@ class _StatusMenu extends StatelessWidget {
 class _MenuRow extends StatefulWidget {
   final int index;
   final Color dotColor;
+
+  /// Рисовать месяц вместо точки — у «не беспокоить» знак не круглый.
+  final bool moon;
   final String title;
   final String hint;
   final bool selected;
@@ -272,6 +277,7 @@ class _MenuRow extends StatefulWidget {
   const _MenuRow({
     required this.index,
     required this.dotColor,
+    this.moon = false,
     required this.title,
     required this.hint,
     required this.selected,
@@ -328,15 +334,35 @@ class _MenuRowState extends State<_MenuRow> with SingleTickerProviderStateMixin 
             ),
             child: Row(
               children: [
-                Container(
-                  width: 9,
-                  height: 9,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: widget.dotColor,
-                    boxShadow: widget.selected
-                        ? [BoxShadow(color: widget.dotColor.withValues(alpha: 0.35), blurRadius: 9)]
-                        : null,
+                // Ширина под знак одна на все строки: подписи иначе разъезжались
+                // бы на пару пикселей между точкой и месяцем.
+                SizedBox(
+                  width: 11,
+                  height: 11,
+                  child: Center(
+                    child: widget.moon
+                        ? VellinIcon.filled(
+                            VellinGlyphs.moonFilled,
+                            size: 11,
+                            box: const Size(12, 12),
+                            color: widget.dotColor,
+                          )
+                        : Container(
+                            width: 9,
+                            height: 9,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: widget.dotColor,
+                              boxShadow: widget.selected
+                                  ? [
+                                      BoxShadow(
+                                        color: widget.dotColor.withValues(alpha: 0.35),
+                                        blurRadius: 9,
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                          ),
                   ),
                 ),
                 const SizedBox(width: 10),

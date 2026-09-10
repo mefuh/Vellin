@@ -468,6 +468,8 @@ model DirectMessage {
   videoThumbUrl  String?
   /// Длительность видеосообщения, сек.
   videoDurationSec Float?
+  /// Когда получатель посмотрел кружок. Null — ещё не смотрел.
+  videoPlayedAt    DateTime?
   /// Стадия: 'processing' | 'ready' | 'failed'. Null — не видеосообщение.
   videoStatus    String?
   /// Карточка-приглашение в комнату («Watch Party»): id приглашённой комнаты.

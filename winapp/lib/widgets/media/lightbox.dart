@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
@@ -23,11 +24,8 @@ void showVellinLightbox(
   final overlay = Overlay.of(context, rootOverlay: true);
   late final OverlayEntry entry;
   entry = OverlayEntry(
-    builder: (_) => _Lightbox(
-      images: images,
-      initialIndex: index,
-      onClose: entry.remove,
-    ),
+    builder: (_) =>
+        _Lightbox(images: images, initialIndex: index, onClose: entry.remove),
   );
   overlay.insert(entry);
 }
@@ -47,11 +45,23 @@ class _Lightbox extends StatefulWidget {
   State<_Lightbox> createState() => _LightboxState();
 }
 
-class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixin {
+class _LightboxState extends State<_Lightbox> with TickerProviderStateMixin {
   late int _index = widget.initialIndex;
 
-  /// Масштаб в процентах: 100–300 шагом 25.
+  /// Масштаб, к которому идём: от 100 % и вверх, шагом из [_step].
+  /// Он же стоит в тулбаре — подпись меняется сразу, а не догоняет анимацию.
   int _zoom = 100;
+
+  /// Масштаб, который нарисован прямо сейчас. Между шагами едет по кривой.
+  double _shown = 1;
+
+  double _zoomFrom = 1;
+  double _zoomTo = 1;
+
+  /// Точка снимка, которую держим в центре во время приближения, долей от
+  /// кадра. Считается один раз на старте шага: пока идёт анимация, центр
+  /// «уезжал» бы сам от себя.
+  Offset _anchor = const Offset(0.5, 0.5);
 
   bool _fullscreen = false;
 
@@ -70,6 +80,15 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
     value: 1,
   );
 
+  /// Шаг зума короткий: кривая и так почти весь путь проходит в первой трети,
+  /// а хвост в триста миллисекунд читался как ожидание после нажатия.
+  /// Длительность подстраивается под размах шага — см. [_setZoom].
+  late final AnimationController _zoomCtl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 170),
+    value: 1,
+  )..addListener(_onZoomTick);
+
   final _focus = FocusNode();
 
   /// Смещение кадра при увеличении — им же двигают снимок мышью.
@@ -86,6 +105,7 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
   void dispose() {
     _open.dispose();
     _page.dispose();
+    _zoomCtl.dispose();
     _focus.dispose();
     _view.dispose();
     super.dispose();
@@ -104,26 +124,91 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
       _index = next;
       _slide = delta;
       _zoom = 100;
+      _shown = 1;
     });
     // Новый снимок показываем целиком: масштаб и смещение прежнего к нему
-    // отношения не имеют.
+    // отношения не имеют, и уезжать к единице на глазах тут нечему — кадр
+    // всё равно сменился.
+    _zoomCtl.value = 1;
     _view.value = Matrix4.identity();
     _page.forward(from: 0);
   }
 
+  /// Шаг увеличения. Мелкий у начала шкалы и крупный дальше: от 400 % к 425 %
+  /// разницы не видно, а нажатий до крупного плана набегает два десятка.
+  int _step(int zoom) => zoom < 300 ? 25 : (zoom < 1000 ? 100 : 200);
+
+  void _zoomIn() => _setZoom(_zoom + _step(_zoom));
+
+  void _zoomOut() => _setZoom(_zoom - _step(_zoom - 1));
+
   void _setZoom(int value) {
-    final before = _zoom / 100;
-    final next = value.clamp(100, 300);
+    // Потолка у увеличения нет — только предохранитель, за которым снимок
+    // всё равно уже рассыпан на пиксели.
+    final next = value.clamp(100, 1600);
+    if (next == _zoom) return;
+    // Едем от того, что нарисовано сейчас, а не от прежней цели: щелчки колеса
+    // идут чаще, чем успевает доиграть шаг.
+    _zoomFrom = _shown;
+    _zoomTo = next / 100;
+    _anchor = _centerFraction();
     setState(() => _zoom = next);
-    // После перестроения кадра — иначе смещение считалось бы по старому размеру.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _recenter(before, next / 100);
-    });
+    // Время — по размаху шага, а не одно на всё: щелчок колеса догоняет
+    // недоигранный кадр за считанные миллисекунды и потому кажется мгновенным,
+    // а редкий большой скачок всё же успевает прочитаться движением.
+    final ratio = _zoomTo > _zoomFrom
+        ? _zoomTo / _zoomFrom
+        : _zoomFrom / _zoomTo;
+    _zoomCtl.duration = Duration(
+      milliseconds: (90 + 190 * (ratio - 1)).clamp(90, 220).round(),
+    );
+    _zoomCtl.forward(from: 0);
+  }
+
+  /// Точка снимка в центре кадра — долей от его размера.
+  Offset _centerFraction() {
+    if (_viewport == Size.zero) return const Offset(0.5, 0.5);
+    final content = _contentSize(_shown);
+    final t = _view.value.getTranslation();
+    return Offset(
+      (-t.x + _viewport.width / 2) / content.width,
+      (-t.y + _viewport.height / 2) / content.height,
+    );
+  }
+
+  void _onZoomTick() {
+    final t = VellinMotion.standard.transform(_zoomCtl.value);
+    setState(() => _shown = _zoomFrom + (_zoomTo - _zoomFrom) * t);
+    _holdAnchor();
+  }
+
+  /// Удержать [_anchor] в центре кадра на текущем масштабе: без этого снимок
+  /// при приближении уползал бы к своему левому верхнему углу.
+  void _holdAnchor() {
+    if (_viewport == Size.zero) return;
+    final content = _contentSize(_shown);
+    final maxX = content.width - _viewport.width;
+    final maxY = content.height - _viewport.height;
+    if (maxX <= 0 && maxY <= 0) {
+      _view.value = Matrix4.identity();
+      return;
+    }
+    final x = (_anchor.dx * content.width - _viewport.width / 2).clamp(
+      0.0,
+      maxX < 0 ? 0.0 : maxX,
+    );
+    final y = (_anchor.dy * content.height - _viewport.height / 2).clamp(
+      0.0,
+      maxY < 0 ? 0.0 : maxY,
+    );
+    _view.value = Matrix4.identity()..translateByDouble(-x, -y, 0, 1);
   }
 
   Future<void> _download() async {
     final url = widget.images[_index];
-    final name = Uri.parse(url).pathSegments.isEmpty ? 'image.jpg' : Uri.parse(url).pathSegments.last;
+    final name = Uri.parse(url).pathSegments.isEmpty
+        ? 'image.jpg'
+        : Uri.parse(url).pathSegments.last;
     final target = await FilePicker.platform.saveFile(fileName: name);
     if (target == null) return;
     try {
@@ -176,7 +261,9 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
                 // Подложка: единственный блюр на весь экран во всём клиенте.
                 Positioned.fill(
                   child: GestureDetector(
-                    onTap: _fullscreen ? () => setState(() => _fullscreen = false) : _close,
+                    onTap: _fullscreen
+                        ? () => setState(() => _fullscreen = false)
+                        : _close,
                     child: BackdropFilter(
                       filter: ui.ImageFilter.blur(
                         sigmaX: VellinBlur.overlay * t,
@@ -187,12 +274,9 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
                   ),
                 ),
                 Positioned.fill(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(72, 64, 72, 64),
-                    child: Transform.scale(
-                      scale: 0.92 + 0.08 * t,
-                      child: _image(),
-                    ),
+                  child: Transform.scale(
+                    scale: 0.92 + 0.08 * t,
+                    child: _image(),
                   ),
                 ),
                 // Вся обвязка гаснет в полноэкранном режиме.
@@ -206,7 +290,8 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
                       children: [
                         if (widget.images.length > 1) _counter(),
                         if (_index > 0) _arrow(left: true),
-                        if (_index < widget.images.length - 1) _arrow(left: false),
+                        if (_index < widget.images.length - 1)
+                          _arrow(left: false),
                         _toolbar(),
                       ],
                     ),
@@ -239,22 +324,43 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
       child: LayoutBuilder(
         builder: (context, box) {
           _viewport = Size(box.maxWidth, box.maxHeight);
-          final scale = _zoom / 100;
-          return SizedBox.expand(
-            child: InteractiveViewer(
-              transformationController: _view,
-              constrained: false,
-              panEnabled: _zoom > 100,
-              scaleEnabled: false,
-              minScale: 1,
-              maxScale: 1,
-              child: SizedBox(
-                width: box.maxWidth * scale,
-                height: box.maxHeight * scale,
-                child: Image.network(
-                  widget.images[_index],
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          final frame = _frameSize(_shown);
+          final content = _contentSize(_shown);
+          return Listener(
+            // Колесо мыши — привычный способ приблизить снимок; кнопками в
+            // тулбаре до крупного плана добираться долго.
+            onPointerSignal: (signal) {
+              if (signal is! PointerScrollEvent) return;
+              if (signal.scrollDelta.dy < 0) {
+                _zoomIn();
+              } else {
+                _zoomOut();
+              }
+            },
+            child: SizedBox.expand(
+              child: InteractiveViewer(
+                transformationController: _view,
+                constrained: false,
+                panEnabled: _shown > 1,
+                scaleEnabled: false,
+                minScale: 1,
+                maxScale: 1,
+                // Внешняя коробка не меньше кадра: пока снимок мельче окна, он
+                // держится по центру, а не липнет к левому верхнему углу.
+                child: SizedBox(
+                  width: content.width,
+                  height: content.height,
+                  child: Center(
+                    child: SizedBox(
+                      width: frame.width,
+                      height: frame.height,
+                      child: Image.network(
+                        widget.images[_index],
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -267,23 +373,31 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
   /// Размер видимого кадра — по нему считается смещение при увеличении.
   Size _viewport = Size.zero;
 
-  /// Оставить в центре ту же точку снимка при смене масштаба: без этого
-  /// увеличенный кадр показывался бы своим левым верхним углом.
-  void _recenter(double before, double after) {
-    if (_viewport == Size.zero) return;
-    if (after <= 1) {
-      _view.value = Matrix4.identity();
-      return;
-    }
-    // Центр кадра в координатах снимка при прежнем масштабе.
-    final t = _view.value.getTranslation();
-    final centerX = (-t.x + _viewport.width / 2) / before;
-    final centerY = (-t.y + _viewport.height / 2) / before;
-    final maxX = _viewport.width * after - _viewport.width;
-    final maxY = _viewport.height * after - _viewport.height;
-    final x = (centerX * after - _viewport.width / 2).clamp(0.0, maxX);
-    final y = (centerY * after - _viewport.height / 2).clamp(0.0, maxY);
-    _view.value = Matrix4.identity()..translateByDouble(-x, -y, 0, 1);
+  /// Поля вокруг вписанного снимка: при 100 % он не должен лезть под счётчик,
+  /// стрелки и тулбар. Это множитель, а не отступ у рамки, — иначе на переходе
+  /// через 100 % кадр прыгал бы на ширину полей.
+  double _inset() {
+    // В полноэкранном режиме обвязки нет — и полей под неё тоже.
+    if (_viewport == Size.zero || _fullscreen) return 1;
+    final w = (_viewport.width - 144) / _viewport.width;
+    final h = (_viewport.height - 128) / _viewport.height;
+    // Нижняя граница — для узкого окна, где поля съели бы весь кадр.
+    return w < h ? w.clamp(0.5, 1.0) : h.clamp(0.5, 1.0);
+  }
+
+  /// Размер самого снимка при данном масштабе.
+  Size _frameSize(double scale) {
+    final k = _inset() * scale;
+    return Size(_viewport.width * k, _viewport.height * k);
+  }
+
+  /// Размер прокручиваемой области: снимок, но не меньше окна.
+  Size _contentSize(double scale) {
+    final frame = _frameSize(scale);
+    return Size(
+      frame.width < _viewport.width ? _viewport.width : frame.width,
+      frame.height < _viewport.height ? _viewport.height : frame.height,
+    );
   }
 
   Widget _counter() {
@@ -326,13 +440,19 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
             return AnimatedContainer(
               duration: VellinMotion.hover,
               curve: VellinMotion.standard,
-              transform: Matrix4.translationValues(hot ? (left ? -2 : 2) : 0, 0, 0),
+              transform: Matrix4.translationValues(
+                hot ? (left ? -2 : 2) : 0,
+                0,
+                0,
+              ),
               width: 42,
               height: 42,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: hot ? const Color(0x29E2C99B) : const Color(0xB80E0C0B),
-                border: Border.all(color: hot ? VellinColors.accentLine : VellinColors.line10),
+                border: Border.all(
+                  color: hot ? VellinColors.accentLine : VellinColors.line10,
+                ),
               ),
               alignment: Alignment.center,
               child: VellinIcon(
@@ -367,10 +487,11 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
               _ToolButton(
                 glyph: VellinGlyphs.zoomOut,
                 box: const Size(16, 16),
-                onTap: _zoom > 100 ? () => _setZoom(_zoom - 25) : null,
+                onTap: _zoom > 100 ? _zoomOut : null,
               ),
               SizedBox(
-                width: 46,
+                // Ширина под «1600%», иначе тулбар дёргается на каждом шаге.
+                width: 62,
                 child: Text(
                   '$_zoom%',
                   textAlign: TextAlign.center,
@@ -383,7 +504,7 @@ class _LightboxState extends State<_Lightbox> with SingleTickerProviderStateMixi
               _ToolButton(
                 glyph: VellinGlyphs.zoomIn,
                 box: const Size(16, 16),
-                onTap: _zoom < 300 ? () => _setZoom(_zoom + 25) : null,
+                onTap: _zoom < 1600 ? _zoomIn : null,
               ),
               const SizedBox(width: 6),
               _ToolButton(glyph: VellinGlyphs.download, onTap: _download),
@@ -405,7 +526,11 @@ class _ToolButton extends StatelessWidget {
   final Size box;
   final VoidCallback? onTap;
 
-  const _ToolButton({required this.glyph, this.box = const Size(18, 18), this.onTap});
+  const _ToolButton({
+    required this.glyph,
+    this.box = const Size(18, 18),
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -431,8 +556,8 @@ class _ToolButton extends StatelessWidget {
             color: onTap == null
                 ? VellinColors.ink24
                 : hot
-                    ? VellinColors.accent
-                    : VellinColors.ink62,
+                ? VellinColors.accent
+                : VellinColors.ink62,
           ),
         );
       },

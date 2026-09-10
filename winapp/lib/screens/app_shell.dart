@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
@@ -12,6 +13,7 @@ import '../state/auth_controller.dart';
 import '../state/call_controller.dart';
 import '../state/dm_controller.dart';
 import '../state/friends_controller.dart';
+import '../state/notifications_controller.dart';
 import '../state/playback_controller.dart';
 import '../state/presence_controller.dart';
 import '../state/shell_controller.dart';
@@ -165,7 +167,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final narrow = MediaQuery.sizeOf(context).width < VellinLayout.breakpoint;
     final panelWidth = narrow ? VellinLayout.panelWidthNarrow : VellinLayout.panelWidth;
 
-    return ColoredBox(
+    return Focus(
+      // Esc закрывает то, что открыто сейчас, — по одному слою за нажатие.
+      // Узел не берёт фокус на себя: событие приходит сюда всплытием от поля
+      // ввода или списка, где фокус на самом деле и находится.
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (node, event) => _onEscape(event, shell, dm),
+      child: ColoredBox(
       color: VellinColors.bg1,
       child: Row(
         children: [
@@ -210,7 +219,37 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           Expanded(child: _rightWithPlayer(shell, dm)),
         ],
       ),
+      ),
     );
+  }
+
+  /// Esc закрывает верхний открытый слой: сначала настройки, потом панель
+  /// уведомлений, затем профиль, и только в конце — саму переписку.
+  KeyEventResult _onEscape(KeyEvent event, ShellController shell, DmController dm) {
+    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.escape) {
+      return KeyEventResult.ignored;
+    }
+
+    if (shell.settingsOpen) {
+      shell.closeSettings();
+      return KeyEventResult.handled;
+    }
+    final notifications = context.read<NotificationsController>();
+    if (notifications.panelOpen) {
+      notifications.closePanel();
+      return KeyEventResult.handled;
+    }
+    switch (shell.pane) {
+      case RightPaneKind.profile:
+        shell.closeProfile(hasOpenChat: dm.activePeerPublicId != null);
+        return KeyEventResult.handled;
+      case RightPaneKind.chat:
+        dm.closeThread();
+        shell.showEmpty();
+        return KeyEventResult.handled;
+      case RightPaneKind.empty:
+        return KeyEventResult.ignored;
+    }
   }
 
   Widget _panelBody(ShellController shell, DmController dm, FriendsController friends) {
@@ -319,17 +358,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// Правая область вместе с мини-плеером: в своём чате он висит пилюлей над
   /// лентой, вне его — доком, который сдвигает содержимое вниз.
   Widget _rightWithPlayer(ShellController shell, DmController dm) {
-    final playback = context.watch<PlaybackController>();
-    final item = playback.item;
-    final own = item != null &&
-        shell.pane == RightPaneKind.chat &&
-        item.peerPublicId == dm.activePeerPublicId;
+    // Плеер один на голосовые и кружки — что из них звучит, решает сам плеер.
+    final track = MiniPlayerTrack.of(context);
+    // Вид зависит от того, что в правой области: над перепиской и над пустым
+    // «выберите диалог» плеер парит баблом, в профиле — прижимается полосой,
+    // чтобы не висеть поверх лица.
+    final dock = shell.pane == RightPaneKind.profile;
 
     return Stack(
       children: [
         Column(
           children: [
-            if (item != null && !own) MiniPlayer(openPeerPublicId: dm.activePeerPublicId),
+            if (track != null && dock) const MiniPlayer(dock: true),
             Expanded(
               // Профиль и переписка сменяют друг друга в две фазы, как разделы
               // рейла: прежнее уезжает, и лишь потом монтируется новое.
@@ -343,12 +383,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ),
           ],
         ),
-        if (own)
+        if (track != null && !dock)
           Positioned(
-            top: VellinLayout.chatHeader + 8,
+            // Над лентой — ниже шапки чата; над пустой областью шапки нет,
+            // поэтому пилюля поднимается к самому верху.
+            top: shell.pane == RightPaneKind.chat ? VellinLayout.chatHeader + 8 : 12,
             left: 0,
             right: 0,
-            child: MiniPlayer(openPeerPublicId: dm.activePeerPublicId),
+            child: const MiniPlayer(dock: false),
           ),
         // Кружок, уехавший из видимой части ленты, — окошком справа сверху,
         // под шапкой чата.

@@ -13,7 +13,22 @@ class CircleItem {
   /// ходить в сеть незачем.
   final String path;
 
-  const CircleItem({required this.messageId, required this.path});
+  /// Диалог и собеседник — их показывает мини-плеер, как у голосовых.
+  final String peerPublicId;
+  final String peerName;
+  final String? peerAvatarUrl;
+
+  /// Свой кружок — в плеере он подписан «Вы».
+  final bool mine;
+
+  const CircleItem({
+    required this.messageId,
+    required this.path,
+    required this.peerPublicId,
+    required this.peerName,
+    required this.peerAvatarUrl,
+    required this.mine,
+  });
 }
 
 /// Озвученное воспроизведение видео-кружков — одно на всё приложение.
@@ -33,6 +48,9 @@ class CirclePlaybackController extends ChangeNotifier {
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
 
+  /// Скорость воспроизведения — общая с голосовыми по набору значений.
+  double _speed = 1;
+
   /// Виден ли сейчас баббл этого кружка в ленте. Пока виден — картинка у него,
   /// как только ушёл — всплывает окошко.
   bool _bubbleVisible = true;
@@ -42,6 +60,8 @@ class CirclePlaybackController extends ChangeNotifier {
   bool get playing => _playing;
   bool get bubbleVisible => _bubbleVisible;
   Duration get position => _position;
+  Duration get duration => _duration;
+  double get speed => _speed;
 
   /// Показывать ли окошко: кружок играет, а его строки на экране нет.
   bool get pipVisible => _item != null && !_bubbleVisible;
@@ -56,7 +76,9 @@ class CirclePlaybackController extends ChangeNotifier {
   void setBubbleVisible(String messageId, bool visible) {
     if (!isCurrent(messageId) || _bubbleVisible == visible) return;
     _bubbleVisible = visible;
-    notifyListeners();
+    // Оповещение — отдельной микрозадачей: строка сообщает об уходе из своего
+    // dispose, а перестраивать дерево прямо в этот момент нельзя.
+    scheduleMicrotask(notifyListeners);
   }
 
   /// Включить кружок со звуком с начала.
@@ -101,6 +123,8 @@ class CirclePlaybackController extends ChangeNotifier {
 
       await p.setVolume(100);
       await p.open(Media(next.path));
+      // Выбранная скорость держится между записями, как у голосовых.
+      await p.setRate(_speed);
     } catch (_) {
       _item = null;
       _controller = null;
@@ -116,6 +140,15 @@ class CirclePlaybackController extends ChangeNotifier {
     } else {
       await p.play();
     }
+  }
+
+  /// Скорость по кругу — тот же набор, что у голосовых.
+  Future<void> cycleSpeed() async {
+    const order = [1.0, 1.5, 2.0, 0.5, 0.75];
+    final next = order[(order.indexOf(_speed) + 1) % order.length];
+    _speed = next;
+    await _player?.setRate(next);
+    notifyListeners();
   }
 
   Future<void> stop() async {

@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
+import '../../state/circle_playback_controller.dart';
 import '../../state/playback_controller.dart';
 import '../../theme/vellin_design.dart';
 import '../../theme/vellin_glyphs.dart';
@@ -9,32 +10,109 @@ import '../ui/vellin_hover.dart';
 import '../ui/vellin_icon.dart';
 import '../ui/vellin_surfaces.dart';
 
-/// Мини-плеер голосового: пилюля в своём чате и док — во всех остальных местах.
+/// То, что сейчас звучит, — в одном виде для голосового и для кружка.
+class MiniPlayerTrack {
+  final String peerPublicId;
+  final String peerName;
+  final String? peerAvatarUrl;
+
+  /// «голосовое» или «кружок» — подпись рядом с именем.
+  final String kind;
+
+  final bool playing;
+  final double progress;
+  final Duration position;
+  final Duration duration;
+
+  final double speed;
+  final VoidCallback onSpeed;
+
+  final VoidCallback onToggle;
+  final VoidCallback onStop;
+
+  const MiniPlayerTrack({
+    required this.peerPublicId,
+    required this.peerName,
+    required this.peerAvatarUrl,
+    required this.kind,
+    required this.playing,
+    required this.progress,
+    required this.position,
+    required this.duration,
+    required this.speed,
+    required this.onSpeed,
+    required this.onToggle,
+    required this.onStop,
+  });
+
+  /// Что звучит сейчас. Одновременно голосовое и кружок не играют — запуск
+  /// одного останавливает другое, поэтому достаточно проверить по очереди.
+  static MiniPlayerTrack? of(BuildContext context) {
+    final circles = context.watch<CirclePlaybackController>();
+    final circle = circles.item;
+    if (circle != null) {
+      return MiniPlayerTrack(
+        peerPublicId: circle.peerPublicId,
+        peerName: circle.mine ? 'Вы' : circle.peerName,
+        peerAvatarUrl: circle.peerAvatarUrl,
+        kind: 'кружок',
+        playing: circles.playing,
+        progress: circles.progress,
+        position: circles.position,
+        duration: circles.duration,
+        speed: circles.speed,
+        onSpeed: circles.cycleSpeed,
+        onToggle: circles.toggle,
+        onStop: circles.stop,
+      );
+    }
+
+    final playback = context.watch<PlaybackController>();
+    final voice = playback.item;
+    if (voice == null) return null;
+    return MiniPlayerTrack(
+      peerPublicId: voice.peerPublicId,
+      peerName: voice.mine ? 'Вы' : voice.peerName,
+      peerAvatarUrl: voice.peerAvatarUrl,
+      kind: 'голосовое',
+      playing: playback.playing,
+      progress: playback.progress,
+      position: playback.position,
+      duration: Duration(seconds: voice.durationSec),
+      speed: playback.speed,
+      onSpeed: playback.cycleSpeed,
+      onToggle: playback.toggle,
+      onStop: playback.stop,
+    );
+  }
+}
+
+/// Мини-плеер: пилюля над перепиской и полоса-док в профиле и настройках.
 ///
 /// Он один на приложение и переживает переходы: запись, начатая в переписке,
-/// продолжает играть и в «Друзьях», и в профиле.
+/// продолжает играть и в «Друзьях», и в профиле. Вид выбирается по тому, что
+/// сейчас в правой области, а не по тому, из чьего чата запись: над лентой и
+/// над пустым «выберите диалог» плеер парит баблом, а на странице профиля и в
+/// настройках прижимается полосой к верху — иначе он повисал бы над лицом.
 class MiniPlayer extends StatelessWidget {
-  /// Какой диалог открыт сейчас — по нему выбирается вид: пилюля или док.
-  final String? openPeerPublicId;
+  /// Прижать плеер полосой к верху вместо парящей пилюли.
+  final bool dock;
 
-  const MiniPlayer({super.key, required this.openPeerPublicId});
+  const MiniPlayer({super.key, required this.dock});
 
   @override
   Widget build(BuildContext context) {
-    final playback = context.watch<PlaybackController>();
-    final item = playback.item;
-    if (item == null) return const SizedBox.shrink();
+    final track = MiniPlayerTrack.of(context);
+    if (track == null) return const SizedBox.shrink();
 
-    final own = item.peerPublicId == openPeerPublicId;
-    return own ? _Pill(item: item, playback: playback) : _Dock(item: item, playback: playback);
+    return dock ? _Dock(track: track) : _Pill(track: track);
   }
 }
 
 /// Пилюля поверх ленты своего чата.
 class _Pill extends StatelessWidget {
-  final PlaybackItem item;
-  final PlaybackController playback;
-  const _Pill({required this.item, required this.playback});
+  final MiniPlayerTrack track;
+  const _Pill({required this.track});
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +131,7 @@ class _Pill extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(5, 0, 6, 0),
             child: SizedBox(
               height: 40,
-              child: _Body(item: item, playback: playback),
+              child: _Body(track: track),
             ),
           ),
         ),
@@ -64,9 +142,8 @@ class _Pill extends StatelessWidget {
 
 /// Док во всю ширину правой области, когда чат записи не открыт.
 class _Dock extends StatelessWidget {
-  final PlaybackItem item;
-  final PlaybackController playback;
-  const _Dock({required this.item, required this.playback});
+  final MiniPlayerTrack track;
+  const _Dock({required this.track});
 
   @override
   Widget build(BuildContext context) {
@@ -79,7 +156,8 @@ class _Dock extends StatelessWidget {
           color: VellinColors.glassDock,
           border: Border(bottom: BorderSide(color: VellinColors.line07)),
         ),
-        child: _Body(item: item, playback: playback),
+        // Содержимое полосы стоит по центру области — как в макете.
+        child: Center(child: _Body(track: track)),
       ),
     );
   }
@@ -87,33 +165,32 @@ class _Dock extends StatelessWidget {
 
 /// Начинка плеера — одна на оба вида.
 class _Body extends StatelessWidget {
-  final PlaybackItem item;
-  final PlaybackController playback;
-  const _Body({required this.item, required this.playback});
+  final MiniPlayerTrack track;
+  const _Body({required this.track});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _PlayPause(playing: playback.playing, onTap: playback.toggle),
+        _PlayPause(playing: track.playing, onTap: track.onToggle),
         const SizedBox(width: 9),
         VellinAvatar(
-          username: item.peerName,
-          avatarUrl: item.peerAvatarUrl,
+          username: track.peerName,
+          avatarUrl: track.peerAvatarUrl,
           size: 20,
           bedColor: VellinColors.strip,
         ),
         const SizedBox(width: 8),
         Text(
-          '${item.peerName} · голосовое',
+          '${track.peerName} · ${track.kind}',
           style: VellinType.caption.copyWith(fontSize: 12, color: VellinColors.ink72),
         ),
         const SizedBox(width: 12),
-        _Progress(value: playback.progress),
+        _Progress(value: track.progress),
         const SizedBox(width: 10),
         Text(
-          _fmt(playback.position.inSeconds),
+          '${_fmt(track.position.inSeconds)} / ${_fmt(track.duration.inSeconds)}',
           style: VellinType.caption.copyWith(
             fontSize: 11,
             color: const Color(0xA8E2C99B),
@@ -121,9 +198,9 @@ class _Body extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        _SpeedButton(speed: playback.speed, onTap: playback.cycleSpeed),
+        _SpeedButton(speed: track.speed, onTap: track.onSpeed),
         const SizedBox(width: 4),
-        _CloseButton(onTap: playback.stop),
+        _CloseButton(onTap: track.onStop),
       ],
     );
   }
@@ -221,13 +298,25 @@ class _SpeedButton extends StatelessWidget {
             color: hot ? VellinColors.fill11 : VellinColors.fill045,
             borderRadius: BorderRadius.circular(VellinRadius.chip),
           ),
-          child: Text(
-            label,
-            style: VellinType.caption.copyWith(
-              fontSize: 11,
-              color: VellinColors.ink62,
-              fontFeatures: VellinType.tabular,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: VellinType.caption.copyWith(
+                  fontSize: 10.5,
+                  color: VellinColors.ink72,
+                  fontFeatures: VellinType.tabular,
+                ),
+              ),
+              const SizedBox(width: 4),
+              const VellinIcon(
+                VellinGlyphs.chevronDown,
+                size: 8,
+                box: Size(10, 10),
+                color: VellinColors.ink55,
+              ),
+            ],
           ),
         );
       },

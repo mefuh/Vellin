@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../storage/prefs.dart';
 
 /// Что именно поменялось в настройках. Разное применяется по-разному: громкость
 /// ложится мгновенно, а смена устройства захвата или обработки звука требует
@@ -92,7 +93,7 @@ class CallSettings extends ChangeNotifier {
 
   Future<void> load() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await openPrefs();
       _micId = prefs.getString(_kMic);
       _speakerId = prefs.getString(_kSpeaker);
       _cameraId = prefs.getString(_kCamera);
@@ -116,7 +117,7 @@ class CallSettings extends ChangeNotifier {
 
   Future<SharedPreferences?> _prefs() async {
     try {
-      return await SharedPreferences.getInstance();
+      return await openPrefs();
     } catch (_) {
       return null;
     }

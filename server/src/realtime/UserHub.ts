@@ -227,10 +227,12 @@ class UserHub {
   presenceOf(userId: string): FriendPresence {
     const connected = this.isOnline(userId);
     // Выбранный статус показывается только при живом соединении: «в сети» без
-    // связи — неправда, а «недавно» без связи неотличимо от «не в сети».
+    // связи — неправда, а «не беспокоить» без связи неотличимо от «не в сети».
     const chosen = this.presenceStatus.get(userId) ?? 'online';
     const status: PresenceStatus = connected ? chosen : 'offline';
-    const online = status === 'online';
+    // «Не беспокоить» — человек на связи и не прячется: тишина у него, а не
+    // невидимость для других. Скрывает присутствие только «не в сети».
+    const online = status === 'online' || status === 'dnd';
     const seen = connected ? null : this.lastSeen.get(userId);
     return {
       userId,

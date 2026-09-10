@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
+import '../state/circle_playback_controller.dart';
 import '../state/playback_controller.dart';
 import '../theme/vellin_design.dart';
 import '../theme/vellin_glyphs.dart';
@@ -32,6 +33,9 @@ class VoiceBubble extends StatelessWidget {
   /// Первый запуск чужого голосового — повод сказать об этом собеседнику.
   final VoidCallback? onFirstPlay;
 
+  /// Время отправки и галочки — их собирает строка сообщения.
+  final Widget? trailing;
+
   const VoiceBubble({
     super.key,
     required this.messageId,
@@ -44,6 +48,7 @@ class VoiceBubble extends StatelessWidget {
     required this.peerAvatarUrl,
     this.played = false,
     this.onFirstPlay,
+    this.trailing,
   });
 
   @override
@@ -64,6 +69,8 @@ class VoiceBubble extends StatelessWidget {
           playing: playing,
           onTap: () {
             onFirstPlay?.call();
+            // Кружок и голосовое одновременно не звучат.
+            context.read<CirclePlaybackController>().stop();
             context.read<PlaybackController>().play(
                   PlaybackItem(
                     messageId: messageId,
@@ -73,6 +80,7 @@ class VoiceBubble extends StatelessWidget {
                     url: url,
                     durationSec: durationSec,
                     peaks: peaks,
+                    mine: mine,
                   ),
                 );
           },
@@ -100,8 +108,15 @@ class VoiceBubble extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 7),
-        _PlayedDot(played: played),
+        // Отступ живёт вместе с точкой: без неё он оставлял бы дыру у края.
+        if (!played) ...[
+          const SizedBox(width: 7),
+          const _PlayedDot(played: false),
+        ],
+        if (trailing != null) ...[
+          const SizedBox(width: 10),
+          trailing!,
+        ],
       ],
     );
   }
@@ -229,23 +244,22 @@ class _PlayButton extends StatelessWidget {
   }
 }
 
-/// Точка «прослушано»: закрашена золотом с ореолом, иначе — пустая с обводкой.
+/// Точка «ещё не прослушано»: золотая, пока запись не открыли. Прослушанная
+/// запись метки не несёт — отметка нужна ровно до того, как её сняли.
 class _PlayedDot extends StatelessWidget {
   final bool played;
   const _PlayedDot({required this.played});
 
   @override
   Widget build(BuildContext context) {
+    if (played) return const SizedBox.shrink();
     return Container(
       width: 5,
       height: 5,
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         shape: BoxShape.circle,
-        color: played ? VellinColors.accent : const Color(0x00000000),
-        border: played ? null : Border.all(color: VellinColors.accentLineStrong, width: 1),
-        boxShadow: played
-            ? const [BoxShadow(color: Color(0x1FE2C99B), blurRadius: 0, spreadRadius: 3)]
-            : null,
+        color: VellinColors.accent,
+        boxShadow: [BoxShadow(color: Color(0x1FE2C99B), blurRadius: 0, spreadRadius: 3)],
       ),
     );
   }

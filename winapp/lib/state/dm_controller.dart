@@ -354,6 +354,9 @@ class DmController extends ChangeNotifier {
       case 'dm_voice_played':
         _onVoicePlayed(msg['messageId'] as String?);
         break;
+      case 'dm_video_played':
+        _onVideoPlayed(msg['messageId'] as String?);
+        break;
     }
   }
 
@@ -363,6 +366,24 @@ class DmController extends ChangeNotifier {
     final idx = activeMessages.indexWhere((m) => m.id == messageId);
     if (idx < 0) return;
     activeMessages[idx] = activeMessages[idx].copyWith(voicePlayed: true);
+    notifyListeners();
+  }
+
+  /// Собеседник посмотрел мой кружок — гасим точку «не просмотрено».
+  void _onVideoPlayed(String? messageId) {
+    if (messageId == null) return;
+    final idx = activeMessages.indexWhere((m) => m.id == messageId);
+    if (idx < 0) return;
+    activeMessages[idx] = activeMessages[idx].copyWith(videoPlayed: true);
+    notifyListeners();
+  }
+
+  /// Отметить чужой кружок просмотренным — так же одноразово, как голосовое.
+  void markVideoPlayed(String messageId) {
+    final idx = activeMessages.indexWhere((m) => m.id == messageId);
+    if (idx < 0 || activeMessages[idx].videoPlayed) return;
+    activeMessages[idx] = activeMessages[idx].copyWith(videoPlayed: true);
+    _socket.send({'t': 'dm_video_played', 'messageId': messageId});
     notifyListeners();
   }
 

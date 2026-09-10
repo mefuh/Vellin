@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../storage/prefs.dart';
 
 /// Настройки приложения: уведомления и оформление.
 ///
@@ -41,7 +41,7 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> load() async {
     try {
-      final p = await SharedPreferences.getInstance();
+      final p = await openPrefs();
       _toasts = p.getBool(_kToasts) ?? true;
       _toastPreview = p.getBool(_kToastPreview) ?? true;
       _messageSound = p.getBool(_kMessageSound) ?? true;
@@ -69,7 +69,7 @@ class AppSettings extends ChangeNotifier {
     _textScale = v;
     notifyListeners();
     try {
-      final p = await SharedPreferences.getInstance();
+      final p = await openPrefs();
       await p.setDouble(_kTextScale, v);
     } catch (_) {}
   }
@@ -78,7 +78,7 @@ class AppSettings extends ChangeNotifier {
     apply();
     notifyListeners();
     try {
-      final p = await SharedPreferences.getInstance();
+      final p = await openPrefs();
       await p.setBool(key, value);
     } catch (_) {}
   }

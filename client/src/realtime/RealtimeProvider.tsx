@@ -120,6 +120,9 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
         case 'dm_voice_played':
           useDmStore.getState().applyVoicePlayed(msg.messageId);
           break;
+        case 'dm_video_played':
+          useDmStore.getState().applyVideoPlayed(msg.messageId);
+          break;
         case 'dm_typing':
           useDmStore.getState().applyTyping(msg.fromUserId, msg.typing, msg.kind);
           break;

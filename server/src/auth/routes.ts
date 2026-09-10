@@ -136,7 +136,7 @@ const updatePrivacySchema = z.object({
 });
 
 const updateStatusSchema = z.object({
-  status: z.enum(['online', 'away', 'offline']),
+  status: z.enum(['online', 'dnd', 'offline']),
 });
 
 interface DbUserCore {
@@ -151,15 +151,22 @@ interface DbUserCore {
   birthDate: Date | null;
   city: string | null;
   createdAt: Date;
-  /** Выбранный статус присутствия ('online' | 'away' | 'offline'). */
+  /** Выбранный статус присутствия ('online' | 'dnd' | 'offline'). */
   presenceStatus?: string | null;
   /** RBAC-роль админки. Непустая → пользователь имеет доступ к /admin. */
   adminRoleId?: string | null;
 }
 
-/** Значение из БД → статус присутствия. Мусор и старые строки → «в сети». */
+/**
+ * Значение из БД → статус присутствия. Мусор и пустое → «в сети».
+ *
+ * `away` — прежнее «недавно»: у кого-то оно уже записано в базе, а место в меню
+ * теперь занимает «не беспокоить». Читаем старое значение как новое, чтобы не
+ * ходить миграцией по таблице ради одной строки.
+ */
 function normalizePresenceStatus(value: string | null | undefined): PresenceStatus {
-  return value === 'away' || value === 'offline' ? value : 'online';
+  if (value === 'dnd' || value === 'away') return 'dnd';
+  return value === 'offline' ? 'offline' : 'online';
 }
 
 function toAuthUser(u: DbUserCore): AuthUser {

@@ -418,6 +418,7 @@ export type UserS2C =
   | UserS2CDmRead
   | UserS2CDmTyping
   | UserS2CDmVoicePlayed
+  | UserS2CDmVideoPlayed
   | UserS2CDmError
   | UserS2CDmCallRing
   | UserS2CDmCallState
@@ -551,6 +552,12 @@ export interface UserS2CDmVoicePlayed {
   conversationId: string;
   messageId: string;
 }
+/** Собеседник посмотрел мой кружок — обновить индикатор «просмотрено». */
+export interface UserS2CDmVideoPlayed {
+  t: 'dm_video_played';
+  conversationId: string;
+  messageId: string;
+}
 /** Ошибка отправки ЛС (нет прав/заблокирован/слишком длинно). */
 export interface UserS2CDmError {
   t: 'dm_error';
@@ -672,6 +679,7 @@ export type UserC2S =
   | UserC2SDmTyping
   | UserC2SDmRead
   | UserC2SDmVoicePlayed
+  | UserC2SDmVideoPlayed
   | UserC2SPresenceFocus
   | UserC2SActivity
   | UserC2SDmCallInvite
@@ -742,6 +750,11 @@ export interface UserC2SDmSend {
 /** Отметить голосовое сообщение прослушанным (получателем). */
 export interface UserC2SDmVoicePlayed {
   t: 'dm_voice_played';
+  messageId: string;
+}
+/** Отметить видео-кружок просмотренным (получателем). */
+export interface UserC2SDmVideoPlayed {
+  t: 'dm_video_played';
   messageId: string;
 }
 /** Сигнал «печатаю/перестал» собеседнику `toUserId`. */

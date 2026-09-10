@@ -21,6 +21,9 @@ class DirectMessage {
   final String? videoUrl;
   final String? videoThumbUrl;
   final int? videoDurationSec;
+
+  /// Посмотрен ли кружок получателем — точка «просмотрено» у автора.
+  final bool videoPlayed;
   final String? inviteRoomId;
 
   /// Запись о звонке. Наличие [callId] делает сообщение записью о звонке;
@@ -55,6 +58,7 @@ class DirectMessage {
     this.videoUrl,
     this.videoThumbUrl,
     this.videoDurationSec,
+    this.videoPlayed = false,
     this.inviteRoomId,
     this.callId,
     this.callKind,
@@ -69,7 +73,7 @@ class DirectMessage {
 
   /// Копия с изменённой отметкой «прослушано»: остальные поля сообщения после
   /// отправки не меняются, поэтому общего copyWith на все поля не нужно.
-  DirectMessage copyWith({bool? voicePlayed}) => DirectMessage(
+  DirectMessage copyWith({bool? voicePlayed, bool? videoPlayed}) => DirectMessage(
         id: id,
         conversationId: conversationId,
         senderId: senderId,
@@ -86,6 +90,7 @@ class DirectMessage {
         videoUrl: videoUrl,
         videoThumbUrl: videoThumbUrl,
         videoDurationSec: videoDurationSec,
+        videoPlayed: videoPlayed ?? this.videoPlayed,
         inviteRoomId: inviteRoomId,
         callId: callId,
         callKind: callKind,
@@ -112,6 +117,7 @@ class DirectMessage {
         videoUrl: j['videoUrl'] as String?,
         videoThumbUrl: j['videoThumbUrl'] as String?,
         videoDurationSec: (j['videoDurationSec'] as num?)?.toInt(),
+        videoPlayed: j['videoPlayed'] as bool? ?? false,
         inviteRoomId: j['inviteRoomId'] as String?,
         callId: j['callId'] as String?,
         callKind: j['callKind'] as String?,

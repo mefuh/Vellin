@@ -18,7 +18,13 @@ import { ensureRoomRuntime } from '../rooms/RoomRuntime.js';
 import { prisma } from '../db/prisma.js';
 import { userHub, type UserConnection } from '../realtime/UserHub.js';
 import { getFriendPresenceSnapshot, getNotificationsSnapshot } from '../friends/service.js';
-import { handleDmRead, handleDmSend, handleDmTyping, handleDmVoicePlayed } from '../dm/realtime.js';
+import {
+  handleDmRead,
+  handleDmSend,
+  handleDmTyping,
+  handleDmVideoPlayed,
+  handleDmVoicePlayed,
+} from '../dm/realtime.js';
 import { unreadTotal as dmUnreadTotal } from '../dm/service.js';
 import { MAX_DM_BODY } from '../dm/service.js';
 import { TokenBucket } from './rateLimit.js';
@@ -211,6 +217,8 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         void handleDmRead(principal.userId, m.peerId);
       } else if (m.t === 'dm_voice_played' && typeof m.messageId === 'string') {
         void handleDmVoicePlayed(principal.userId, m.messageId);
+      } else if (m.t === 'dm_video_played' && typeof m.messageId === 'string') {
+        void handleDmVideoPlayed(principal.userId, m.messageId);
       } else if (m.t === 'presence_focus') {
         // Какой диалог открыт + видима ли вкладка — для подавления push о ЛС.
         const convId = typeof m.conversationId === 'string' ? m.conversationId : null;

@@ -8,9 +8,8 @@ import 'package:visibility_detector/visibility_detector.dart';
 import '../app_config.dart';
 import 'package:provider/provider.dart';
 import '../state/circle_playback_controller.dart';
+import '../state/playback_controller.dart';
 import '../theme/vellin_design.dart';
-import '../theme/vellin_glyphs.dart';
-import 'ui/vellin_icon.dart';
 
 /// Круглый бабл видео-кружка (поведение как в мессенджерах):
 /// * пока кружок виден в диалоге — крутится по кругу **без звука**;
@@ -33,12 +32,37 @@ class VideoBubble extends StatefulWidget {
   /// Мой кружок или чужой — от этого зависит цвет подложки кольца.
   final bool mine;
 
+  /// Диалог и собеседник — их показывает мини-плеер, пока кружок звучит.
+  final String peerPublicId;
+  final String peerName;
+  final String? peerAvatarUrl;
+
+  /// Длина записи в секундах — подпись слева внизу.
+  final int? durationSec;
+
+  /// Время отправки и галочки — подпись справа внизу; её собирает строка
+  /// сообщения, чтобы у всех типов реплик она выглядела одинаково.
+  final Widget sentAt;
+
+  /// Посмотрел ли собеседник мой кружок — точка рядом с длительностью.
+  final bool played;
+
+  /// Первый просмотр чужого кружка — повод сказать об этом отправителю.
+  final VoidCallback? onFirstPlay;
+
   const VideoBubble({
     super.key,
     required this.messageId,
     required this.status,
     required this.videoUrl,
     required this.thumbUrl,
+    required this.peerPublicId,
+    required this.peerName,
+    required this.peerAvatarUrl,
+    required this.durationSec,
+    required this.sentAt,
+    this.played = false,
+    this.onFirstPlay,
     this.mine = false,
   });
 
@@ -97,6 +121,10 @@ class _VideoBubbleState extends State<VideoBubble> {
   @override
   void dispose() {
     _circles?.removeListener(_onCirclesChanged);
+    // Ушли из переписки или сменили раздел — строки больше нет, показывать
+    // кадр некому. Без этого окошко не всплывало: плеер считал, что кружок
+    // всё ещё на виду.
+    _circles?.setBubbleVisible(widget.messageId, false);
     _teardown();
     super.dispose();
   }
@@ -216,17 +244,29 @@ class _VideoBubbleState extends State<VideoBubble> {
     }
     if (!mounted) return;
 
+    widget.onFirstPlay?.call();
+    // Голосовое и кружок вместе звучать не должны — одно место для звука.
+    await context.read<PlaybackController>().stop();
+    if (!mounted) return;
     // Свой беззвучный цикл гасим: иначе один кружок звучал бы из двух плееров.
     setState(_teardown);
-    await circles.play(CircleItem(messageId: widget.messageId, path: path));
+    await circles.play(CircleItem(
+      messageId: widget.messageId,
+      path: path,
+      peerPublicId: widget.peerPublicId,
+      peerName: widget.peerName,
+      peerAvatarUrl: widget.peerAvatarUrl,
+      mine: widget.mine,
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
-    // Кадр всегда круглый и одного размера: бокс 140 с отступом 9 под кольцо
-    // прогресса — так кружки в ленте стоят ровной колонкой.
-    const box = 140.0;
-    const inset = 9.0;
+    // Кадр всегда круглый и одного размера — кружки в ленте стоят ровной
+    // колонкой. Размер заметно крупнее макетного: на 140 лицо было не
+    // разглядеть.
+    const box = 260.0;
+    const grow = 1.14;
 
     final playing = _playingWithSound;
 
@@ -234,9 +274,9 @@ class _VideoBubbleState extends State<VideoBubble> {
       key: _visibilityKey,
       onVisibilityChanged: _onVisibilityChanged,
       child: Padding(
-        // Играющий кружок вырастает — оставляем ему воздух снизу заранее,
-        // иначе лента дёргалась бы на каждом запуске.
-        padding: EdgeInsets.only(bottom: playing ? 22 : 0),
+        // Растёт кружок от нижнего края, то есть вверх — значит и воздух ему
+        // нужен сверху, иначе он наезжает на предыдущую реплику.
+        padding: EdgeInsets.only(top: playing ? box * (grow - 1) : 0),
         child: MouseRegion(
           cursor: widget.status == 'ready' ? SystemMouseCursors.click : MouseCursor.defer,
           child: GestureDetector(
@@ -244,7 +284,7 @@ class _VideoBubbleState extends State<VideoBubble> {
             child: AnimatedScale(
               duration: const Duration(milliseconds: 550),
               curve: VellinMotion.standard,
-              scale: playing ? 1.14 : 1,
+              scale: playing ? grow : 1,
               alignment: Alignment.bottomCenter,
               child: AnimatedContainer(
                 duration: VellinMotion.state,
@@ -262,16 +302,29 @@ class _VideoBubbleState extends State<VideoBubble> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    // Кольцо прогресса поверх всего: оно и рамка кадра.
-                    CustomPaint(
-                      painter: _RingPainter(
-                        progress: _progress,
-                        mine: widget.mine,
+                    ClipOval(child: _frame()),
+                    // Кольцо идёт ровно по краю кадра и только пока кружок
+                    // звучит: на выключенном ему нечего показывать.
+                    if (_isCurrent)
+                      CustomPaint(painter: _RingPainter(progress: _progress)),
+                    // Слева — сколько идёт запись и просмотрена ли она,
+                    // справа — когда её прислали.
+                    Positioned(
+                      left: 10,
+                      right: 10,
+                      bottom: 12,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _Caption(
+                            text: _durationLabel,
+                            // Точка стоит, пока запись не открыли: у своего
+                            // кружка её снимет собеседник, у чужого — я сам.
+                            trailing: widget.played ? null : const _PlayedDot(),
+                          ),
+                          _Caption(child: widget.sentAt),
+                        ],
                       ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(inset),
-                      child: ClipOval(child: _frame()),
                     ),
                   ],
                 ),
@@ -302,7 +355,6 @@ class _VideoBubbleState extends State<VideoBubble> {
     }
 
     final thumb = AppConfig.mediaUrl(widget.thumbUrl);
-    final playing = _playingWithSound;
     // Звучащий кружок рисуется из общего плеера — своего у баббла в этот
     // момент нет, он его отдал вместе с воспроизведением.
     final shared = _isCurrent ? _circles?.controller : null;
@@ -319,36 +371,17 @@ class _VideoBubbleState extends State<VideoBubble> {
               errorBuilder: (_, _, _) => const ColoredBox(color: VellinColors.bg5))
         else
           const ColoredBox(color: VellinColors.bg5),
-        // Пока не играет со звуком, кадр под вуалью с треугольником: беззвучный
-        // цикл — это ещё не воспроизведение, и путать их не нужно.
-        AnimatedOpacity(
-          duration: VellinMotion.state,
-          curve: VellinMotion.standard,
-          opacity: playing ? 0 : 1,
-          child: ColoredBox(
-            color: const Color(0x57080706),
-            child: Center(
-              child: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: VellinColors.glassPill,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: VellinColors.accentLine),
-                ),
-                alignment: Alignment.center,
-                child: VellinIcon.filled(
-                  VellinGlyphs.playFilled,
-                  size: 13,
-                  box: const Size(12, 12),
-                  color: VellinColors.accent,
-                ),
-              ),
-            ),
-          ),
-        ),
+        // Затемнения и кнопки здесь нет: кружок в покое крутит беззвучный
+        // цикл, и вуаль поверх живого кадра только мешала бы его смотреть.
       ],
     );
+  }
+
+  /// Подпись слева: пока звучит — сколько прошло, иначе длина записи.
+  String get _durationLabel {
+    final total = widget.durationSec ?? _circles?.duration.inSeconds ?? 0;
+    final shown = _isCurrent ? (_circles?.position.inSeconds ?? 0) : total;
+    return '${(shown ~/ 60).toString().padLeft(2, '0')}:${(shown % 60).toString().padLeft(2, '0')}';
   }
 
   Widget _placeholder(String label) {
@@ -368,9 +401,8 @@ class _VideoBubbleState extends State<VideoBubble> {
 /// Кольцо вокруг кадра: подложка и золотой прогресс от верхней точки.
 class _RingPainter extends CustomPainter {
   final double progress;
-  final bool mine;
 
-  _RingPainter({required this.progress, required this.mine});
+  _RingPainter({required this.progress});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -380,10 +412,12 @@ class _RingPainter extends CustomPainter {
       radius: size.width / 2 - stroke / 2,
     );
 
+    // Подложка кольца — тёмный контур кадра: на нём золотой прогресс виден и
+    // на светлом видео.
     final base = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = stroke
-      ..color = mine ? const Color(0x33E2C99B) : const Color(0x24FFFFFF);
+      ..color = const Color(0x66080706);
     canvas.drawArc(rect, 0, 6.2831853, false, base);
 
     if (progress <= 0) return;
@@ -397,5 +431,66 @@ class _RingPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_RingPainter old) => old.progress != progress || old.mine != mine;
+  bool shouldRepaint(_RingPainter old) => old.progress != progress;
+}
+
+/// Подпись на кадре: тёмная капсула, чтобы цифры читались на любом видео.
+class _Caption extends StatelessWidget {
+  /// Готовая подпись (время с галочками) либо просто строка — их рисуют
+  /// разные места, а капсула у обеих одна.
+  final String? text;
+  final Widget? child;
+  final Widget? trailing;
+
+  const _Caption({this.text, this.child, this.trailing});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xA6080706),
+        borderRadius: BorderRadius.circular(VellinRadius.pill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (child != null)
+            child!
+          else
+            Text(
+              text ?? '',
+              style: VellinType.caption.copyWith(
+                fontSize: 11,
+                color: VellinColors.ink82,
+                fontFeatures: VellinType.tabular,
+              ),
+            ),
+          if (trailing != null) ...[
+            const SizedBox(width: 6),
+            trailing!,
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Точка «ещё не просмотрено»: золотая, пока кружок не открыли. Просмотренный
+/// метки не несёт.
+class _PlayedDot extends StatelessWidget {
+  const _PlayedDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 5,
+      height: 5,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: VellinColors.accent,
+        boxShadow: [BoxShadow(color: Color(0x1FE2C99B), blurRadius: 0, spreadRadius: 3)],
+      ),
+    );
+  }
 }

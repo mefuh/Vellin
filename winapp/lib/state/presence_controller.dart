@@ -4,12 +4,12 @@ import '../realtime/user_socket.dart';
 
 /// Живое присутствие пользователя.
 ///
-/// [status] — то, что показывать в списках: «в сети», «недавно» или «не в
+/// [status] — то, что показывать в списках: «в сети», «не беспокоить» или «не в
 /// сети». Он учитывает и связь, и выбранный человеком статус, поэтому
 /// `online` из него выводится, а не наоборот.
 class PresenceInfo {
   final bool online;
-  final String status; // online | away | offline
+  final String status; // online | dnd | offline
   final String? lastSeenAt;
   const PresenceInfo({required this.online, required this.status, required this.lastSeenAt});
 }

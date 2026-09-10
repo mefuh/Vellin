@@ -31,6 +31,7 @@ class MessageRow extends StatelessWidget {
   final DateTime? peerReadAt;
 
   final void Function(String messageId)? onVoicePlayed;
+  final void Function(String messageId)? onVideoPlayed;
   final void Function(String url)? onImageTap;
 
   const MessageRow({
@@ -43,6 +44,7 @@ class MessageRow extends StatelessWidget {
     required this.myAvatarUrl,
     required this.peerReadAt,
     this.onVoicePlayed,
+    this.onVideoPlayed,
     this.onImageTap,
   });
 
@@ -78,25 +80,18 @@ class MessageRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (groupStart) ...[
-                  Row(
-                    children: [
-                      Text(
-                        name,
-                        style: VellinType.author.copyWith(
-                          color: mine ? VellinColors.accent : VellinColors.ink62,
-                        ),
-                      ),
-                      const SizedBox(width: 7),
-                      Text(_time(message.createdAt), style: VellinType.time),
-                      if (mine) ...[
-                        const SizedBox(width: 7),
-                        _Ticks(read: read, pending: message.pending),
-                      ],
-                    ],
+                  // В строке автора только имя: время и галочки переехали
+                  // внутрь каждой реплики — так видно, что прочитано именно
+                  // её, а не всю группу разом.
+                  Text(
+                    name,
+                    style: VellinType.author.copyWith(
+                      color: mine ? VellinColors.accent : VellinColors.ink62,
+                    ),
                   ),
                   const SizedBox(height: 4),
                 ],
-                _body(context),
+                _body(context, read),
               ],
             ),
           ),
@@ -112,7 +107,7 @@ class MessageRow extends StatelessWidget {
     return sent != null && !sent.isAfter(at);
   }
 
-  Widget _body(BuildContext context) {
+  Widget _body(BuildContext context, bool read) {
     if (message.voiceUrl != null) {
       return _Bubble(
         mine: mine,
@@ -128,6 +123,12 @@ class MessageRow extends StatelessWidget {
           peerName: mine ? myUsername : (peer?.username ?? ''),
           peerAvatarUrl: mine ? myAvatarUrl : peer?.avatarUrl,
           onFirstPlay: mine ? null : () => onVoicePlayed?.call(message.id),
+          trailing: _Meta(
+            time: _time(message.createdAt),
+            mine: mine,
+            read: read,
+            pending: message.pending,
+          ),
         ),
       );
     }
@@ -138,6 +139,18 @@ class MessageRow extends StatelessWidget {
         status: message.videoStatus,
         videoUrl: AppConfig.mediaUrl(message.videoUrl),
         thumbUrl: AppConfig.mediaUrl(message.videoThumbUrl),
+        peerPublicId: peer?.publicId ?? '',
+        peerName: mine ? myUsername : (peer?.username ?? ''),
+        peerAvatarUrl: mine ? myAvatarUrl : peer?.avatarUrl,
+        durationSec: message.videoDurationSec,
+        sentAt: _Meta(
+          time: _time(message.createdAt),
+          mine: mine,
+          read: read,
+          pending: message.pending,
+        ),
+        played: message.videoPlayed,
+        onFirstPlay: mine ? null : () => onVideoPlayed?.call(message.id),
         mine: mine,
       );
     }
@@ -151,16 +164,51 @@ class MessageRow extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _ImageBubble(url: url, mine: mine, onTap: url == null ? null : () => onImageTap?.call(url)),
+          _ImageBubble(
+            url: url,
+            mine: mine,
+            onTap: url == null ? null : () => onImageTap?.call(url),
+            meta: message.body.isEmpty
+                ? _Meta(
+                    time: _time(message.createdAt),
+                    mine: mine,
+                    read: read,
+                    pending: message.pending,
+                  )
+                : null,
+          ),
           if (message.body.isNotEmpty) ...[
             const SizedBox(height: 4),
-            _Bubble(mine: mine, child: _text(message.body)),
+            _Bubble(mine: mine, child: _textWithMeta(read)),
           ],
         ],
       );
     }
 
-    return _Bubble(mine: mine, child: _text(message.body));
+    return _Bubble(mine: mine, child: _textWithMeta(read));
+  }
+
+  /// Текст с меткой времени в одной строке: короткая реплика и метка встают
+  /// рядом, длинная переносится, и метка садится в конец последней строки.
+  Widget _textWithMeta(bool read) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Flexible(child: _text(message.body)),
+        const SizedBox(width: 9),
+        Padding(
+          // Метка стоит на базовой линии последней строки, а не по её верху.
+          padding: const EdgeInsets.only(bottom: 1),
+          child: _Meta(
+            time: _time(message.createdAt),
+            mine: mine,
+            read: read,
+            pending: message.pending,
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _text(String body) => Text(
@@ -212,7 +260,10 @@ class _ImageBubble extends StatefulWidget {
   final bool mine;
   final VoidCallback? onTap;
 
-  const _ImageBubble({required this.url, required this.mine, this.onTap});
+  /// Время и галочки — капсулой поверх правого нижнего угла кадра.
+  final Widget? meta;
+
+  const _ImageBubble({required this.url, required this.mine, this.onTap, this.meta});
 
   @override
   State<_ImageBubble> createState() => _ImageBubbleState();
@@ -261,15 +312,35 @@ class _ImageBubbleState extends State<_ImageBubble> with SingleTickerProviderSta
                   bottomLeft: Radius.circular(10),
                   bottomRight: Radius.circular(10),
                 ),
-                child: widget.url == null
-                    ? Container(height: 150, color: VellinColors.skeleton)
-                    : Image.network(
+                child: Stack(
+                  children: [
+                    if (widget.url == null)
+                      Container(height: 150, color: VellinColors.skeleton)
+                    else
+                      Image.network(
                         widget.url!,
                         height: 150,
                         width: double.infinity,
                         fit: BoxFit.cover,
                         errorBuilder: (_, _, _) => Container(height: 150, color: VellinColors.skeleton),
                       ),
+                    // У снимка без подписи метке негде встать в тексте —
+                    // кладём её капсулой на сам кадр.
+                    if (widget.meta != null)
+                      Positioned(
+                        right: 6,
+                        bottom: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xA6080706),
+                            borderRadius: BorderRadius.circular(VellinRadius.pill),
+                          ),
+                          child: widget.meta,
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -294,13 +365,19 @@ class _TicksState extends State<_Ticks> with SingleTickerProviderStateMixin {
   late final AnimationController _draw = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 500),
-  )..forward();
+    // Уже написанная история показывается готовой: прочерчивать галочки у
+    // старых реплик каждый раз, когда открыли диалог или пришло новое
+    // сообщение, — значит врать про момент прочтения.
+    value: 1,
+  );
 
   @override
   void didUpdateWidget(_Ticks old) {
     super.didUpdateWidget(old);
-    // Вторая галочка приезжает позже первой — прочерчиваем её заново.
-    if (old.read != widget.read) _draw.forward(from: 0);
+    // Рисуем только сам переход: отправлено → доставлено → прочитано.
+    if (old.read != widget.read || old.pending != widget.pending) {
+      _draw.forward(from: 0);
+    }
   }
 
   @override
@@ -328,25 +405,13 @@ class _TicksState extends State<_Ticks> with SingleTickerProviderStateMixin {
             progress: t,
           );
         }
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            VellinIcon(
-              VellinGlyphs.tickDouble,
-              size: 18,
-              box: const Size(18, 11),
-              color: VellinColors.accent,
-              progress: t,
-            ),
-            const SizedBox(width: 6),
-            Opacity(
-              opacity: t,
-              child: Text(
-                'прочитано',
-                style: VellinType.time.copyWith(fontSize: 10, color: const Color(0x99E2C99B)),
-              ),
-            ),
-          ],
+        // Подписи «прочитано» рядом нет: две галочки говорят это сами.
+        return VellinIcon(
+          VellinGlyphs.tickDouble,
+          size: 18,
+          box: const Size(18, 11),
+          color: VellinColors.accent,
+          progress: t,
         );
       },
     );
@@ -415,4 +480,39 @@ class _CallRecord extends StatelessWidget {
 
   static String _duration(int sec) =>
       '${(sec ~/ 60).toString().padLeft(1, '0')}:${(sec % 60).toString().padLeft(2, '0')}';
+}
+
+/// Время отправки и — у своих — галочки доставки. Живёт внутри реплики,
+/// правее текста и на одной строке с ним.
+class _Meta extends StatelessWidget {
+  final String time;
+  final bool mine;
+  final bool read;
+  final bool pending;
+
+  const _Meta({
+    required this.time,
+    required this.mine,
+    required this.read,
+    required this.pending,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          time,
+          style: VellinType.time.copyWith(
+            color: mine ? const Color(0x7AE2C99B) : VellinColors.ink28,
+          ),
+        ),
+        if (mine) ...[
+          const SizedBox(width: 5),
+          _Ticks(read: read, pending: pending),
+        ],
+      ],
+    );
+  }
 }

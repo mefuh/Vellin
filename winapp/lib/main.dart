@@ -80,9 +80,13 @@ Future<void> main(List<String> args) async {
   final toasts = ToastHost();
   final notifications = NotificationsController(notificationsApi, friendsApi, socket);
   notifications.onIncoming = toasts.show;
+  // «Не беспокоить» — статус присутствия, а не настройка: доставка не меняется,
+  // молчит только показ. Уведомления при этом продолжают копиться в списке.
+  bool dnd() => auth.user?.presenceStatus == 'dnd';
+
   // Тостер спрашивает настройки в момент показа, а не запоминает их: человек
   // мог передумать между двумя уведомлениями.
-  toasts.enabled = () => appSettings.toasts;
+  toasts.enabled = () => appSettings.toasts && !dnd();
   toasts.preview = () => appSettings.toastPreview;
 
   // Старт: сценарий обновления и восстановление сессии идут параллельно.
@@ -124,7 +128,7 @@ Future<void> main(List<String> args) async {
         ChangeNotifierProvider<DmController>(
           create: (_) {
             final dm = DmController(dmApi, socket);
-            dm.soundEnabled = () => appSettings.messageSound;
+            dm.soundEnabled = () => appSettings.messageSound && !dnd();
             return dm;
           },
         ),
@@ -137,6 +141,7 @@ Future<void> main(List<String> args) async {
           create: (_) {
             final calls = CallController(socket, toasts, callSettings);
             calls.ringtoneEnabled = () => appSettings.ringtone;
+            calls.doNotDisturb = dnd;
             return calls;
           },
         ),

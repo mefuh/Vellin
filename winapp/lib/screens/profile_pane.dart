@@ -428,28 +428,51 @@ class _Backdrop extends StatelessWidget {
         .take(6)
         .toList();
 
-    return Stack(
+    // Обрезка обязательна: размытие рисуется шире своего бокса и без неё
+    // выползало и на левую панель, и вниз — под аватаром получался шов, за
+    // которым дымка шла уже без затемняющего градиента.
+    return ClipRect(
+      child: Stack(
       fit: StackFit.expand,
       children: [
         if (posters.isNotEmpty)
-          ImageFiltered(
-            imageFilter: ui.ImageFilter.blur(
-              sigmaX: VellinBlur.backdrop,
-              sigmaY: VellinBlur.backdrop,
-              tileMode: TileMode.decal,
-            ),
-            child: Row(
-              children: [
-                for (final url in posters)
-                  Expanded(
-                    child: Image.network(
-                      url,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const ColoredBox(color: VellinColors.bg5),
-                    ),
+          // Размытие считается от ширины области, а не берётся числом из
+          // макета: на развёрнутом окне постеры занимают вдвое больше места, и
+          // фиксированные 30 оставляли от них крупные цветные пятна вместо
+          // ровной дымки.
+          LayoutBuilder(
+            builder: (context, box) {
+              final sigma = (box.maxWidth / 39).clamp(VellinBlur.backdrop, 72.0);
+              return ImageFiltered(
+                imageFilter: ui.ImageFilter.blur(
+                  sigmaX: sigma,
+                  sigmaY: sigma,
+                  tileMode: TileMode.decal,
+                ),
+                // Цвет постеров приглушён: в полную силу размытые пятна спорят
+                // с именем и читаются как грязь, а не как отсвет витрины.
+                child: ColorFiltered(
+                  colorFilter: const ColorFilter.matrix(<double>[
+                    0.55, 0.33, 0.12, 0, 0, //
+                    0.19, 0.69, 0.12, 0, 0, //
+                    0.19, 0.33, 0.48, 0, 0, //
+                    0, 0, 0, 1, 0, //
+                  ]),
+                  child: Row(
+                    children: [
+                      for (final url in posters)
+                        Expanded(
+                          child: Image.network(
+                            url,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => const ColoredBox(color: VellinColors.bg5),
+                          ),
+                        ),
+                    ],
                   ),
-              ],
-            ),
+                ),
+              );
+            },
           ),
         // Золотое пятно и градиент в фон: без них подложка спорит с именем.
         const DecoratedBox(
@@ -466,12 +489,13 @@ class _Backdrop extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Color(0x1F0A0807), Color(0x940A0807), Color(0xF00A0807), Color(0xFF0A0807)],
-              stops: [0, 0.54, 0.84, 1],
+              colors: [Color(0x520A0807), Color(0xB50A0807), Color(0xF20A0807), Color(0xFF0A0807)],
+              stops: [0, 0.5, 0.84, 1],
             ),
           ),
         ),
       ],
+      ),
     );
   }
 }

@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'prefs.dart';
 import '../models/models.dart';
 
 /// Хранилище сессии (token + user). На Windows shared_preferences реализован
@@ -15,7 +15,7 @@ class SessionStore {
 
   Future<({String token, AuthUser user})?> load() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await openPrefs();
       final token = prefs.getString(_kToken);
       final userJson = prefs.getString(_kUser);
       if (token == null || userJson == null) return null;
@@ -27,13 +27,13 @@ class SessionStore {
   }
 
   Future<void> save(String token, AuthUser user) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await openPrefs();
     await prefs.setString(_kToken, token);
     await prefs.setString(_kUser, jsonEncode(user.toJson()));
   }
 
   Future<void> clear() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await openPrefs();
     await prefs.remove(_kToken);
     await prefs.remove(_kUser);
   }

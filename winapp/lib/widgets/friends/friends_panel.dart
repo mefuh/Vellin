@@ -129,7 +129,7 @@ class FriendsPanel extends StatelessWidget {
           user: f.user,
           subtitle: switch (state) {
             VellinPresence.online => 'в сети',
-            VellinPresence.away => 'недавно',
+            VellinPresence.dnd => 'не беспокоить',
             VellinPresence.offline =>
               presenceLabel(online: false, lastSeenAt: info?.lastSeenAt ?? f.lastSeenAt),
           },

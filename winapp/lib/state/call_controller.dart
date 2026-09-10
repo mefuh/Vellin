@@ -51,6 +51,11 @@ class CallController extends ChangeNotifier {
   /// Играть ли мелодию входящего — настройка оболочки, задаётся при старте.
   bool Function()? ringtoneEnabled;
 
+  /// Режим «не беспокоить»: звонок доходит, но молча и без окна поверх других
+  /// программ. Ответить можно с экрана входящего в самом клиенте — иначе
+  /// звонок было бы нечем принять.
+  bool Function()? doNotDisturb;
+
   CallController(this._socket, this._toasts, this.settings) {
     _toasts.onCallAction = _onToastAction;
     // Настройки меняют посреди разговора — применяем их на ходу.
@@ -369,8 +374,11 @@ class CallController extends ChangeNotifier {
         incoming = IncomingDmCall(snapshot, from);
         error = null;
         // Мелодию можно выключить в настройках — экран входящего остаётся.
-        if (ringtoneEnabled?.call() != false) CallTones.instance.startRingtone();
-        _showCallToast(snapshot, from);
+        final quiet = doNotDisturb?.call() == true;
+        if (!quiet && ringtoneEnabled?.call() != false) {
+          CallTones.instance.startRingtone();
+        }
+        if (!quiet) _showCallToast(snapshot, from);
         notifyListeners();
         break;
 

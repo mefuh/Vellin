@@ -64,6 +64,7 @@ export function dmRowToDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
           ...(m.videoUrl ? { videoUrl: absoluteUrl(m.videoUrl) } : {}),
           ...(m.videoThumbUrl ? { videoThumbUrl: absoluteUrl(m.videoThumbUrl) } : {}),
           ...(m.videoDurationSec != null ? { videoDurationSec: m.videoDurationSec } : {}),
+          videoPlayed: m.videoPlayedAt != null,
         }
       : {}),
     ...(m.imageUrl
@@ -621,6 +622,25 @@ export async function markVoicePlayed(meId: string, messageId: string): Promise<
   if (!isParticipant || m.senderId === meId) return null; // только получатель
   if (!m.voicePlayedAt) {
     await prisma.directMessage.update({ where: { id: m.id }, data: { voicePlayedAt: new Date() } });
+  }
+  return { conversationId: m.conversationId, messageId: m.id, senderId: m.senderId };
+}
+
+/**
+ * Отметить видео-кружок просмотренным. Правила те же, что у голосового:
+ * только получатель, только в своём диалоге, повторный вызов момент не
+ * перезаписывает.
+ */
+export async function markVideoPlayed(meId: string, messageId: string): Promise<VoicePlayedResult | null> {
+  const m = await prisma.directMessage.findUnique({
+    where: { id: messageId },
+    include: { conversation: { select: { userAId: true, userBId: true } } },
+  });
+  if (!m || !m.videoStatus) return null;
+  const isParticipant = m.conversation.userAId === meId || m.conversation.userBId === meId;
+  if (!isParticipant || m.senderId === meId) return null; // только получатель
+  if (!m.videoPlayedAt) {
+    await prisma.directMessage.update({ where: { id: m.id }, data: { videoPlayedAt: new Date() } });
   }
   return { conversationId: m.conversationId, messageId: m.id, senderId: m.senderId };
 }

@@ -16,7 +16,7 @@ class AuthUser {
   final String kind;
   final String createdAt;
 
-  /// Выбранный статус присутствия: online | away | offline.
+  /// Выбранный статус присутствия: online | dnd | offline.
   final String presenceStatus;
   final bool isAdmin;
 

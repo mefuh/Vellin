@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart' show InputDecoration, TextField;
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
@@ -14,7 +15,6 @@ import '../../state/dm_controller.dart';
 import '../../state/presence_controller.dart';
 import '../../theme/vellin_design.dart';
 import '../../theme/vellin_glyphs.dart';
-import '../circle_recorder.dart';
 import '../ui/vellin_avatar.dart';
 import '../ui/vellin_button.dart';
 import '../ui/vellin_hover.dart';
@@ -205,27 +205,6 @@ class _ChatPaneState extends State<ChatPane> {
     }
   }
 
-  Future<void> _recordCircle() async {
-    // Камеру и микрофон во время звонка держит он — записать кружок нечем.
-    if (MediaGate.instance.callHoldsDevices) {
-      _toast('Идёт звонок — записать кружок нельзя');
-      return;
-    }
-    widget.dm.sendRecordingSignal(true, 'video');
-    CircleRecording? rec;
-    try {
-      rec = await showCircleRecorder(context);
-    } finally {
-      widget.dm.sendRecordingSignal(false, 'video');
-    }
-    if (rec == null) return;
-    try {
-      await widget.dm.sendVideoNote(rec.path, rec.seconds);
-    } catch (e) {
-      if (mounted) _toast('Не удалось отправить кружок: $e');
-    }
-  }
-
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) _scroll.jumpTo(0);
@@ -336,6 +315,10 @@ class _ChatPaneState extends State<ChatPane> {
           children: [
             ?divider,
             MessageRow(
+              // Ключ по сообщению: без него состояние строки (в том числе
+              // прочерчивание галочек) достаётся соседней реплике, когда в
+              // ленту добавляется новая.
+              key: ValueKey(m.id),
               message: m,
               mine: mine,
               groupStart: groupStart,
@@ -344,6 +327,7 @@ class _ChatPaneState extends State<ChatPane> {
               myAvatarUrl: auth?.avatarUrl,
               peerReadAt: peerRead,
               onVoicePlayed: dm.markVoicePlayed,
+              onVideoPlayed: dm.markVideoPlayed,
               onImageTap: widget.onOpenImage,
             ),
           ],
@@ -406,23 +390,14 @@ class _ChatPaneState extends State<ChatPane> {
   }
 
   Widget _inputBar() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Expanded(
-          child: _InputField(
-            controller: _input,
-            focusNode: _inputFocus,
-            onSubmit: _send,
-            onAttach: _attach,
-            onVoice: _startRecord,
-          ),
-        ),
-        const SizedBox(width: 10),
-        _CircleButton(onTap: _recordCircle),
-        const SizedBox(width: 8),
-        _SendButton(onTap: _send),
-      ],
+    // Одна рамка на всё: картинка, текст, микрофон и отправка живут внутри
+    // поля, как в макете.
+    return _InputField(
+      controller: _input,
+      focusNode: _inputFocus,
+      onSubmit: _send,
+      onAttach: _attach,
+      onVoice: _startRecord,
     );
   }
 
@@ -486,16 +461,11 @@ class _ChatHeader extends StatelessWidget {
               ),
             ),
           ),
+          // Кнопка одна: камеру в разговоре включают внутри самого звонка,
+          // и отдельный вход «сразу с видео» тут только дублировал её.
           VellinIconButton(
             glyph: VellinGlyphs.calls,
             onPressed: busy || peerId == null ? null : () => call.invite(peerId, video: false),
-            size: 34,
-            radius: VellinRadius.button,
-          ),
-          const SizedBox(width: 8),
-          VellinIconButton(
-            glyph: VellinGlyphs.camera,
-            onPressed: busy || peerId == null ? null : () => call.invite(peerId, video: true),
             size: 34,
             radius: VellinRadius.button,
           ),
@@ -534,13 +504,13 @@ class _StatusLine extends StatelessWidget {
     return Text(
       switch (presence) {
         VellinPresence.online => 'в сети',
-        VellinPresence.away => 'недавно',
+        VellinPresence.dnd => 'не беспокоить',
         VellinPresence.offline => presenceLabel(online: false, lastSeenAt: lastSeenAt),
       },
       style: VellinType.caption.copyWith(
         color: switch (presence) {
           VellinPresence.online => const Color(0xE693B08A),
-          VellinPresence.away => const Color(0xCCD6AE6E),
+          VellinPresence.dnd => const Color(0xCCD6AE6E),
           VellinPresence.offline => VellinColors.ink28,
         },
       ),
@@ -781,18 +751,16 @@ class _InputFieldState extends State<_InputField> {
 
   @override
   Widget build(BuildContext context) {
-    final focused = widget.focusNode.hasFocus;
-
-    return AnimatedContainer(
-      duration: VellinMotion.hover,
-      curve: VellinMotion.standard,
+    // Поле выглядит одинаково в покое и в работе: о том, что оно поймало
+    // ввод, говорит мигающая каретка, а золотая рамка на всю ширину окна
+    // только мешала.
+    return Container(
       constraints: const BoxConstraints(minHeight: VellinLayout.composerMinHeight),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.only(left: 6, right: 8),
       decoration: BoxDecoration(
         color: VellinColors.fill045,
         borderRadius: BorderRadius.circular(VellinRadius.row),
-        border: Border.all(color: focused ? VellinColors.focusRing : VellinColors.line09),
-        boxShadow: focused ? VellinShadow.focus : null,
+        border: Border.all(color: VellinColors.line09),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -805,9 +773,25 @@ class _InputFieldState extends State<_InputField> {
             glyphSize: 17,
             filled: false,
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 10),
           Expanded(
-            child: TextField(
+            // Enter отправляет, Shift+Enter переносит строку. Поле
+            // многострочное, поэтому решать приходится до того, как перевод
+            // строки попадёт в текст.
+            child: Focus(
+              canRequestFocus: false,
+              skipTraversal: true,
+              onKeyEvent: (node, event) {
+                if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                final enter = event.logicalKey == LogicalKeyboardKey.enter ||
+                    event.logicalKey == LogicalKeyboardKey.numpadEnter;
+                if (!enter) return KeyEventResult.ignored;
+                final shift = HardwareKeyboard.instance.isShiftPressed;
+                if (shift) return KeyEventResult.ignored;
+                widget.onSubmit();
+                return KeyEventResult.handled;
+              },
+              child: TextField(
               controller: widget.controller,
               focusNode: widget.focusNode,
               maxLines: 5,
@@ -820,7 +804,6 @@ class _InputFieldState extends State<_InputField> {
               ),
               cursorColor: VellinColors.accent,
               cursorWidth: 1.4,
-              onSubmitted: (_) => widget.onSubmit(),
               decoration: InputDecoration.collapsed(
                 hintText: 'Написать сообщение…',
                 hintStyle: TextStyle(
@@ -830,8 +813,9 @@ class _InputFieldState extends State<_InputField> {
                 ),
               ),
             ),
+            ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 10),
           VellinIconButton(
             glyph: VellinGlyphs.mic,
             onPressed: widget.onVoice,
@@ -840,25 +824,10 @@ class _InputFieldState extends State<_InputField> {
             glyphSize: 17,
             filled: false,
           ),
+          const SizedBox(width: 10),
+          _SendButton(onTap: widget.onSubmit),
         ],
       ),
-    );
-  }
-}
-
-/// Кнопка записи кружка.
-class _CircleButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _CircleButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return VellinIconButton(
-      glyph: VellinGlyphs.camera,
-      onPressed: onTap,
-      size: 34,
-      radius: VellinRadius.button,
-      glyphSize: 17,
     );
   }
 }
