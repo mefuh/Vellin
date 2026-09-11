@@ -64,6 +64,7 @@ model User {
   conversationsA         Conversation[]  @relation("ConvUserA")
   conversationsB         Conversation[]  @relation("ConvUserB")
   directMessages         DirectMessage[] @relation("DmSender")
+  dmReactions            DirectMessageReaction[]
   sharedWatchA           SharedWatchStat[] @relation("SharedWatchA")
   sharedWatchB           SharedWatchStat[] @relation("SharedWatchB")
 
@@ -513,12 +514,31 @@ model DirectMessage {
   readAt           DateTime?
   /// Кто скрыл сообщение у себя («удалить только у меня»).
   hiddenFor        String[]     @default([])
+  reactions        DirectMessageReaction[]
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])
   @@index([videoStatus])
   @@index([conversationId, inviteRoomId, inviteStatus])
   @@index([callId])
+}
+
+/// Реакция на личное сообщение. У человека на одном сообщении — одна реакция:
+/// новая заменяет прежнюю, а не добавляется рядом.
+model DirectMessageReaction {
+  id        String        @id @default(cuid())
+  messageId String
+  message   DirectMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Эмодзи целиком, с модификаторами и склейками.
+  emoji     String
+  createdAt DateTime      @default(now())
+  /// Сдвигается при замене реакции — по нему плашки встают в порядке смены.
+  updatedAt DateTime      @updatedAt
+
+  @@unique([messageId, userId])
+  @@index([messageId])
 }
 
 /// Серверная запись о входе (устройство/браузер). JWT пользователя несёт

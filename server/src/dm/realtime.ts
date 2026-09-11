@@ -14,6 +14,7 @@ import {
   editMessage,
   forwardMessages,
   pinMessage,
+  reactToMessage,
   markRead,
   markVideoPlayed,
   markVoicePlayed,
@@ -361,5 +362,18 @@ export async function handleDmForward(meId: string, toUserId: string, messageIds
       return;
     }
     logger.error({ err, meId, toUserId }, 'dm forward failed');
+  }
+}
+
+/** Реакция поставлена, заменена или снята — актуальный список обоим участникам. */
+export async function handleDmReact(meId: string, messageId: string, emoji: string | null): Promise<void> {
+  try {
+    const r = await reactToMessage(meId, messageId, emoji);
+    if (!r) return;
+    const event = { t: 'dm_reaction' as const, conversationId: r.conversationId, messageId: r.messageId, reactions: r.reactions };
+    userHub.pushTo(r.userAId, event);
+    userHub.pushTo(r.userBId, event);
+  } catch (err) {
+    logger.error({ err, meId, messageId }, 'dm react failed');
   }
 }

@@ -519,6 +519,12 @@ export interface DirectMessageReplyRef {
   body?: string;
 }
 
+/** Реакция одного участника на сообщение. */
+export interface DirectMessageReactionDTO {
+  userId: string;
+  emoji: string;
+}
+
 /** Одно личное сообщение. */
 export interface DirectMessageDTO {
   id: string;
@@ -594,6 +600,8 @@ export interface DirectMessageDTO {
   readAt?: string;
   /** Когда голосовое или кружок впервые прослушали (ISO). Прочитано ≠ прослушано. */
   playedAt?: string;
+  /** Реакции участников — не больше одной на человека. Отсутствует — реакций нет. */
+  reactions?: DirectMessageReactionDTO[];
   /**
    * Эхо клиентского nonce — отдаётся только отправителю, чтобы он сопоставил
    * пришедшее с сервера сообщение со своей оптимистичной отправкой.

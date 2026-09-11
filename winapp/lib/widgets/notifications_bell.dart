@@ -101,12 +101,19 @@ class NotificationsPanelOverlay extends StatelessWidget {
         OverlayEntry(
           builder: (context) {
             final c = context.watch<NotificationsController>();
+            // Панель и перехват щелчков начинаются под заголовком окна: иначе
+            // панель ложится на кнопки свернуть и закрыть, а подложка
+            // съедает нажатия по ним, пока панель открыта.
             return Stack(
               children: [
-                Positioned.fill(
+                Positioned(
+                  top: VellinLayout.titleBarHeight,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
                   child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: c.closePanel),
                 ),
-                Positioned(top: 4, right: 8, child: _Panel(c: c)),
+                Positioned(top: VellinLayout.titleBarHeight + 6, right: 8, child: _Panel(c: c)),
               ],
             );
           },

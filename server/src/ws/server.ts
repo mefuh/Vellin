@@ -27,6 +27,7 @@ import {
   handleDmDelete,
   handleDmPin,
   handleDmForward,
+  handleDmReact,
   handleDmVoicePlayed,
 } from '../dm/realtime.js';
 import { unreadTotal as dmUnreadTotal } from '../dm/service.js';
@@ -173,6 +174,7 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         messageId?: string | null;
         messageIds?: unknown;
         forAll?: boolean;
+        emoji?: string | null;
         replyToId?: string;
         conversationId?: string | null;
         visible?: boolean;
@@ -248,6 +250,8 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         void handleDmPin(principal.userId, m.peerId, m.messageId);
       } else if (m.t === 'dm_forward' && typeof m.toUserId === 'string' && isStringList(m.messageIds)) {
         void handleDmForward(principal.userId, m.toUserId, m.messageIds);
+      } else if (m.t === 'dm_react' && typeof m.messageId === 'string' && (typeof m.emoji === 'string' || m.emoji === null)) {
+        void handleDmReact(principal.userId, m.messageId, m.emoji);
       } else if (m.t === 'presence_focus') {
         // Какой диалог открыт + видима ли вкладка — для подавления push о ЛС.
         const convId = typeof m.conversationId === 'string' ? m.conversationId : null;

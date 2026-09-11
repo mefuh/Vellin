@@ -6,6 +6,7 @@ import '../models/dm.dart';
 import '../models/social.dart';
 import '../realtime/user_socket.dart';
 import '../runtime/call_tones.dart';
+import 'recent_reactions.dart';
 
 /// Состояние личных сообщений: WebSocket-канал, список диалогов и активный тред.
 /// Отправка — по WS (dm_send с nonce + оптимистичный бабл), приём — dm_message.
@@ -455,6 +456,37 @@ class DmController extends ChangeNotifier {
     _socket.send({'t': 'dm_pin', 'peerId': peerId, 'messageId': unpin ? null : m.id});
   }
 
+  /// Поставить реакцию или снять свою. Та же реакция ещё раз — снимает её,
+  /// другая — заменяет. Лента меняется сразу, сервер подтверждает рассылкой.
+  void react(DirectMessage m, String emoji) {
+    if (m.pending || m.isCallRecord) return;
+    final idx = activeMessages.indexWhere((x) => x.id == m.id);
+    if (idx < 0) return;
+    final current = activeMessages[idx];
+    final removing = current.reactionOf(_myUserId) == emoji;
+    final next = [
+      ...current.reactions.where((r) => r.userId != _myUserId),
+      if (!removing) DmReaction(userId: _myUserId, emoji: emoji),
+    ];
+    activeMessages[idx] = current.copyWith(reactions: next);
+    notifyListeners();
+    if (!removing) RecentReactions.instance.use(emoji);
+    _socket.send({'t': 'dm_react', 'messageId': m.id, 'emoji': removing ? null : emoji});
+  }
+
+  void _onReaction(Map<String, dynamic> msg) {
+    final id = msg['messageId'] as String?;
+    if (id == null) return;
+    final idx = activeMessages.indexWhere((x) => x.id == id);
+    if (idx < 0) return;
+    final list = (msg['reactions'] as List? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(DmReaction.fromJson)
+        .toList();
+    activeMessages[idx] = activeMessages[idx].copyWith(reactions: list);
+    notifyListeners();
+  }
+
   void unpin() {
     final peerId = _activePeerUserId;
     if (peerId == null || pinned == null) return;
@@ -589,6 +621,9 @@ class DmController extends ChangeNotifier {
         break;
       case 'dm_error':
         _onError(msg);
+        break;
+      case 'dm_reaction':
+        _onReaction(msg);
         break;
     }
   }

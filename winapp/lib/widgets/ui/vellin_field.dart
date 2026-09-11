@@ -142,12 +142,16 @@ class VellinSearchField extends StatefulWidget {
   final ValueChanged<String>? onChanged;
   final double height;
 
+  /// Забрать фокус при появлении — поиск, ради которого открыли окно.
+  final bool autofocus;
+
   const VellinSearchField({
     super.key,
     required this.controller,
     this.placeholder = 'Поиск',
     this.onChanged,
     this.height = VellinLayout.searchHeight,
+    this.autofocus = false,
   });
 
   @override
@@ -197,6 +201,7 @@ class _VellinSearchFieldState extends State<VellinSearchField> {
             child: TextField(
               controller: widget.controller,
               focusNode: _focus,
+              autofocus: widget.autofocus,
               style: _inputStyle(12.5, VellinColors.ink92),
               cursorColor: VellinColors.accent,
               cursorWidth: 1.4,

@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
@@ -13,7 +12,6 @@ import '../state/auth_controller.dart';
 import '../state/call_controller.dart';
 import '../state/dm_controller.dart';
 import '../state/friends_controller.dart';
-import '../state/notifications_controller.dart';
 import '../state/playback_controller.dart';
 import '../state/presence_controller.dart';
 import '../state/shell_controller.dart';
@@ -167,14 +165,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final narrow = MediaQuery.sizeOf(context).width < VellinLayout.breakpoint;
     final panelWidth = narrow ? VellinLayout.panelWidthNarrow : VellinLayout.panelWidth;
 
-    return Focus(
-      // Esc закрывает то, что открыто сейчас, — по одному слою за нажатие.
-      // Узел не берёт фокус на себя: событие приходит сюда всплытием от поля
-      // ввода или списка, где фокус на самом деле и находится.
-      canRequestFocus: false,
-      skipTraversal: true,
-      onKeyEvent: (node, event) => _onEscape(event, shell, dm),
-      child: ColoredBox(
+    // Esc обрабатывается выше, в EscapeScope над всем приложением.
+    return ColoredBox(
       color: VellinColors.bg1,
       child: Row(
         children: [
@@ -219,37 +211,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           Expanded(child: _rightWithPlayer(shell, dm)),
         ],
       ),
-      ),
     );
-  }
-
-  /// Esc закрывает верхний открытый слой: сначала настройки, потом панель
-  /// уведомлений, затем профиль, и только в конце — саму переписку.
-  KeyEventResult _onEscape(KeyEvent event, ShellController shell, DmController dm) {
-    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.escape) {
-      return KeyEventResult.ignored;
-    }
-
-    if (shell.settingsOpen) {
-      shell.closeSettings();
-      return KeyEventResult.handled;
-    }
-    final notifications = context.read<NotificationsController>();
-    if (notifications.panelOpen) {
-      notifications.closePanel();
-      return KeyEventResult.handled;
-    }
-    switch (shell.pane) {
-      case RightPaneKind.profile:
-        shell.closeProfile(hasOpenChat: dm.activePeerPublicId != null);
-        return KeyEventResult.handled;
-      case RightPaneKind.chat:
-        dm.closeThread();
-        shell.showEmpty();
-        return KeyEventResult.handled;
-      case RightPaneKind.empty:
-        return KeyEventResult.ignored;
-    }
   }
 
   Widget _panelBody(ShellController shell, DmController dm, FriendsController friends) {

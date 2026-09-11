@@ -74,6 +74,21 @@ class ShellController extends ChangeNotifier {
     notifyListeners();
   }
 
+  int _settingsCloseRequest = 0;
+
+  /// Номер просьбы закрыть настройки. Растёт с каждой просьбой — фрейм
+  /// сравнивает его с увиденным и уходит своей анимацией.
+  int get settingsCloseRequest => _settingsCloseRequest;
+
+  /// Закрыть настройки с анимацией ухода — для Esc и прочих закрытий извне.
+  /// [closeSettings] убирает слой сразу и годится, только когда уход уже
+  /// доигран (кнопка «назад» во фрейме, выход из аккаунта).
+  void requestCloseSettings() {
+    if (!_settingsOpen) return;
+    _settingsCloseRequest++;
+    notifyListeners();
+  }
+
   void selectSettingsTab(String tab) {
     if (_settingsTab == tab) return;
     _settingsTab = tab;

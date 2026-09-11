@@ -4,6 +4,7 @@ import type {
   CallSnapshot,
   ChatMessage,
   DirectMessageDTO,
+  DirectMessageReactionDTO,
   DmCallSnapshot,
   FriendPresence,
   ParticipantInfo,
@@ -417,6 +418,7 @@ export type UserS2C =
   | UserS2CDmMessageUpdated
   | UserS2CDmMessageDeleted
   | UserS2CDmPinned
+  | UserS2CDmReaction
   | UserS2CDmRead
   | UserS2CDmTyping
   | UserS2CDmVoicePlayed
@@ -533,6 +535,14 @@ export interface UserS2CDmMessageDeleted {
   conversationId: string;
   messageIds: string[];
   forAll: boolean;
+}
+
+/** Реакции на сообщение изменились — полный актуальный список, а не разница. */
+export interface UserS2CDmReaction {
+  t: 'dm_reaction';
+  conversationId: string;
+  messageId: string;
+  reactions: DirectMessageReactionDTO[];
 }
 
 /** В диалоге сменилось закреплённое сообщение. `message: null` — открепили. */
@@ -705,6 +715,7 @@ export type UserC2S =
   | UserC2SDmDelete
   | UserC2SDmPin
   | UserC2SDmForward
+  | UserC2SDmReact
   | UserC2SDmTyping
   | UserC2SDmRead
   | UserC2SDmVoicePlayed
@@ -810,6 +821,15 @@ export interface UserC2SDmForward {
   t: 'dm_forward';
   toUserId: string;
   messageIds: string[];
+}
+/**
+ * Поставить реакцию на сообщение (заменяет прежнюю реакцию этого человека)
+ * или снять её (`emoji: null`). Записи о звонках реакций не принимают.
+ */
+export interface UserC2SDmReact {
+  t: 'dm_react';
+  messageId: string;
+  emoji: string | null;
 }
 /** Отметить голосовое сообщение прослушанным (получателем). */
 export interface UserC2SDmVoicePlayed {

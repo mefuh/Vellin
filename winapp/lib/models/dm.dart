@@ -23,6 +23,16 @@ String dmKindLabel(DmKind kind) => switch (kind) {
       DmKind.text => '',
     };
 
+/// Реакция одного участника (shared: DirectMessageReactionDTO).
+class DmReaction {
+  final String userId;
+  final String emoji;
+  const DmReaction({required this.userId, required this.emoji});
+
+  factory DmReaction.fromJson(Map<String, dynamic> j) =>
+      DmReaction(userId: j['userId'] as String? ?? '', emoji: j['emoji'] as String? ?? '');
+}
+
 /// Ссылка на сообщение в цитате ответа (shared: DirectMessageReplyRef).
 class DmReplyRef {
   final String id;
@@ -111,6 +121,9 @@ class DirectMessage {
   /// Когда голосовое или кружок впервые прослушали (ISO).
   final String? playedAt;
 
+  /// Реакции участников — не больше одной на человека, по порядку постановки.
+  final List<DmReaction> reactions;
+
   /// Эхо оптимистичной отправки (только у отправителя).
   final String? nonce;
   /// Локальный флаг «ещё отправляется» (оптимистичный бабл до эха с сервера).
@@ -144,9 +157,18 @@ class DirectMessage {
     this.editedAt,
     this.readAt,
     this.playedAt,
+    this.reactions = const [],
     this.nonce,
     this.pending = false,
   });
+
+  /// Моя реакция на это сообщение, если есть.
+  String? reactionOf(String userId) {
+    for (final r in reactions) {
+      if (r.userId == userId) return r.emoji;
+    }
+    return null;
+  }
 
   /// Сообщение — запись о звонке, а не переписка.
   bool get isCallRecord => callId != null && callId!.isNotEmpty;
@@ -184,6 +206,7 @@ class DirectMessage {
     Object? editedAt = _keep,
     Object? readAt = _keep,
     Object? playedAt = _keep,
+    List<DmReaction>? reactions,
   }) =>
       DirectMessage(
         id: id,
@@ -213,6 +236,7 @@ class DirectMessage {
         editedAt: identical(editedAt, _keep) ? this.editedAt : editedAt as String?,
         readAt: identical(readAt, _keep) ? this.readAt : readAt as String?,
         playedAt: identical(playedAt, _keep) ? this.playedAt : playedAt as String?,
+        reactions: reactions ?? this.reactions,
         nonce: nonce,
         pending: pending,
       );
@@ -247,6 +271,10 @@ class DirectMessage {
         editedAt: j['editedAt'] as String?,
         readAt: j['readAt'] as String?,
         playedAt: j['playedAt'] as String?,
+        reactions: (j['reactions'] as List? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(DmReaction.fromJson)
+            .toList(),
         nonce: j['nonce'] as String?,
       );
 

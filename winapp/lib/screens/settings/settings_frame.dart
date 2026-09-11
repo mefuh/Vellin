@@ -63,7 +63,15 @@ class _SettingsFrameState extends State<SettingsFrame> with SingleTickerProvider
     super.dispose();
   }
 
+  bool _closing = false;
+
+  /// Просьбы закрыться, пришедшие до открытия фрейма, к нему не относятся.
+  late int _seenCloseRequest = context.read<ShellController>().settingsCloseRequest;
+
   Future<void> _close() async {
+    // Кнопка и Esc могут прийти почти разом — уход играем один раз.
+    if (_closing) return;
+    _closing = true;
     await _in.reverse();
     if (mounted) context.read<ShellController>().closeSettings();
   }
@@ -72,6 +80,12 @@ class _SettingsFrameState extends State<SettingsFrame> with SingleTickerProvider
   Widget build(BuildContext context) {
     final shell = context.watch<ShellController>();
     final tab = shell.settingsTab;
+    if (shell.settingsCloseRequest != _seenCloseRequest) {
+      _seenCloseRequest = shell.settingsCloseRequest;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _close();
+      });
+    }
 
     return AnimatedBuilder(
       animation: _in,

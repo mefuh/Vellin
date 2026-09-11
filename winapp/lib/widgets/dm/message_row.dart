@@ -9,6 +9,7 @@ import '../ui/vellin_avatar.dart';
 import '../ui/vellin_icon.dart';
 import '../video_bubble.dart';
 import '../voice_bubble.dart';
+import 'emoji_catalog.dart';
 import 'room_invite_card.dart';
 
 /// Реплика в ленте: аватар слева, строка автора, баббл.
@@ -54,6 +55,9 @@ class MessageRow extends StatelessWidget {
   final VoidCallback? onToggleSelect;
   final void Function(String messageId)? onQuoteTap;
 
+  /// Щелчок по плашке реакции: своя — снять, чужая — поставить такую же.
+  final ValueChanged<String>? onReact;
+
   const MessageRow({
     super.key,
     required this.message,
@@ -75,6 +79,7 @@ class MessageRow extends StatelessWidget {
     this.onContextMenu,
     this.onToggleSelect,
     this.onQuoteTap,
+    this.onReact,
   });
 
   @override
@@ -140,6 +145,14 @@ class MessageRow extends StatelessWidget {
                   const SizedBox(height: 4),
                 ],
                 _body(context, read),
+                _ReactionBar(
+                  reactions: message.reactions,
+                  myUserId: myUserId,
+                  myUsername: myUsername,
+                  myAvatarUrl: myAvatarUrl,
+                  peer: peer,
+                  onTap: selecting ? null : onReact,
+                ),
               ],
             ),
           ),
@@ -1078,6 +1091,284 @@ class _ReplyQuoteState extends State<_ReplyQuote> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Плашки реакций под репликой. Одна плашка на эмодзи, в ней — аватары тех,
+/// кто его поставил.
+class _ReactionBar extends StatefulWidget {
+  final List<DmReaction> reactions;
+  final String myUserId;
+  final String myUsername;
+  final String? myAvatarUrl;
+  final PublicUser? peer;
+  final ValueChanged<String>? onTap;
+
+  const _ReactionBar({
+    required this.reactions,
+    required this.myUserId,
+    required this.myUsername,
+    required this.myAvatarUrl,
+    required this.peer,
+    required this.onTap,
+  });
+
+  @override
+  State<_ReactionBar> createState() => _ReactionBarState();
+}
+
+class _ChipData {
+  final String emoji;
+  List<String> userIds;
+  bool leaving;
+
+  /// Была на месте при первом показе строки — появляется без анимации: иначе
+  /// давние реакции «выскакивали» бы при каждой прокрутке ленты.
+  final bool initial;
+
+  _ChipData(this.emoji, this.userIds, {this.initial = false}) : leaving = false;
+}
+
+class _ReactionBarState extends State<_ReactionBar> {
+  late final List<_ChipData> _chips = [
+    for (final g in _group(widget.reactions).entries) _ChipData(g.key, g.value, initial: true),
+  ];
+
+  static Map<String, List<String>> _group(List<DmReaction> list) {
+    final out = <String, List<String>>{};
+    for (final r in list) {
+      (out[r.emoji] ??= []).add(r.userId);
+    }
+    return out;
+  }
+
+  @override
+  void didUpdateWidget(_ReactionBar old) {
+    super.didUpdateWidget(old);
+    final next = _group(widget.reactions);
+    for (final c in _chips) {
+      final users = next[c.emoji];
+      if (users == null) {
+        c.leaving = true;
+      } else {
+        c
+          ..userIds = users
+          ..leaving = false;
+      }
+    }
+    for (final e in next.entries) {
+      if (_chips.every((c) => c.emoji != e.key)) _chips.add(_ChipData(e.key, e.value));
+    }
+  }
+
+  void _gone(_ChipData chip) {
+    if (!mounted || !chip.leaving) return;
+    setState(() => _chips.remove(chip));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSize(
+      duration: VellinMotion.hover,
+      curve: VellinMotion.standard,
+      alignment: Alignment.topLeft,
+      child: _chips.isEmpty
+          ? const SizedBox(width: 0, height: 0)
+          : Padding(
+              padding: const EdgeInsets.only(top: 5),
+              child: Wrap(
+                spacing: 0,
+                runSpacing: 4,
+                children: [
+                  for (final c in _chips)
+                    _ReactionChip(
+                      key: ValueKey(c.emoji),
+                      emoji: c.emoji,
+                      leaving: c.leaving,
+                      initial: c.initial,
+                      mine: c.userIds.contains(widget.myUserId),
+                      avatars: [
+                        for (final id in c.userIds)
+                          id == widget.myUserId
+                              ? (widget.myUsername, widget.myAvatarUrl)
+                              : (widget.peer?.username ?? '', widget.peer?.avatarUrl),
+                      ],
+                      onTap: widget.onTap == null ? null : () => widget.onTap!(c.emoji),
+                      onGone: () => _gone(c),
+                    ),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+class _ReactionChip extends StatefulWidget {
+  final String emoji;
+  final bool leaving;
+  final bool initial;
+  final bool mine;
+  final List<(String, String?)> avatars;
+  final VoidCallback? onTap;
+  final VoidCallback onGone;
+
+  const _ReactionChip({
+    super.key,
+    required this.emoji,
+    required this.leaving,
+    required this.initial,
+    required this.mine,
+    required this.avatars,
+    required this.onTap,
+    required this.onGone,
+  });
+
+  @override
+  State<_ReactionChip> createState() => _ReactionChipState();
+}
+
+class _ReactionChipState extends State<_ReactionChip> with SingleTickerProviderStateMixin {
+  // Приход — рост из точки с отложенным «щелчком» эмодзи, уход — сжатие и
+  // схлопывание места, чтобы соседние плашки съехались.
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 520),
+    reverseDuration: VellinMotion.quick,
+    value: widget.initial ? 1 : 0,
+  );
+  bool _hover = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.initial) _c.forward();
+    if (widget.leaving) _leave();
+  }
+
+  @override
+  void didUpdateWidget(_ReactionChip old) {
+    super.didUpdateWidget(old);
+    if (widget.leaving && !old.leaving) {
+      _leave();
+    } else if (!widget.leaving && old.leaving) {
+      _c.forward();
+    }
+  }
+
+  Future<void> _leave() async {
+    await _c.reverse();
+    if (mounted && widget.leaving) widget.onGone();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mine = widget.mine;
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        final reverse = _c.status == AnimationStatus.reverse;
+        final t = reverse ? VellinMotion.exit.transform(_c.value) : VellinMotion.standard.transform(_c.value);
+        // Эмодзи догоняет плашку: сначала встаёт подложка, потом он сам.
+        final e = reverse ? t : VellinMotion.standard.transform(((_c.value - 0.18) / 0.82).clamp(0.0, 1.0));
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            widthFactor: t,
+            child: Opacity(
+              opacity: t.clamp(0.0, 1.0),
+              child: Transform.scale(
+                scale: 0.6 + 0.4 * t,
+                alignment: Alignment.centerLeft,
+                child: _ChipScale(emojiScale: 0.5 + 0.5 * e, child: child!),
+              ),
+            ),
+          ),
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(right: 5),
+        child: MouseRegion(
+          cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hover = true),
+          onExit: (_) => setState(() => _hover = false),
+          child: GestureDetector(
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: VellinMotion.hover,
+              curve: VellinMotion.standard,
+              height: 26,
+              padding: const EdgeInsets.only(left: 6, right: 4),
+              decoration: BoxDecoration(
+                color: mine
+                    ? (_hover ? const Color(0x33E2C99B) : const Color(0x1FE2C99B))
+                    : (_hover ? VellinColors.fill055 : VellinColors.fill045),
+                borderRadius: BorderRadius.circular(VellinRadius.pill),
+                border: Border.all(color: mine ? VellinColors.accentLine : VellinColors.line07),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _ChipEmoji(emoji: widget.emoji),
+                  const SizedBox(width: 4),
+                  // Второй поставивший ту же реакцию — аватар въезжает, а не
+                  // появляется скачком.
+                  AnimatedSize(
+                    duration: VellinMotion.hover,
+                    curve: VellinMotion.standard,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (var i = 0; i < widget.avatars.length; i++)
+                          Transform.translate(
+                            offset: Offset(-4.0 * i, 0),
+                            child: VellinAvatar(
+                              username: widget.avatars[i].$1,
+                              avatarUrl: widget.avatars[i].$2,
+                              size: 18,
+                              ringColor: VellinColors.bg1,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Передаёт масштаб эмодзи внутрь плашки без перестройки всей строки.
+class _ChipScale extends InheritedWidget {
+  final double emojiScale;
+  const _ChipScale({required this.emojiScale, required super.child});
+
+  static double of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_ChipScale>()?.emojiScale ?? 1;
+
+  @override
+  bool updateShouldNotify(_ChipScale old) => old.emojiScale != emojiScale;
+}
+
+class _ChipEmoji extends StatelessWidget {
+  final String emoji;
+  const _ChipEmoji({required this.emoji});
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.scale(
+      scale: _ChipScale.of(context),
+      child: EmojiGlyph(emoji, size: 16),
     );
   }
 }

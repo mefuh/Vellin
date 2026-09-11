@@ -22,6 +22,7 @@ import '../ui/vellin_icon.dart';
 import '../shell/phase_switch.dart';
 import '../../models/dm.dart';
 import '../../state/friends_controller.dart';
+import '../../state/recent_reactions.dart';
 import 'message_dialogs.dart';
 import 'message_menu.dart';
 import 'message_row.dart';
@@ -218,7 +219,20 @@ class _ChatPaneState extends State<ChatPane> {
     ];
 
     setState(() => _menuTargetId = m.id);
-    await showMessageMenu(context, position: position, items: items, facts: facts);
+    await showMessageMenu(
+      context,
+      position: position,
+      items: items,
+      facts: facts,
+      // У записи о звонке реакций нет: это отметка события, а не реплика.
+      reactions: m.isCallRecord
+          ? null
+          : MessageMenuReactions(
+              quick: RecentReactions.instance.quick,
+              current: m.reactionOf(dm.myUserId),
+              onReact: (emoji) => dm.react(m, emoji),
+            ),
+    );
     if (mounted && _menuTargetId == m.id) setState(() => _menuTargetId = null);
   }
 
@@ -597,6 +611,7 @@ class _ChatPaneState extends State<ChatPane> {
                 onImageTap: widget.onOpenImage,
                 onContextMenu: _openMenu,
                 onToggleSelect: () => dm.toggleSelected(m.id),
+                onReact: (emoji) => dm.react(m, emoji),
                 onQuoteTap: _scrollToMessage,
               ),
             ),

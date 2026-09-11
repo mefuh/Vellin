@@ -3,6 +3,7 @@ import type {
   CallHistoryEntry,
   DirectMessageDTO,
   DirectMessageKind,
+  DirectMessageReactionDTO,
   DirectMessageReplyRef,
   DmConversation,
   DmEligibility,
@@ -148,11 +149,27 @@ function replyRefOf(m: DirectMessage): DirectMessageReplyRef {
  * всю страницу, а не по одному на сообщение.
  */
 export async function toDtos(rows: DirectMessage[]): Promise<DirectMessageDTO[]> {
+  if (!rows.length) return [];
   const ids = [...new Set(rows.map((r) => r.replyToId).filter((x): x is string => !!x))];
-  const originals = ids.length ? await prisma.directMessage.findMany({ where: { id: { in: ids } } }) : [];
+  const [originals, reactions] = await Promise.all([
+    ids.length ? prisma.directMessage.findMany({ where: { id: { in: ids } } }) : Promise.resolve([]),
+    prisma.directMessageReaction.findMany({
+      where: { messageId: { in: rows.map((r) => r.id) } },
+      orderBy: { updatedAt: 'asc' },
+      select: { messageId: true, userId: true, emoji: true },
+    }),
+  ]);
   const byId = new Map(originals.map((o) => [o.id, o]));
+  const reactionsOf = new Map<string, DirectMessageReactionDTO[]>();
+  for (const x of reactions) {
+    const list = reactionsOf.get(x.messageId) ?? [];
+    list.push({ userId: x.userId, emoji: x.emoji });
+    reactionsOf.set(x.messageId, list);
+  }
   return rows.map((r) => {
     const dto = dmRowToDto(r);
+    const rs = reactionsOf.get(r.id);
+    if (rs) dto.reactions = rs;
     if (r.replyToId) {
       const o = byId.get(r.replyToId);
       dto.replyTo = o ? replyRefOf(o) : { id: r.replyToId, deleted: true };
@@ -492,7 +509,7 @@ export async function createOrUpdateRoomInviteCard(
   const me = await prisma.user.findUnique({ where: { id: meId }, select: PUBLIC_USER_SELECT });
   return {
     conversationId: conv.id,
-    message: dmRowToDto(row),
+    message: await toDto(row),
     sender: me ? toPublicUser(me) : { id: meId, publicId: meId, username: '', avatarSeed: '', avatarUrl: null, kind: 'user' },
     recipient: { id: peer.id, publicId: peer.publicId, username: peer.username, avatarSeed: peer.avatarSeed, avatarUrl: peer.avatarUrl, kind: 'user' },
     isNew,
@@ -523,8 +540,11 @@ export async function syncRoomInviteSnapshots(
     data: { inviteVideoTitle: videoTitle, inviteVideoPoster: videoPoster },
   });
 
-  return active.map((r) => ({
-    message: dmRowToDto({ ...r, inviteVideoTitle: videoTitle, inviteVideoPoster: videoPoster }),
+  // Через toDtos, а не голое преобразование строки: обновление целиком
+  // заменяет карточку у клиента, и без реакций они бы с неё пропали.
+  const dtos = await toDtos(active.map((r) => ({ ...r, inviteVideoTitle: videoTitle, inviteVideoPoster: videoPoster })));
+  return active.map((r, i) => ({
+    message: dtos[i],
     userAId: r.conversation.userAId,
     userBId: r.conversation.userBId,
   }));
@@ -1169,5 +1189,60 @@ export async function forwardMessages(
       avatarUrl: peer.avatarUrl,
       kind: 'user',
     },
+  };
+}
+
+/** Эмодзи: пиктограммы, модификаторы тона, склейки и селекторы вида — и ничего кроме. */
+const EMOJI_RE = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Emoji_Component}|\u200d|\ufe0f|\u20e3)+$/u;
+
+export interface ReactionResult {
+  conversationId: string;
+  userAId: string;
+  userBId: string;
+  messageId: string;
+  reactions: DirectMessageReactionDTO[];
+}
+
+/**
+ * Поставить реакцию (заменив прежнюю реакцию этого человека) или снять её.
+ * Реагировать можно на всё, кроме записей о звонках: это отметка события, а
+ * не реплика.
+ */
+export async function reactToMessage(
+  meId: string,
+  messageId: string,
+  rawEmoji: string | null,
+): Promise<ReactionResult | null> {
+  const emoji = rawEmoji?.trim() ?? null;
+  // Хотя бы одна пиктограмма: цифры и «#» формально тоже компоненты эмодзи.
+  if (
+    emoji !== null &&
+    (emoji.length === 0 || emoji.length > 32 || !EMOJI_RE.test(emoji) || !/\p{Extended_Pictographic}/u.test(emoji))
+  ) {
+    return null;
+  }
+  const m = await prisma.directMessage.findUnique({ where: { id: messageId }, include: { conversation: true } });
+  if (!m || !isParticipant(m.conversation, meId) || m.hiddenFor.includes(meId) || m.callId) return null;
+
+  if (emoji === null) {
+    await prisma.directMessageReaction.deleteMany({ where: { messageId, userId: meId } });
+  } else {
+    await prisma.directMessageReaction.upsert({
+      where: { messageId_userId: { messageId, userId: meId } },
+      create: { messageId, userId: meId, emoji },
+      update: { emoji },
+    });
+  }
+  const reactions = await prisma.directMessageReaction.findMany({
+    where: { messageId },
+    orderBy: { updatedAt: 'asc' },
+    select: { userId: true, emoji: true },
+  });
+  return {
+    conversationId: m.conversationId,
+    userAId: m.conversation.userAId,
+    userBId: m.conversation.userBId,
+    messageId,
+    reactions,
   };
 }

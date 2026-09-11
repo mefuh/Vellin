@@ -20,6 +20,7 @@ import 'state/presence_controller.dart';
 import 'state/app_settings.dart';
 import 'state/circle_playback_controller.dart';
 import 'state/playback_controller.dart';
+import 'state/recent_reactions.dart';
 import 'state/shell_controller.dart';
 import 'state/update_controller.dart';
 import 'storage/session_store.dart';
@@ -33,6 +34,7 @@ import 'runtime/updater_splash.dart';
 import 'screens/settings/settings_layer.dart';
 import 'widgets/call_overlay.dart';
 import 'widgets/notifications_bell.dart';
+import 'widgets/shell/escape_scope.dart';
 // Заголовок окна и его высота: экран звонка отступает на неё сверху.
 import 'widgets/window_title_bar.dart';
 
@@ -74,6 +76,8 @@ Future<void> main(List<String> args) async {
   // Уведомления и оформление — настройки этого компьютера, а не аккаунта.
   final appSettings = AppSettings();
   appSettings.load();
+  // Недавние реакции — к первому же меню сообщения они уже должны быть на месте.
+  RecentReactions.instance.load();
 
   // Всплывающие уведомления в фирменном стиле — отдельным окном-процессом.
   // Поднимается лениво, при первом уведомлении.
@@ -287,6 +291,9 @@ class _VellinAppState extends State<VellinApp> {
           type: MaterialType.transparency,
           child: DefaultTextStyle(
             style: VellinType.body,
+            // Esc — над всеми слоями сразу: и над разделом, и над фрейм
+            // настроек, и над наложениями навигатора.
+            child: EscapeScope(
             child: Stack(children: [
           Column(children: [
             // Место под заголовок: сам он нарисован выше по стопке.
@@ -310,6 +317,7 @@ class _VellinAppState extends State<VellinApp> {
           const Positioned(top: 0, left: 0, right: 0, child: WindowTitleBar()),
           const NotificationsPanelOverlay(),
             ]),
+            ),
           ),
           ),
         ),

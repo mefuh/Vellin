@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   DirectMessageDTO,
+  DirectMessageReactionDTO,
   DmConversation,
   DmEligibility,
   Gender,
@@ -87,6 +88,8 @@ interface DmState {
   applyVideoPlayed: (messageId: string) => void;
   /** Сообщения удалены (для всех или скрыты мной на другом устройстве). */
   applyDeleted: (messageIds: string[]) => void;
+  /** Реакции на сообщение сменились — хранится актуальный список. */
+  applyReactions: (messageId: string, reactions: DirectMessageReactionDTO[]) => void;
   /** Кто-то прочитал (своё эхо или собеседник). */
   applyRead: (
     payload: { conversationId: string; byUserId: string; readAt: string; unreadTotal?: number },
@@ -369,6 +372,22 @@ export const useDmStore = create<DmState>((set, get) => ({
           changed = true;
           const msgs = t.messages.slice();
           msgs[idx] = { ...msgs[idx], voicePlayed: true };
+          threads[pid] = { ...t, messages: msgs };
+        }
+      }
+      return changed ? { threads } : s;
+    }),
+
+  applyReactions: (messageId, reactions) =>
+    set((s) => {
+      const threads = { ...s.threads };
+      let changed = false;
+      for (const [pid, t] of Object.entries(threads)) {
+        const idx = t.messages.findIndex((m) => m.id === messageId);
+        if (idx >= 0) {
+          changed = true;
+          const msgs = t.messages.slice();
+          msgs[idx] = { ...msgs[idx], reactions };
           threads[pid] = { ...t, messages: msgs };
         }
       }
