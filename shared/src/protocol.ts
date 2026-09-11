@@ -415,6 +415,8 @@ export type UserS2C =
   | UserS2CFriendsChanged
   | UserS2CDmMessage
   | UserS2CDmMessageUpdated
+  | UserS2CDmMessageDeleted
+  | UserS2CDmPinned
   | UserS2CDmRead
   | UserS2CDmTyping
   | UserS2CDmVoicePlayed
@@ -523,6 +525,25 @@ export interface UserS2CDmMessageUpdated {
 }
 
 /**
+ * Сообщения удалены. `forAll` — у обоих участников (строки больше нет);
+ * иначе — только у получателя этого события, скрыты им самим на другой вкладке.
+ */
+export interface UserS2CDmMessageDeleted {
+  t: 'dm_message_deleted';
+  conversationId: string;
+  messageIds: string[];
+  forAll: boolean;
+}
+
+/** В диалоге сменилось закреплённое сообщение. `message: null` — открепили. */
+export interface UserS2CDmPinned {
+  t: 'dm_pinned';
+  conversationId: string;
+  message: DirectMessageDTO | null;
+  byUserId: string;
+}
+
+/**
  * Переписку прочитали. Шлётся: (1) самому прочитавшему на остальные его
  * соединения — сбросить непрочитанные и бейдж (`unreadTotal` задан); (2)
  * собеседнику — обновить «галочки» на его сообщениях (`unreadTotal` опущен).
@@ -551,12 +572,16 @@ export interface UserS2CDmVoicePlayed {
   t: 'dm_voice_played';
   conversationId: string;
   messageId: string;
+  /** Момент первого прослушивания (ISO). */
+  playedAt?: string;
 }
 /** Собеседник посмотрел мой кружок — обновить индикатор «просмотрено». */
 export interface UserS2CDmVideoPlayed {
   t: 'dm_video_played';
   conversationId: string;
   messageId: string;
+  /** Момент первого просмотра (ISO). */
+  playedAt?: string;
 }
 /** Ошибка отправки ЛС (нет прав/заблокирован/слишком длинно). */
 export interface UserS2CDmError {
@@ -676,6 +701,10 @@ export type UserC2S =
   | UserC2SWatchLibrary
   | UserC2SUnwatchLibrary
   | UserC2SDmSend
+  | UserC2SDmEdit
+  | UserC2SDmDelete
+  | UserC2SDmPin
+  | UserC2SDmForward
   | UserC2SDmTyping
   | UserC2SDmRead
   | UserC2SDmVoicePlayed
@@ -744,8 +773,43 @@ export interface UserC2SDmSend {
    * и сервер зеркалит его сам (совместимый fallback без смены камеры).
    */
   videoMirrored?: boolean;
+  /** Ответ на сообщение этого же диалога. Чужой id сервер молча отбрасывает. */
+  replyToId?: string;
   /** Клиентский идентификатор для сопоставления эха (оптимистичная отправка). */
   nonce: string;
+}
+/**
+ * Изменить текст своего сообщения. Голосовые, кружки, приглашения, звонки и
+ * пересланное не редактируются. Ответ — `dm_message_updated` обоим.
+ */
+export interface UserC2SDmEdit {
+  t: 'dm_edit';
+  messageId: string;
+  body: string;
+}
+/**
+ * Удалить сообщения одного диалога. `forAll` — у обоих (любое сообщение
+ * переписки, не только своё), иначе — скрыть только у себя.
+ */
+export interface UserC2SDmDelete {
+  t: 'dm_delete';
+  messageIds: string[];
+  forAll: boolean;
+}
+/** Закрепить сообщение в диалоге с `peerId`; `messageId: null` — открепить. */
+export interface UserC2SDmPin {
+  t: 'dm_pin';
+  peerId: string;
+  messageId: string | null;
+}
+/**
+ * Переслать сообщения пользователю `toUserId` (в том числе в тот же диалог).
+ * Порядок сохраняется по времени оригиналов. Звонки и приглашения не пересылаются.
+ */
+export interface UserC2SDmForward {
+  t: 'dm_forward';
+  toUserId: string;
+  messageIds: string[];
 }
 /** Отметить голосовое сообщение прослушанным (получателем). */
 export interface UserC2SDmVoicePlayed {

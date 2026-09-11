@@ -36,6 +36,26 @@ class DmController extends ChangeNotifier {
   /// ленте зажигаются вторые галочки у своих сообщений.
   String? peerLastReadAt;
 
+  /// Закреплённое в активном диалоге сообщение.
+  DirectMessage? pinned;
+
+  /// На что отвечаем из поля ввода. Взаимоисключимо с [editing].
+  DirectMessage? replyTarget;
+
+  /// Какое своё сообщение сейчас правим в поле ввода.
+  DirectMessage? editing;
+
+  /// Режим выделения: выбранные сообщения по порядку выбора.
+  final Set<String> selected = <String>{};
+  bool selecting = false;
+
+  /// Сообщения, которые доигрывают анимацию ухода перед удалением из ленты.
+  final Set<String> removing = <String>{};
+
+  /// Ошибки действий с сервера — лента показывает их тостом.
+  final _errors = StreamController<String>.broadcast();
+  Stream<String> get errors => _errors.stream;
+
   /// Что делает собеседник прямо сейчас в активном треде: null / 'text'
   /// (печатает) / 'voice' (записывает голосовое) / 'video' (записывает кружок).
   String? peerActivity;
@@ -100,6 +120,7 @@ class DmController extends ChangeNotifier {
         ?.peer;
     activeMessages = [];
     activeHasMore = false;
+    _resetMessageActions();
     threadLoading = true;
     notifyListeners();
     try {
@@ -110,6 +131,7 @@ class DmController extends ChangeNotifier {
       activeMessages = t.messages;
       activeHasMore = t.hasMore;
       peerLastReadAt = t.peerLastReadAt;
+      pinned = t.pinned;
       threadLoading = false;
       notifyListeners();
       // Отметить прочитанным (если диалог уже существует).
@@ -135,7 +157,17 @@ class DmController extends ChangeNotifier {
     activeMessages = [];
     activeHasMore = false;
     peerLastReadAt = null;
+    _resetMessageActions();
     notifyListeners();
+  }
+
+  void _resetMessageActions() {
+    pinned = null;
+    replyTarget = null;
+    editing = null;
+    selected.clear();
+    selecting = false;
+    removing.clear();
   }
 
   // ── Индикаторы «печатает / записывает» ────────────────────────────────────
@@ -224,6 +256,7 @@ class DmController extends ChangeNotifier {
     try {
       final img = await _api.uploadImage(filePath);
       final nonce = 'n${DateTime.now().millisecondsSinceEpoch}_${_nonceSeq++}';
+      final reply = _takeReply();
       activeMessages.add(DirectMessage(
         id: nonce,
         conversationId: _activeConversationId ?? '',
@@ -233,6 +266,7 @@ class DmController extends ChangeNotifier {
         imageUrl: img.url,
         imageWidth: img.width,
         imageHeight: img.height,
+        replyTo: reply == null ? null : DmReplyRef.of(reply),
         nonce: nonce,
         pending: true,
       ));
@@ -244,6 +278,7 @@ class DmController extends ChangeNotifier {
         'imageUrl': img.url,
         'imageWidth': img.width,
         'imageHeight': img.height,
+        'replyToId': ?reply?.id,
       });
     } finally {
       sendingImage = false;
@@ -256,6 +291,7 @@ class DmController extends ChangeNotifier {
     if (_activePeerUserId == null) return;
     final url = await _api.uploadVoice(filePath);
     final nonce = 'n${DateTime.now().millisecondsSinceEpoch}_${_nonceSeq++}';
+    final reply = _takeReply();
     activeMessages.add(DirectMessage(
       id: nonce,
       conversationId: _activeConversationId ?? '',
@@ -265,6 +301,7 @@ class DmController extends ChangeNotifier {
       voiceUrl: url,
       voiceDurationSec: durationSec,
       voicePeaks: peaks,
+      replyTo: reply == null ? null : DmReplyRef.of(reply),
       nonce: nonce,
       pending: true,
     ));
@@ -277,6 +314,7 @@ class DmController extends ChangeNotifier {
       'voiceUrl': url,
       'voiceDurationSec': durationSec,
       'voicePeaks': peaks,
+      'replyToId': ?reply?.id,
     });
   }
 
@@ -315,17 +353,198 @@ class DmController extends ChangeNotifier {
     if (body.isEmpty || _activePeerUserId == null) return;
     _stopTyping();
     final nonce = 'n${DateTime.now().millisecondsSinceEpoch}_${_nonceSeq++}';
+    final reply = _takeReply();
     activeMessages.add(DirectMessage(
       id: nonce,
       conversationId: _activeConversationId ?? '',
       senderId: _myUserId,
       body: body,
       createdAt: DateTime.now().toIso8601String(),
+      replyTo: reply == null ? null : DmReplyRef.of(reply),
       nonce: nonce,
       pending: true,
     ));
     notifyListeners();
-    _socket.send({'t': 'dm_send', 'toUserId': _activePeerUserId, 'body': body, 'nonce': nonce});
+    _socket.send({
+      't': 'dm_send',
+      'toUserId': _activePeerUserId,
+      'body': body,
+      'nonce': nonce,
+      'replyToId': ?reply?.id,
+    });
+  }
+
+  /// Ответ уходит с первым же отправленным сообщением и больше не висит.
+  DirectMessage? _takeReply() {
+    final reply = replyTarget;
+    replyTarget = null;
+    return reply;
+  }
+
+  // ── Действия над сообщениями ─────────────────────────────────────────────
+
+  DirectMessage? messageById(String id) {
+    for (final m in activeMessages) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
+  /// Ответить на сообщение: цитата встаёт над полем ввода.
+  void startReply(DirectMessage m) {
+    editing = null;
+    replyTarget = m;
+    notifyListeners();
+  }
+
+  /// Править своё сообщение: текст переезжает в поле ввода.
+  void startEdit(DirectMessage m) {
+    if (m.senderId != _myUserId || !m.isEditable) return;
+    replyTarget = null;
+    editing = m;
+    notifyListeners();
+  }
+
+  /// Снять ответ или правку — поле ввода возвращается к обычной отправке.
+  void cancelCompose() {
+    if (replyTarget == null && editing == null) return;
+    replyTarget = null;
+    editing = null;
+    notifyListeners();
+  }
+
+  /// Сохранить правку. Текст меняется сразу, сервер лишь подтверждает; без
+  /// изменений правка просто закрывается.
+  void saveEdit(String text) {
+    final target = editing;
+    if (target == null) return;
+    editing = null;
+    final body = text.trim();
+    if (body == target.body || (body.isEmpty && target.imageUrl == null)) {
+      notifyListeners();
+      return;
+    }
+    final idx = activeMessages.indexWhere((m) => m.id == target.id);
+    if (idx >= 0) {
+      activeMessages[idx] = activeMessages[idx].copyWith(
+        body: body,
+        editedAt: DateTime.now().toUtc().toIso8601String(),
+      );
+    }
+    notifyListeners();
+    _socket.send({'t': 'dm_edit', 'messageId': target.id, 'body': body});
+  }
+
+  /// Удалить сообщения: у себя сразу, с анимацией ухода; сервер разошлёт
+  /// удаление собеседнику, если оно для всех.
+  void deleteMessages(Iterable<String> ids, {required bool forAll}) {
+    final list = ids.where((id) => messageById(id)?.pending == false).toList();
+    if (list.isEmpty) return;
+    exitSelection();
+    _removeAnimated(list, forAll: forAll);
+    _socket.send({'t': 'dm_delete', 'messageIds': list, 'forAll': forAll});
+  }
+
+  /// Закрепить или открепить. Закреп общий на двоих — сервер разошлёт.
+  void togglePin(DirectMessage m) {
+    final peerId = _activePeerUserId;
+    if (peerId == null || m.pending) return;
+    final unpin = pinned?.id == m.id;
+    pinned = unpin ? null : m;
+    notifyListeners();
+    _socket.send({'t': 'dm_pin', 'peerId': peerId, 'messageId': unpin ? null : m.id});
+  }
+
+  void unpin() {
+    final peerId = _activePeerUserId;
+    if (peerId == null || pinned == null) return;
+    pinned = null;
+    notifyListeners();
+    _socket.send({'t': 'dm_pin', 'peerId': peerId, 'messageId': null});
+  }
+
+  /// Переслать пользователю. Непересылаемое (звонки, приглашения) отсеивается
+  /// ещё здесь, чтобы не гонять его на сервер.
+  int forward(String toUserId, Iterable<String> ids) {
+    final list = ids.where((id) => messageById(id)?.isForwardable ?? false).toList();
+    if (list.isEmpty) return 0;
+    exitSelection();
+    _socket.send({'t': 'dm_forward', 'toUserId': toUserId, 'messageIds': list});
+    return list.length;
+  }
+
+  // ── Режим выделения ──────────────────────────────────────────────────────
+
+  void startSelection(String firstId) {
+    replyTarget = null;
+    editing = null;
+    selecting = true;
+    selected
+      ..clear()
+      ..add(firstId);
+    notifyListeners();
+  }
+
+  void toggleSelected(String id) {
+    if (!selecting) return;
+    if (!selected.remove(id)) selected.add(id);
+    // Сняли последнее — режим закрывается сам, пустая панель действий ни к чему.
+    if (selected.isEmpty) selecting = false;
+    notifyListeners();
+  }
+
+  void exitSelection() {
+    if (!selecting && selected.isEmpty) return;
+    selecting = false;
+    selected.clear();
+    notifyListeners();
+  }
+
+  /// Выбранные в порядке ленты, а не в порядке кликов.
+  List<DirectMessage> get selectedMessages =>
+      activeMessages.where((m) => selected.contains(m.id)).toList();
+
+  /// Догрузить историю, пока в ней не появится сообщение: закреп и цитата
+  /// могут ссылаться на реплику далеко выше загруженного.
+  Future<bool> ensureLoaded(String id) async {
+    for (var guard = 0; guard < 50; guard++) {
+      if (messageById(id) != null) return true;
+      if (!activeHasMore) return false;
+      final added = await loadOlder();
+      if (added == 0 && !activeHasMore) return messageById(id) != null;
+    }
+    return messageById(id) != null;
+  }
+
+  void _removeAnimated(List<String> ids, {required bool forAll}) {
+    final fresh = ids.where((id) => !removing.contains(id) && messageById(id) != null).toList();
+    if (fresh.isNotEmpty) {
+      removing.addAll(fresh);
+      if (pinned != null && fresh.contains(pinned!.id)) pinned = null;
+      if (replyTarget != null && fresh.contains(replyTarget!.id)) replyTarget = null;
+      if (editing != null && fresh.contains(editing!.id)) editing = null;
+      selected.removeAll(fresh);
+      if (selected.isEmpty) selecting = false;
+      notifyListeners();
+      // Строка сворачивается сама — из ленты её убираем, когда уход доиграл.
+      Timer(const Duration(milliseconds: 320), () {
+        activeMessages.removeWhere((m) => fresh.contains(m.id));
+        removing.removeAll(fresh);
+        notifyListeners();
+      });
+    }
+    if (forAll) {
+      // Ответы на удалённое остаются, но цитата в них говорит «удалено».
+      var changed = false;
+      for (var i = 0; i < activeMessages.length; i++) {
+        final r = activeMessages[i].replyTo;
+        if (r != null && !r.deleted && ids.contains(r.id)) {
+          activeMessages[i] = activeMessages[i].copyWith(replyTo: DmReplyRef(id: r.id, deleted: true));
+          changed = true;
+        }
+      }
+      if (changed) notifyListeners();
+    }
   }
 
   void _onMessage(Map<String, dynamic> msg) {
@@ -348,33 +567,87 @@ class DmController extends ChangeNotifier {
         // тем же сообщением и к чужим галочкам отношения не имеет.
         if (msg['byUserId'] == _activePeerUserId && msg['readAt'] is String) {
           peerLastReadAt = msg['readAt'] as String;
+          _stampReadAt(peerLastReadAt!);
           notifyListeners();
         }
         break;
       case 'dm_voice_played':
-        _onVoicePlayed(msg['messageId'] as String?);
+        _onVoicePlayed(msg['messageId'] as String?, msg['playedAt'] as String?);
         break;
       case 'dm_video_played':
-        _onVideoPlayed(msg['messageId'] as String?);
+        _onVideoPlayed(msg['messageId'] as String?, msg['playedAt'] as String?);
+        break;
+      case 'dm_message_deleted':
+        _onDeleted(msg);
+        break;
+      case 'dm_pinned':
+        if (msg['conversationId'] == _activeConversationId && _activeConversationId != null) {
+          final raw = msg['message'];
+          pinned = raw is Map<String, dynamic> ? DirectMessage.fromJson(raw) : null;
+          notifyListeners();
+        }
+        break;
+      case 'dm_error':
+        _onError(msg);
         break;
     }
   }
 
+  /// Проставить момент прочтения своим сообщениям, которые его ещё не имели, —
+  /// так же, как это сделал сервер, чтобы не перезапрашивать тред.
+  void _stampReadAt(String readAtIso) {
+    final at = DateTime.tryParse(readAtIso);
+    if (at == null) return;
+    for (var i = 0; i < activeMessages.length; i++) {
+      final m = activeMessages[i];
+      if (m.senderId != _myUserId || m.readAt != null || m.pending) continue;
+      final sent = DateTime.tryParse(m.createdAt);
+      if (sent != null && !sent.isAfter(at)) {
+        activeMessages[i] = m.copyWith(readAt: readAtIso);
+      }
+    }
+  }
+
+  void _onDeleted(Map<String, dynamic> msg) {
+    final ids = (msg['messageIds'] as List? ?? const []).whereType<String>().toList();
+    if (ids.isEmpty) return;
+    _removeAnimated(ids, forAll: msg['forAll'] == true);
+    loadConversations();
+  }
+
+  void _onError(Map<String, dynamic> msg) {
+    final nonce = msg['nonce'] as String?;
+    if (nonce != null) {
+      // Сообщение не ушло — оптимистичный бабл убираем, чтобы он не висел
+      // «отправляется» вечно.
+      activeMessages.removeWhere((m) => m.nonce == nonce && m.pending);
+      notifyListeners();
+    }
+    final text = msg['message'] as String?;
+    if (text != null && text.isNotEmpty) _errors.add(text);
+  }
+
   /// Собеседник дослушал моё голосовое — гасим точку «не прослушано».
-  void _onVoicePlayed(String? messageId) {
+  void _onVoicePlayed(String? messageId, String? playedAt) {
     if (messageId == null) return;
     final idx = activeMessages.indexWhere((m) => m.id == messageId);
     if (idx < 0) return;
-    activeMessages[idx] = activeMessages[idx].copyWith(voicePlayed: true);
+    activeMessages[idx] = activeMessages[idx].copyWith(
+      voicePlayed: true,
+      playedAt: playedAt ?? DateTime.now().toUtc().toIso8601String(),
+    );
     notifyListeners();
   }
 
   /// Собеседник посмотрел мой кружок — гасим точку «не просмотрено».
-  void _onVideoPlayed(String? messageId) {
+  void _onVideoPlayed(String? messageId, String? playedAt) {
     if (messageId == null) return;
     final idx = activeMessages.indexWhere((m) => m.id == messageId);
     if (idx < 0) return;
-    activeMessages[idx] = activeMessages[idx].copyWith(videoPlayed: true);
+    activeMessages[idx] = activeMessages[idx].copyWith(
+      videoPlayed: true,
+      playedAt: playedAt ?? DateTime.now().toUtc().toIso8601String(),
+    );
     notifyListeners();
   }
 
@@ -399,11 +672,26 @@ class DmController extends ChangeNotifier {
 
   /// Обновление существующего сообщения (напр. видео-кружок processing→ready).
   void _onDmMessageUpdated(DirectMessage m) {
+    var changed = false;
     final idx = activeMessages.indexWhere((x) => x.id == m.id);
     if (idx >= 0) {
       activeMessages[idx] = m;
-      notifyListeners();
+      changed = true;
     }
+    // Правка текста доходит и до цитат, и до полосы закрепа.
+    for (var i = 0; i < activeMessages.length; i++) {
+      final r = activeMessages[i].replyTo;
+      if (r != null && r.id == m.id && !r.deleted && r.body != m.body) {
+        activeMessages[i] = activeMessages[i].copyWith(replyTo: DmReplyRef.of(m));
+        changed = true;
+      }
+    }
+    if (pinned?.id == m.id) {
+      pinned = m;
+      changed = true;
+    }
+    if (editing?.id == m.id) editing = m;
+    if (changed) notifyListeners();
     loadConversations();
   }
 

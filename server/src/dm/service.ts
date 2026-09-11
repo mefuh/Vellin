@@ -2,6 +2,8 @@ import type { Conversation, DirectMessage, Room } from '@prisma/client';
 import type {
   CallHistoryEntry,
   DirectMessageDTO,
+  DirectMessageKind,
+  DirectMessageReplyRef,
   DmConversation,
   DmEligibility,
   Gender,
@@ -113,8 +115,60 @@ export function dmRowToDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
           ...(m.callDurationSec != null ? { callDurationSec: m.callDurationSec } : {}),
         }
       : {}),
+    ...(m.forwardedFromId
+      ? { forwardedFrom: { userId: m.forwardedFromId, name: m.forwardedFromName ?? '' } }
+      : {}),
+    ...(m.editedAt ? { editedAt: m.editedAt.toISOString() } : {}),
+    ...(m.readAt ? { readAt: m.readAt.toISOString() } : {}),
+    // Прослушано — отдельный момент от «прочитано»: голосовое можно увидеть
+    // в ленте и не включить.
+    ...((m.voicePlayedAt ?? m.videoPlayedAt)
+      ? { playedAt: (m.voicePlayedAt ?? m.videoPlayedAt)!.toISOString() }
+      : {}),
     ...(nonce ? { nonce } : {}),
   };
+}
+
+/** Чем является сообщение — для цитаты ответа и полосы закрепа. */
+function kindOf(m: DirectMessage): DirectMessageKind {
+  if (m.callId) return 'call';
+  if (m.inviteRoomId) return 'invite';
+  if (m.videoStatus) return 'video';
+  if (m.voiceUrl) return 'voice';
+  if (m.imageUrl) return 'image';
+  return 'text';
+}
+
+function replyRefOf(m: DirectMessage): DirectMessageReplyRef {
+  return { id: m.id, senderId: m.senderId, kind: kindOf(m), body: m.body.slice(0, 160) };
+}
+
+/**
+ * Строки → DTO с цитатами ответов. Оригиналы подтягиваются одним запросом на
+ * всю страницу, а не по одному на сообщение.
+ */
+export async function toDtos(rows: DirectMessage[]): Promise<DirectMessageDTO[]> {
+  const ids = [...new Set(rows.map((r) => r.replyToId).filter((x): x is string => !!x))];
+  const originals = ids.length ? await prisma.directMessage.findMany({ where: { id: { in: ids } } }) : [];
+  const byId = new Map(originals.map((o) => [o.id, o]));
+  return rows.map((r) => {
+    const dto = dmRowToDto(r);
+    if (r.replyToId) {
+      const o = byId.get(r.replyToId);
+      dto.replyTo = o ? replyRefOf(o) : { id: r.replyToId, deleted: true };
+    }
+    return dto;
+  });
+}
+
+export async function toDto(row: DirectMessage): Promise<DirectMessageDTO> {
+  const [dto] = await toDtos([row]);
+  return dto;
+}
+
+/** Условие выборки: сообщение не скрыто пользователем у себя. */
+function visibleTo(userId: string) {
+  return { NOT: { hiddenFor: { has: userId } } };
 }
 
 /** Заблокирован ли кто-то из пары другим (в любом направлении). */
@@ -188,6 +242,7 @@ async function unreadInConversation(
     where: {
       conversationId,
       senderId: { not: userId },
+      ...visibleTo(userId),
       ...(myRead ? { createdAt: { gt: myRead } } : {}),
     },
   });
@@ -248,6 +303,7 @@ export async function sendMessage(
   image?: SendImage,
   voice?: SendVoice,
   video?: SendVideoNote,
+  replyToId?: string,
 ): Promise<SendResult> {
   const body = rawBody.trim();
   if (!body && !image && !voice && !video) throw new DmError('ok', 'Пустое сообщение');
@@ -268,11 +324,17 @@ export async function sendMessage(
   }
 
   const conv = await getOrCreateConversation(meId, peerId);
+  // Ответить можно только на сообщение этой же переписки: чужой id из
+  // другого диалога раскрыл бы его содержимое в цитате.
+  const replyTo = replyToId
+    ? await prisma.directMessage.findFirst({ where: { id: replyToId, conversationId: conv.id }, select: { id: true } })
+    : null;
   const message = await prisma.directMessage.create({
     data: {
       conversationId: conv.id,
       senderId: meId,
       body,
+      ...(replyTo ? { replyToId: replyTo.id } : {}),
       ...(image
         ? { imageUrl: image.url, imageWidth: Math.round(image.width), imageHeight: Math.round(image.height) }
         : {}),
@@ -297,7 +359,7 @@ export async function sendMessage(
   const me = await prisma.user.findUnique({ where: { id: meId }, select: PUBLIC_USER_SELECT });
   return {
     conversationId: conv.id,
-    message: dmRowToDto(message),
+    message: await toDto(message),
     sender: me ? toPublicUser(me) : { id: meId, publicId: meId, username: '', avatarSeed: '', avatarUrl: null, kind: 'user' },
     recipient: { id: peer.id, publicId: peer.publicId, username: peer.username, avatarSeed: peer.avatarSeed, avatarUrl: peer.avatarUrl, kind: 'user' },
   };
@@ -316,7 +378,7 @@ async function loadForBroadcast(messageId: string): Promise<VideoNoteBroadcast |
     include: { conversation: { select: { userAId: true, userBId: true } } },
   });
   if (!m) return null;
-  return { message: dmRowToDto(m), userAId: m.conversation.userAId, userBId: m.conversation.userBId };
+  return { message: await toDto(m), userAId: m.conversation.userAId, userBId: m.conversation.userBId };
 }
 
 /** Отметить видеосообщение готовым (после транскода) и вернуть данные для рассылки. */
@@ -591,6 +653,13 @@ export async function markRead(meId: string, peerId: string): Promise<MarkReadRe
     where: { id: conv.id },
     data: { [myReadField(conv, meId)]: now },
   });
+  // Момент прочтения каждого сообщения — один раз, при первом прочтении:
+  // отметка по диалогу дальше сдвигается, и по ней уже не восстановить,
+  // когда прочитали конкретную реплику.
+  await prisma.directMessage.updateMany({
+    where: { conversationId: conv.id, senderId: peerId, readAt: null, createdAt: { lte: now } },
+    data: { readAt: now },
+  });
   return {
     conversationId: conv.id,
     readAt: now.toISOString(),
@@ -604,6 +673,8 @@ export interface VoicePlayedResult {
   messageId: string;
   /** Автор голосового — ему шлём обновление индикатора «прослушано». */
   senderId: string;
+  /** Момент первого прослушивания. */
+  playedAt: string;
 }
 
 /**
@@ -620,10 +691,11 @@ export async function markVoicePlayed(meId: string, messageId: string): Promise<
   if (!m || !m.voiceUrl) return null;
   const isParticipant = m.conversation.userAId === meId || m.conversation.userBId === meId;
   if (!isParticipant || m.senderId === meId) return null; // только получатель
+  const playedAt = m.voicePlayedAt ?? new Date();
   if (!m.voicePlayedAt) {
-    await prisma.directMessage.update({ where: { id: m.id }, data: { voicePlayedAt: new Date() } });
+    await prisma.directMessage.update({ where: { id: m.id }, data: { voicePlayedAt: playedAt } });
   }
-  return { conversationId: m.conversationId, messageId: m.id, senderId: m.senderId };
+  return { conversationId: m.conversationId, messageId: m.id, senderId: m.senderId, playedAt: playedAt.toISOString() };
 }
 
 /**
@@ -639,10 +711,11 @@ export async function markVideoPlayed(meId: string, messageId: string): Promise<
   if (!m || !m.videoStatus) return null;
   const isParticipant = m.conversation.userAId === meId || m.conversation.userBId === meId;
   if (!isParticipant || m.senderId === meId) return null; // только получатель
+  const playedAt = m.videoPlayedAt ?? new Date();
   if (!m.videoPlayedAt) {
-    await prisma.directMessage.update({ where: { id: m.id }, data: { videoPlayedAt: new Date() } });
+    await prisma.directMessage.update({ where: { id: m.id }, data: { videoPlayedAt: playedAt } });
   }
-  return { conversationId: m.conversationId, messageId: m.id, senderId: m.senderId };
+  return { conversationId: m.conversationId, messageId: m.id, senderId: m.senderId, playedAt: playedAt.toISOString() };
 }
 
 /** Список диалогов пользователя (по убыванию активности). */
@@ -655,7 +728,7 @@ export async function listConversations(
     include: {
       userA: { select: { ...PUBLIC_USER_SELECT, privacyJson: true } },
       userB: { select: { ...PUBLIC_USER_SELECT, privacyJson: true } },
-      messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+      messages: { where: visibleTo(userId), orderBy: { createdAt: 'desc' }, take: 1 },
     },
   });
   const friendIds = new Set(await getAcceptedFriendIds(userId));
@@ -715,6 +788,7 @@ export interface ThreadResult {
   peerLastSeenAt: string | null;
   peerGender: Gender | null;
   eligibility: DmEligibility;
+  pinned: DirectMessageDTO | null;
 }
 
 /**
@@ -768,11 +842,16 @@ export async function getThreadByPublicId(
       peerLastSeenAt,
       peerGender,
       eligibility,
+      pinned: null,
     };
   }
 
   const rows = await prisma.directMessage.findMany({
-    where: { conversationId: conv.id, ...(before ? { createdAt: { lt: new Date(before) } } : {}) },
+    where: {
+      conversationId: conv.id,
+      ...visibleTo(meId),
+      ...(before ? { createdAt: { lt: new Date(before) } } : {}),
+    },
     orderBy: { createdAt: 'desc' },
     take: DM_PAGE + 1,
   });
@@ -780,17 +859,24 @@ export async function getThreadByPublicId(
   const page = rows.slice(0, DM_PAGE).reverse();
 
   const peerRead = conv.userAId === u.id ? conv.aLastReadAt : conv.bLastReadAt;
+  // Закреп общий, но скрытое у себя сообщение в полосе закрепа не показываем.
+  const pinnedRow = conv.pinnedMessageId
+    ? await prisma.directMessage.findFirst({
+        where: { id: conv.pinnedMessageId, conversationId: conv.id, ...visibleTo(meId) },
+      })
+    : null;
 
   return {
     conversationId: conv.id,
     peer,
-    messages: page.map((m) => dmRowToDto(m)),
+    messages: await toDtos(page),
     hasMore,
     peerLastReadAt: peerRead ? peerRead.toISOString() : null,
     online,
     peerLastSeenAt,
     peerGender,
     eligibility,
+    pinned: pinnedRow ? await toDto(pinnedRow) : null,
   };
 }
 
@@ -849,4 +935,239 @@ export async function listCallHistory(
   });
 
   return { calls, hasMore };
+}
+
+// ── Действия над сообщениями: правка, удаление, закреп, пересылка ─────────
+
+function isParticipant(conv: Pick<Conversation, 'userAId' | 'userBId'>, userId: string): boolean {
+  return conv.userAId === userId || conv.userBId === userId;
+}
+
+/** Результат, который нужно разослать обоим участникам диалога. */
+export interface ConversationBroadcast<T> {
+  conversationId: string;
+  userAId: string;
+  userBId: string;
+  payload: T;
+}
+
+/**
+ * Изменить текст своего сообщения. Голосовые, кружки, приглашения, записи о
+ * звонках и пересланное не редактируются: у первых нечего править, а
+ * пересланное — чужие слова.
+ */
+export async function editMessage(
+  meId: string,
+  messageId: string,
+  rawBody: string,
+): Promise<ConversationBroadcast<DirectMessageDTO> | null> {
+  const m = await prisma.directMessage.findUnique({ where: { id: messageId }, include: { conversation: true } });
+  if (!m || !isParticipant(m.conversation, meId) || m.hiddenFor.includes(meId)) {
+    throw new DmError('not_found', 'Сообщение не найдено');
+  }
+  if (m.senderId !== meId) throw new DmError('ok', 'Изменить можно только своё сообщение');
+  if (m.voiceUrl || m.videoStatus || m.inviteRoomId || m.callId || m.forwardedFromId) {
+    throw new DmError('ok', 'Это сообщение нельзя изменить');
+  }
+  const body = rawBody.trim();
+  // У снимка подпись можно стереть целиком, у текста — нет: пустое сообщение
+  // без вложения не отличить от удалённого.
+  if (!body && !m.imageUrl) throw new DmError('ok', 'Сообщение не может быть пустым');
+  if (body.length > MAX_DM_BODY) throw new DmError('ok', 'Сообщение слишком длинное');
+  if (body === m.body) return null;
+
+  const row = await prisma.directMessage.update({
+    where: { id: m.id },
+    data: { body, editedAt: new Date() },
+  });
+  return {
+    conversationId: m.conversationId,
+    userAId: m.conversation.userAId,
+    userBId: m.conversation.userBId,
+    payload: await toDto(row),
+  };
+}
+
+export interface DeleteResult {
+  conversationId: string;
+  userAId: string;
+  userBId: string;
+  messageIds: string[];
+  forAll: boolean;
+  /** Удалённое было закреплено — закреп снят у обоих. */
+  unpinned: boolean;
+}
+
+/** Больше за один раз не удаляем и не пересылаем — режим выделения не бесконечен. */
+const MAX_BATCH = 200;
+
+/**
+ * Удалить сообщения одного диалога. Для всех — строка исчезает у обоих (в
+ * личной переписке это можно сделать с любым сообщением, не только своим);
+ * только у себя — сообщение скрывается для удалившего.
+ */
+export async function deleteMessages(
+  meId: string,
+  messageIds: string[],
+  forAll: boolean,
+): Promise<DeleteResult | null> {
+  const ids = [...new Set(messageIds)].slice(0, MAX_BATCH);
+  if (!ids.length) return null;
+  const rows = await prisma.directMessage.findMany({
+    where: { id: { in: ids } },
+    include: { conversation: true },
+  });
+  const conv = rows[0]?.conversation;
+  if (!conv || !isParticipant(conv, meId)) return null;
+  // Одна пачка — один диалог: строки из других переписок отбрасываем.
+  const own = rows.filter((r) => r.conversationId === conv.id && !r.hiddenFor.includes(meId));
+  if (!own.length) return null;
+  const okIds = own.map((r) => r.id);
+
+  if (forAll) {
+    // Файлы вложений не трогаем: пересланные копии ссылаются на те же файлы.
+    await prisma.directMessage.deleteMany({ where: { id: { in: okIds } } });
+  } else {
+    await prisma.$transaction(
+      own.map((r) =>
+        prisma.directMessage.update({ where: { id: r.id }, data: { hiddenFor: { push: meId } } }),
+      ),
+    );
+  }
+
+  const unpinned = forAll && conv.pinnedMessageId != null && okIds.includes(conv.pinnedMessageId);
+  if (unpinned) {
+    await prisma.conversation.update({ where: { id: conv.id }, data: { pinnedMessageId: null } });
+  }
+  return { conversationId: conv.id, userAId: conv.userAId, userBId: conv.userBId, messageIds: okIds, forAll, unpinned };
+}
+
+/** Закрепить сообщение в диалоге с `peerId` (или открепить при `messageId = null`). */
+export async function pinMessage(
+  meId: string,
+  peerId: string,
+  messageId: string | null,
+): Promise<ConversationBroadcast<DirectMessageDTO | null> | null> {
+  const { aId, bId } = pair(meId, peerId);
+  const conv = await prisma.conversation.findUnique({
+    where: { userAId_userBId: { userAId: aId, userBId: bId } },
+  });
+  if (!conv) return null;
+  const row = messageId
+    ? await prisma.directMessage.findFirst({ where: { id: messageId, conversationId: conv.id, ...visibleTo(meId) } })
+    : null;
+  if (messageId && !row) return null;
+  await prisma.conversation.update({ where: { id: conv.id }, data: { pinnedMessageId: row?.id ?? null } });
+  return {
+    conversationId: conv.id,
+    userAId: conv.userAId,
+    userBId: conv.userBId,
+    payload: row ? await toDto(row) : null,
+  };
+}
+
+export interface ForwardResult {
+  conversationId: string;
+  messages: DirectMessageDTO[];
+  sender: PublicUser;
+  recipient: PublicUser;
+}
+
+/**
+ * Переслать сообщения пользователю `toUserId` — в любой диалог, включая тот
+ * же самый. Копируется содержимое, а не ссылка: у получателя это обычные
+ * сообщения с пометкой, чьи они. Звонки и приглашения не пересылаются, как и
+ * кружок, который ещё не дотранскодирован.
+ */
+export async function forwardMessages(
+  meId: string,
+  toUserId: string,
+  messageIds: string[],
+): Promise<ForwardResult | null> {
+  const ids = [...new Set(messageIds)].slice(0, MAX_BATCH);
+  if (!ids.length) return null;
+  const rows = await prisma.directMessage.findMany({
+    where: {
+      id: { in: ids },
+      ...visibleTo(meId),
+      conversation: { OR: [{ userAId: meId }, { userBId: meId }] },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+  const sendable = rows.filter(
+    (r) => !r.callId && !r.inviteRoomId && (!r.videoStatus || r.videoStatus === 'ready'),
+  );
+  if (!sendable.length) return null;
+
+  const peer = await loadPeerOrThrow(toUserId);
+  const elig = await checkEligibility(meId, peer);
+  if (!elig.canMessage) {
+    throw new DmError(
+      elig.reason,
+      elig.reason === 'blocked'
+        ? 'Вы не можете писать этому пользователю'
+        : elig.reason === 'privacy'
+          ? 'Пользователь ограничил, кто может ему писать'
+          : 'Нельзя переслать сообщение',
+    );
+  }
+
+  const conv = await getOrCreateConversation(meId, toUserId);
+  const authorIds = [...new Set(sendable.map((r) => r.forwardedFromId ?? r.senderId))];
+  const authors = await prisma.user.findMany({
+    where: { id: { in: authorIds } },
+    select: { id: true, username: true },
+  });
+  const nameOf = new Map(authors.map((a) => [a.id, a.username]));
+
+  // Время растёт на миллисекунду: у пачки один момент отправки, а порядок
+  // в ленте должен остаться таким, как у оригиналов.
+  const base = Date.now();
+  const created = await prisma.$transaction(
+    sendable.map((r, i) => {
+      const authorId = r.forwardedFromId ?? r.senderId;
+      return prisma.directMessage.create({
+        data: {
+          conversationId: conv.id,
+          senderId: meId,
+          body: r.body,
+          imageUrl: r.imageUrl,
+          imageWidth: r.imageWidth,
+          imageHeight: r.imageHeight,
+          voiceUrl: r.voiceUrl,
+          voiceDurationSec: r.voiceDurationSec,
+          voicePeaksJson: r.voicePeaksJson,
+          videoUrl: r.videoUrl,
+          videoThumbUrl: r.videoThumbUrl,
+          videoDurationSec: r.videoDurationSec,
+          videoStatus: r.videoStatus,
+          forwardedFromId: authorId,
+          forwardedFromName: r.forwardedFromName ?? nameOf.get(authorId) ?? '',
+          createdAt: new Date(base + i),
+        },
+      });
+    }),
+  );
+  const last = created[created.length - 1];
+  await prisma.conversation.update({
+    where: { id: conv.id },
+    data: { lastMessageAt: last.createdAt, [myReadField(conv, meId)]: last.createdAt },
+  });
+
+  const me = await prisma.user.findUnique({ where: { id: meId }, select: PUBLIC_USER_SELECT });
+  return {
+    conversationId: conv.id,
+    messages: await toDtos(created),
+    sender: me
+      ? toPublicUser(me)
+      : { id: meId, publicId: meId, username: '', avatarSeed: '', avatarUrl: null, kind: 'user' },
+    recipient: {
+      id: peer.id,
+      publicId: peer.publicId,
+      username: peer.username,
+      avatarSeed: peer.avatarSeed,
+      avatarUrl: peer.avatarUrl,
+      kind: 'user',
+    },
+  };
 }

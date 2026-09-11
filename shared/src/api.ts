@@ -318,6 +318,8 @@ export interface ConversationThreadResponse {
   /** Пол собеседника (для грамматики «был/была»), с учётом приватности. */
   peerGender: Gender | null;
   eligibility: DmEligibility;
+  /** Закреплённое в диалоге сообщение. Null — ничего не закреплено. */
+  pinned: DirectMessageDTO | null;
 }
 
 /** Ответ на загрузку изображения для ЛС (multipart). */

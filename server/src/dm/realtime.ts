@@ -1,4 +1,4 @@
-import type { PublicUser } from '@vellin/shared';
+import type { DirectMessageDTO, PublicUser } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 import { userHub } from '../realtime/UserHub.js';
 import { isToggleEnabled } from '../admin/platform/gate.js';
@@ -10,6 +10,10 @@ import { dmPushPreview } from '../push/payloads.js';
 import { resetDmCount } from '../push/grouping.js';
 import {
   DmError,
+  deleteMessages,
+  editMessage,
+  forwardMessages,
+  pinMessage,
   markRead,
   markVideoPlayed,
   markVoicePlayed,
@@ -134,13 +138,14 @@ export async function handleDmSend(
   image?: SendImage,
   voice?: SendVoice,
   video?: SendVideoNote,
+  replyToId?: string,
 ): Promise<void> {
   if (!(await isToggleEnabled('directMessages'))) {
     userHub.pushTo(senderId, { t: 'dm_error', nonce, reason: 'ok', message: 'Личные сообщения временно отключены администратором' });
     return;
   }
   try {
-    const res = await sendMessage(senderId, toUserId, body, image, voice, video);
+    const res = await sendMessage(senderId, toUserId, body, image, voice, video, replyToId);
     // Видео: привязать сырой файл к сообщению и поставить в очередь транскода.
     if (video) {
       const ok = await promoteRawToMessage(video.uploadId, res.message.id, video.mirrored);
@@ -227,6 +232,7 @@ export async function handleDmVoicePlayed(meId: string, messageId: string): Prom
       t: 'dm_voice_played',
       conversationId: r.conversationId,
       messageId: r.messageId,
+      playedAt: r.playedAt,
     });
   } catch (err) {
     logger.error({ err, meId, messageId }, 'dm voice played failed');
@@ -242,6 +248,7 @@ export async function handleDmVideoPlayed(meId: string, messageId: string): Prom
       t: 'dm_video_played',
       conversationId: r.conversationId,
       messageId: r.messageId,
+      playedAt: r.playedAt,
     });
   } catch (err) {
     logger.error({ err, meId, messageId }, 'dm video played failed');
@@ -251,4 +258,108 @@ export async function handleDmVideoPlayed(meId: string, messageId: string): Prom
 /** Транзиентный сигнал «печатаю/записываю голосовое/кружок» — просто реле собеседнику. */
 export function handleDmTyping(meId: string, toUserId: string, typing: boolean, kind: 'text' | 'voice' | 'video' = 'text'): void {
   userHub.pushTo(toUserId, { t: 'dm_typing', conversationId: '', fromUserId: meId, typing, kind });
+}
+
+/** Сообщение пары глазами каждого из участников: собеседник у каждого свой. */
+async function pushUpdatedToBoth(
+  userAId: string,
+  userBId: string,
+  message: DirectMessageDTO,
+): Promise<void> {
+  await broadcastVideoNoteUpdate({ message, userAId, userBId });
+}
+
+/** Изменить своё сообщение: обновлённый текст и отметка «изменено» — обоим. */
+export async function handleDmEdit(meId: string, messageId: string, body: string): Promise<void> {
+  try {
+    const r = await editMessage(meId, messageId, body);
+    if (!r) return;
+    await pushUpdatedToBoth(r.userAId, r.userBId, r.payload);
+  } catch (err) {
+    if (err instanceof DmError) {
+      userHub.pushTo(meId, { t: 'dm_error', reason: err.reason, message: err.message });
+      return;
+    }
+    logger.error({ err, meId, messageId }, 'dm edit failed');
+  }
+}
+
+/** Удалить сообщения: для всех — обоим участникам, у себя — только своим вкладкам. */
+export async function handleDmDelete(meId: string, messageIds: string[], forAll: boolean): Promise<void> {
+  try {
+    const r = await deleteMessages(meId, messageIds, forAll);
+    if (!r) return;
+    const event = {
+      t: 'dm_message_deleted' as const,
+      conversationId: r.conversationId,
+      messageIds: r.messageIds,
+      forAll: r.forAll,
+    };
+    if (r.forAll) {
+      userHub.pushTo(r.userAId, event);
+      userHub.pushTo(r.userBId, event);
+    } else {
+      userHub.pushTo(meId, event);
+    }
+    if (r.unpinned) {
+      const pinned = { t: 'dm_pinned' as const, conversationId: r.conversationId, message: null, byUserId: meId };
+      userHub.pushTo(r.userAId, pinned);
+      userHub.pushTo(r.userBId, pinned);
+    }
+  } catch (err) {
+    logger.error({ err, meId }, 'dm delete failed');
+  }
+}
+
+/** Закрепить или открепить сообщение — закреп общий, видят оба. */
+export async function handleDmPin(meId: string, peerId: string, messageId: string | null): Promise<void> {
+  try {
+    const r = await pinMessage(meId, peerId, messageId);
+    if (!r) return;
+    const event = { t: 'dm_pinned' as const, conversationId: r.conversationId, message: r.payload, byUserId: meId };
+    userHub.pushTo(r.userAId, event);
+    userHub.pushTo(r.userBId, event);
+  } catch (err) {
+    logger.error({ err, meId, peerId }, 'dm pin failed');
+  }
+}
+
+/** Переслать сообщения: доставка как у обычной отправки, колокольчик — один на пачку. */
+export async function handleDmForward(meId: string, toUserId: string, messageIds: string[]): Promise<void> {
+  if (!(await isToggleEnabled('directMessages'))) {
+    userHub.pushTo(meId, { t: 'dm_error', reason: 'ok', message: 'Личные сообщения временно отключены администратором' });
+    return;
+  }
+  try {
+    const r = await forwardMessages(meId, toUserId, messageIds);
+    if (!r) return;
+    const [recipUnread, senderUnread] = await Promise.all([unreadTotal(toUserId), unreadTotal(meId)]);
+    // Себе в тот же диалог пересылать можно — тогда адресат и отправитель
+    // совпадают, и второе эхо было бы дублем.
+    const self = toUserId === meId;
+    for (const message of r.messages) {
+      if (!self) {
+        userHub.pushTo(toUserId, { t: 'dm_message', message, peer: r.sender, unreadTotal: recipUnread });
+      }
+      userHub.pushTo(meId, { t: 'dm_message', message, peer: r.recipient, unreadTotal: senderUnread });
+    }
+    if (self) return;
+    const preview =
+      r.messages.length === 1 ? 'Пересланное сообщение' : `Пересланные сообщения: ${r.messages.length}`;
+    await pushDmNotification(toUserId, r.sender, r.conversationId, preview);
+    if (!userHub.isViewingConversation(toUserId, r.conversationId)) {
+      notifyAsync(toUserId, 'direct_message', {
+        username: r.sender.username,
+        publicId: r.sender.publicId,
+        message: preview,
+        conversationId: r.conversationId,
+      });
+    }
+  } catch (err) {
+    if (err instanceof DmError) {
+      userHub.pushTo(meId, { t: 'dm_error', reason: err.reason, message: err.message });
+      return;
+    }
+    logger.error({ err, meId, toUserId }, 'dm forward failed');
+  }
 }

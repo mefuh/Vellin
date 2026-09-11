@@ -505,6 +505,20 @@ export interface AppNotification {
 
 // ── Личные сообщения (ЛС) ────────────────────────────────────────────────
 
+/** Что показывать в цитате ответа. */
+export type DirectMessageKind = 'text' | 'image' | 'voice' | 'video' | 'invite' | 'call';
+
+/** Краткая ссылка на сообщение — для цитаты ответа и полосы закрепа. */
+export interface DirectMessageReplyRef {
+  id: string;
+  /** Оригинал удалён для всех — цитата остаётся, но без содержимого. */
+  deleted?: boolean;
+  senderId?: string;
+  kind?: DirectMessageKind;
+  /** Начало текста, не длиннее 160 символов. */
+  body?: string;
+}
+
 /** Одно личное сообщение. */
 export interface DirectMessageDTO {
   id: string;
@@ -567,6 +581,19 @@ export interface DirectMessageDTO {
   callOutcome?: 'completed' | 'missed' | 'declined' | 'cancelled' | 'failed';
   /** Длительность разговора в секундах; 0 у несостоявшихся звонков. */
   callDurationSec?: number;
+  /** Цитата сообщения, на которое это — ответ. */
+  replyTo?: DirectMessageReplyRef;
+  /** Пересланное сообщение: чьё оно было изначально. */
+  forwardedFrom?: { userId: string; name: string };
+  /** Когда текст последний раз меняли (ISO). Отсутствует — не менялся. */
+  editedAt?: string;
+  /**
+   * Когда получатель прочитал именно это сообщение (ISO). Отсутствует — не
+   * читал либо прочитал до того, как сервер начал это запоминать.
+   */
+  readAt?: string;
+  /** Когда голосовое или кружок впервые прослушали (ISO). Прочитано ≠ прослушано. */
+  playedAt?: string;
   /**
    * Эхо клиентского nonce — отдаётся только отправителю, чтобы он сопоставил
    * пришедшее с сервера сообщение со своей оптимистичной отправкой.

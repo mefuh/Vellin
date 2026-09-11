@@ -19,6 +19,11 @@ import '../ui/vellin_avatar.dart';
 import '../ui/vellin_button.dart';
 import '../ui/vellin_hover.dart';
 import '../ui/vellin_icon.dart';
+import '../shell/phase_switch.dart';
+import '../../models/dm.dart';
+import '../../state/friends_controller.dart';
+import 'message_dialogs.dart';
+import 'message_menu.dart';
 import 'message_row.dart';
 
 /// Переписка в правой области: шапка, лента и поле ввода.
@@ -61,9 +66,30 @@ class _ChatPaneState extends State<ChatPane> {
   final List<int> _peaks = [];
   String? _recPath;
 
+  // Действия над сообщениями.
+  final _paneFocus = FocusNode(debugLabel: 'chat-pane', skipTraversal: true);
+  StreamSubscription<String>? _errors;
+
+  /// Над каким сообщением открыто меню — строка подсвечена, пока оно живо.
+  String? _menuTargetId;
+
+  /// Вспышка у сообщения, к которому прокрутили.
+  String? _flashId;
+  int _flashSeq = 0;
+
+  /// Ключи строк: по ним прокрутка находит сообщение в ленте.
+  final Map<String, GlobalKey> _rowKeys = {};
+
+  /// Какую правку сейчас показывает поле и что было набрано до неё.
+  String? _shownEditId;
+  String _draftBeforeEdit = '';
+
   @override
   void initState() {
     super.initState();
+    _errors = widget.dm.errors.listen((text) {
+      if (mounted) _toast(text);
+    });
     // Лента рисуется снизу вверх (reverse): pixels — расстояние ОТ низа.
     _scroll.addListener(() {
       if (!_scroll.hasClients) return;
@@ -73,9 +99,218 @@ class _ChatPaneState extends State<ChatPane> {
       if (atBottom != _atBottom) setState(() => _atBottom = atBottom);
     });
     _input.addListener(() {
-      if (_input.text.isNotEmpty) widget.dm.typingText();
+      // Правка — не набор нового сообщения: «печатает» собеседнику не шлём.
+      if (_input.text.isNotEmpty && widget.dm.editing == null) widget.dm.typingText();
       setState(() {}); // кнопка отправки зависит от того, пусто ли поле
     });
+  }
+
+  // ── Действия над сообщениями ─────────────────────────────────────────────
+
+  GlobalKey _keyFor(String id) => _rowKeys.putIfAbsent(id, () => GlobalKey(debugLabel: id));
+
+  void _focusInput() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _inputFocus.requestFocus();
+    });
+  }
+
+  /// Поле ввода следует за правкой: при входе в неё подставляет текст
+  /// сообщения, при выходе возвращает набранный до этого черновик.
+  void _syncEditField() {
+    final editing = widget.dm.editing;
+    if (editing?.id == _shownEditId) return;
+    final wasEditing = _shownEditId != null;
+    _shownEditId = editing?.id;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (editing != null) {
+        if (!wasEditing) _draftBeforeEdit = _input.text;
+        _input.value = TextEditingValue(
+          text: editing.body,
+          selection: TextSelection.collapsed(offset: editing.body.length),
+        );
+        _inputFocus.requestFocus();
+      } else {
+        _input.value = TextEditingValue(
+          text: _draftBeforeEdit,
+          selection: TextSelection.collapsed(offset: _draftBeforeEdit.length),
+        );
+        _draftBeforeEdit = '';
+      }
+    });
+  }
+
+  KeyEventResult _onPaneKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.escape) {
+      return KeyEventResult.ignored;
+    }
+    final dm = widget.dm;
+    // Esc снимает самое верхнее: выделение, затем ответ или правку, и только
+    // потом (в оболочке) закрывает сам диалог.
+    if (dm.selecting) {
+      dm.exitSelection();
+      return KeyEventResult.handled;
+    }
+    if (dm.editing != null || dm.replyTarget != null) {
+      dm.cancelCompose();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  bool _isRead(DirectMessage m) {
+    final at = widget.dm.peerLastReadAt != null ? DateTime.tryParse(widget.dm.peerLastReadAt!) : null;
+    final sent = DateTime.tryParse(m.createdAt);
+    return at != null && sent != null && !sent.isAfter(at);
+  }
+
+  Future<void> _openMenu(DirectMessage m, Offset position) async {
+    final dm = widget.dm;
+    final mine = m.senderId == dm.myUserId;
+    final isPinned = dm.pinned?.id == m.id;
+    final items = <MessageMenuItem>[
+      if (!m.isCallRecord)
+        MessageMenuItem(
+          glyph: VellinGlyphs.reply,
+          label: 'Ответить',
+          onSelect: () {
+            dm.startReply(m);
+            _focusInput();
+          },
+        ),
+      if (mine && m.isEditable)
+        MessageMenuItem(glyph: VellinGlyphs.edit, label: 'Изменить', onSelect: () => dm.startEdit(m)),
+      if (!m.isCallRecord)
+        MessageMenuItem(
+          glyph: isPinned ? VellinGlyphs.unpin : VellinGlyphs.pin,
+          label: isPinned ? 'Открепить' : 'Закрепить',
+          onSelect: () => dm.togglePin(m),
+        ),
+      if (m.body.isNotEmpty)
+        MessageMenuItem(glyph: VellinGlyphs.copy, label: 'Копировать текст', onSelect: () => _copy(m)),
+      if (m.isForwardable)
+        MessageMenuItem(glyph: VellinGlyphs.forward, label: 'Переслать', onSelect: () => _forward([m.id])),
+      MessageMenuItem(glyph: VellinGlyphs.trash, label: 'Удалить', danger: true, onSelect: () => _delete([m.id])),
+      MessageMenuItem(
+        glyph: VellinGlyphs.select,
+        label: 'Выделить',
+        onSelect: () {
+          dm.startSelection(m.id);
+          // Фокус ленте: поле ввода в режиме выделения спрятано, а Esc
+          // должен снимать выделение, куда бы ни щёлкнули до этого.
+          _paneFocus.requestFocus();
+        },
+      ),
+    ];
+
+    final facts = <MessageMenuFact>[
+      // Прочитано и прослушано — только у своих: у чужих это знаю я сам.
+      if (mine && !m.isCallRecord) ...[
+        if (m.readAt != null)
+          MessageFacts.read(m.readAt)
+        else if (_isRead(m))
+          MessageFacts.read(null),
+        if (m.playedAt != null && m.voiceUrl != null) MessageFacts.listened(m.playedAt!),
+        if (m.playedAt != null && m.videoStatus != null) MessageFacts.viewed(m.playedAt!),
+      ],
+      if (m.editedAt != null) MessageFacts.edited(m.editedAt!),
+    ];
+
+    setState(() => _menuTargetId = m.id);
+    await showMessageMenu(context, position: position, items: items, facts: facts);
+    if (mounted && _menuTargetId == m.id) setState(() => _menuTargetId = null);
+  }
+
+  Future<void> _copy(DirectMessage m) async {
+    await Clipboard.setData(ClipboardData(text: m.body));
+    if (mounted) _toast('Текст скопирован');
+  }
+
+  Future<void> _forward(List<String> ids) async {
+    final dm = widget.dm;
+    final forwardable = ids.where((id) => dm.messageById(id)?.isForwardable ?? false).toList();
+    if (forwardable.isEmpty) {
+      _toast('Звонки и приглашения не пересылаются');
+      return;
+    }
+    // Сначала переписки — по свежести, затем друзья, с кем ещё не писали.
+    final seen = <String>{};
+    final targets = <ForwardTarget>[];
+    for (final c in dm.conversations) {
+      if (seen.add(c.peer.id)) {
+        targets.add(ForwardTarget(user: c.peer, current: c.peer.id == dm.activePeerUserId));
+      }
+    }
+    final active = dm.activePeer;
+    if (active != null && seen.add(active.id)) targets.insert(0, ForwardTarget(user: active, current: true));
+    for (final f in context.read<FriendsController>().friends) {
+      if (seen.add(f.user.id)) targets.add(ForwardTarget(user: f.user));
+    }
+
+    final to = await showForwardDialog(context, targets: targets, count: forwardable.length);
+    if (to == null || !mounted) return;
+    final sent = dm.forward(to.id, forwardable);
+    if (sent > 0) _toast(to.id == dm.activePeerUserId ? 'Переслано в этот диалог' : 'Переслано · ${to.username}');
+  }
+
+  Future<void> _delete(List<String> ids) async {
+    final dm = widget.dm;
+    final scope = await showDeleteMessagesDialog(
+      context,
+      count: ids.length,
+      peerName: dm.activePeer?.username ?? '',
+    );
+    if (scope == null || !mounted) return;
+    dm.deleteMessages(ids, forAll: scope == DeleteScope.everyone);
+  }
+
+  /// Прокрутить к сообщению и мигнуть им. Если его ещё нет в загруженной
+  /// истории — сначала догрузить; если строка не построена — ехать к ней
+  /// экранами, пока лента её не построит.
+  Future<void> _scrollToMessage(String id) async {
+    final dm = widget.dm;
+    if (!await dm.ensureLoaded(id)) {
+      if (mounted) _toast('Сообщение не найдено');
+      return;
+    }
+    for (var step = 0; step < 60; step++) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !_scroll.hasClients) return;
+      final ctx = _rowKeys[id]?.currentContext;
+      if (ctx != null && ctx.mounted) {
+        await Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.5,
+          duration: VellinMotion.layout,
+          curve: VellinMotion.standard,
+        );
+        if (mounted) {
+          setState(() {
+            _flashId = id;
+            _flashSeq++;
+          });
+        }
+        return;
+      }
+      final target = dm.activeMessages.indexWhere((m) => m.id == id);
+      if (target < 0) return;
+      // Ближайшая построенная строка подсказывает, в какую сторону ехать.
+      var anchor = -1;
+      for (var i = 0; i < dm.activeMessages.length; i++) {
+        if (_rowKeys[dm.activeMessages[i].id]?.currentContext != null) {
+          anchor = i;
+          break;
+        }
+      }
+      final p = _scroll.position;
+      // Лента перевёрнута: к старым сообщениям — это рост pixels.
+      final older = anchor < 0 || target < anchor;
+      final next = (p.pixels + (older ? 1 : -1) * p.viewportDimension * 0.85)
+          .clamp(p.minScrollExtent, p.maxScrollExtent);
+      if (next == p.pixels) return;
+      _scroll.jumpTo(next);
+    }
   }
 
   void _syncPresenceWatch() {
@@ -99,6 +334,8 @@ class _ChatPaneState extends State<ChatPane> {
     if (_watchedPeerId != null) {
       context.read<PresenceController>().unwatch(_watchedPeerId!);
     }
+    _errors?.cancel();
+    _paneFocus.dispose();
     _input.dispose();
     _inputFocus.dispose();
     _scroll.dispose();
@@ -110,6 +347,12 @@ class _ChatPaneState extends State<ChatPane> {
 
   void _send() {
     final text = _input.text;
+    if (widget.dm.editing != null) {
+      // Поле вернёт черновик само, когда правка закроется.
+      widget.dm.saveEdit(text);
+      _inputFocus.requestFocus();
+      return;
+    }
     if (text.trim().isEmpty) return;
     widget.dm.sendText(text);
     _input.clear();
@@ -223,11 +466,16 @@ class _ChatPaneState extends State<ChatPane> {
       if (mounted) _syncPresenceWatch();
     });
 
+    _syncEditField();
+
     final msgs = dm.activeMessages;
     final lastId = msgs.isNotEmpty ? msgs.last.id : null;
     if (dm.activePeerPublicId != _shownPeer) {
       _shownPeer = dm.activePeerPublicId;
       _lastMsgId = lastId;
+      _rowKeys.clear();
+      _menuTargetId = null;
+      _flashId = null;
       _scrollToBottom();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _inputFocus.requestFocus();
@@ -238,9 +486,17 @@ class _ChatPaneState extends State<ChatPane> {
       if (mine) _scrollToBottom();
     }
 
-    return Column(
+    return Focus(
+      focusNode: _paneFocus,
+      onKeyEvent: _onPaneKey,
+      child: Column(
       children: [
         _ChatHeader(dm: dm, onOpenProfile: widget.onOpenProfile),
+        _PinBar(
+          pinned: dm.pinned,
+          onOpen: (id) => _scrollToMessage(id),
+          onUnpin: dm.unpin,
+        ),
         Expanded(
           child: Stack(
             children: [
@@ -269,6 +525,7 @@ class _ChatPaneState extends State<ChatPane> {
         ),
         _composer(),
       ],
+      ),
     );
   }
 
@@ -289,7 +546,8 @@ class _ChatPaneState extends State<ChatPane> {
     return ListView.builder(
       controller: _scroll,
       reverse: true,
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+      // По бокам 16, а не 24: ещё 8 даёт оболочка строки под подсветку.
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
       itemCount: msgs.length + typing,
       itemBuilder: (context, i) {
         if (typing == 1 && i == 0) {
@@ -314,21 +572,33 @@ class _ChatPaneState extends State<ChatPane> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ?divider,
-            MessageRow(
-              // Ключ по сообщению: без него состояние строки (в том числе
-              // прочерчивание галочек) достаётся соседней реплике, когда в
-              // ленту добавляется новая.
-              key: ValueKey(m.id),
-              message: m,
-              mine: mine,
-              groupStart: groupStart,
-              peer: dm.activePeer,
-              myUsername: auth?.username ?? '',
-              myAvatarUrl: auth?.avatarUrl,
-              peerReadAt: peerRead,
-              onVoicePlayed: dm.markVoicePlayed,
-              onVideoPlayed: dm.markVideoPlayed,
-              onImageTap: widget.onOpenImage,
+            KeyedSubtree(
+              key: _keyFor(m.id),
+              child: MessageRow(
+                // Ключ по сообщению: без него состояние строки (в том числе
+                // прочерчивание галочек) достаётся соседней реплике, когда в
+                // ленту добавляется новая.
+                key: ValueKey(m.id),
+                message: m,
+                mine: mine,
+                groupStart: groupStart,
+                peer: dm.activePeer,
+                myUsername: auth?.username ?? '',
+                myAvatarUrl: auth?.avatarUrl,
+                myUserId: dm.myUserId,
+                peerReadAt: peerRead,
+                selecting: dm.selecting,
+                selected: dm.selected.contains(m.id),
+                menuOpen: _menuTargetId == m.id,
+                flash: _flashId == m.id ? _flashSeq : 0,
+                removing: dm.removing.contains(m.id),
+                onVoicePlayed: dm.markVoicePlayed,
+                onVideoPlayed: dm.markVideoPlayed,
+                onImageTap: widget.onOpenImage,
+                onContextMenu: _openMenu,
+                onToggleSelect: () => dm.toggleSelected(m.id),
+                onQuoteTap: _scrollToMessage,
+              ),
             ),
           ],
         );
@@ -357,7 +627,24 @@ class _ChatPaneState extends State<ChatPane> {
         color: VellinColors.strip,
         border: Border(top: BorderSide(color: VellinColors.line05)),
       ),
-      child: _recording ? _recordingBar() : _inputBar(),
+      // Выделение подменяет поле ввода в две фазы: поле уходит, панель
+      // действий приходит, и обратно.
+      child: PhaseSwitch(
+        phaseKey: widget.dm.selecting,
+        child: widget.dm.selecting ? _selectionBar() : (_recording ? _recordingBar() : _inputBar()),
+      ),
+    );
+  }
+
+  Widget _selectionBar() {
+    final dm = widget.dm;
+    final chosen = dm.selectedMessages;
+    final canForward = chosen.any((m) => m.isForwardable);
+    return _SelectionBar(
+      count: chosen.length,
+      onCancel: dm.exitSelection,
+      onForward: canForward ? () => _forward(chosen.map((m) => m.id).toList()) : null,
+      onDelete: chosen.isEmpty ? null : () => _delete(chosen.map((m) => m.id).toList()),
     );
   }
 
@@ -392,12 +679,27 @@ class _ChatPaneState extends State<ChatPane> {
   Widget _inputBar() {
     // Одна рамка на всё: картинка, текст, микрофон и отправка живут внутри
     // поля, как в макете.
-    return _InputField(
-      controller: _input,
-      focusNode: _inputFocus,
-      onSubmit: _send,
-      onAttach: _attach,
-      onVoice: _startRecord,
+    final dm = widget.dm;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ComposeStrip(
+          reply: dm.replyTarget,
+          editing: dm.editing,
+          authorOf: (m) => m.senderId == dm.myUserId ? 'Вы' : (dm.activePeer?.username ?? ''),
+          onCancel: dm.cancelCompose,
+          onOpen: _scrollToMessage,
+        ),
+        _InputField(
+          controller: _input,
+          focusNode: _inputFocus,
+          editing: dm.editing != null,
+          onSubmit: _send,
+          onAttach: _attach,
+          onVoice: _startRecord,
+        ),
+      ],
     );
   }
 
@@ -718,6 +1020,10 @@ class _FeedSkeleton extends StatelessWidget {
 class _InputField extends StatefulWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
+
+  /// Поле правит отправленное сообщение: другая подсказка и галочка вместо
+  /// самолётика, вложений и голосового при правке нет.
+  final bool editing;
   final VoidCallback onSubmit;
   final VoidCallback onAttach;
   final VoidCallback onVoice;
@@ -725,6 +1031,7 @@ class _InputField extends StatefulWidget {
   const _InputField({
     required this.controller,
     required this.focusNode,
+    this.editing = false,
     required this.onSubmit,
     required this.onAttach,
     required this.onVoice,
@@ -765,15 +1072,23 @@ class _InputFieldState extends State<_InputField> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          VellinIconButton(
-            glyph: VellinGlyphs.image,
-            onPressed: widget.onAttach,
-            size: 32,
-            radius: VellinRadius.mini,
-            glyphSize: 17,
-            filled: false,
+          // При правке вложение и голосовое прячутся: заменить снимок или
+          // запись в отправленном сообщении нельзя.
+          _Collapsible(
+            visible: !widget.editing,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: VellinIconButton(
+                glyph: VellinGlyphs.image,
+                onPressed: widget.onAttach,
+                size: 32,
+                radius: VellinRadius.mini,
+                glyphSize: 17,
+                filled: false,
+              ),
+            ),
           ),
-          const SizedBox(width: 10),
+          if (widget.editing) const SizedBox(width: 8),
           Expanded(
             // Enter отправляет, Shift+Enter переносит строку. Поле
             // многострочное, поэтому решать приходится до того, как перевод
@@ -805,7 +1120,7 @@ class _InputFieldState extends State<_InputField> {
               cursorColor: VellinColors.accent,
               cursorWidth: 1.4,
               decoration: InputDecoration.collapsed(
-                hintText: 'Написать сообщение…',
+                hintText: widget.editing ? 'Текст сообщения…' : 'Написать сообщение…',
                 hintStyle: TextStyle(
                   fontFamily: VellinType.family,
                   fontSize: 13.5,
@@ -816,16 +1131,21 @@ class _InputFieldState extends State<_InputField> {
             ),
           ),
           const SizedBox(width: 10),
-          VellinIconButton(
-            glyph: VellinGlyphs.mic,
-            onPressed: widget.onVoice,
-            size: 32,
-            radius: VellinRadius.mini,
-            glyphSize: 17,
-            filled: false,
+          _Collapsible(
+            visible: !widget.editing,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: VellinIconButton(
+                glyph: VellinGlyphs.mic,
+                onPressed: widget.onVoice,
+                size: 32,
+                radius: VellinRadius.mini,
+                glyphSize: 17,
+                filled: false,
+              ),
+            ),
           ),
-          const SizedBox(width: 10),
-          _SendButton(onTap: widget.onSubmit),
+          _SendButton(onTap: widget.onSubmit, confirm: widget.editing),
         ],
       ),
     );
@@ -835,7 +1155,10 @@ class _InputFieldState extends State<_InputField> {
 /// Кнопка отправки: единственная золотая заливка в поле ввода.
 class _SendButton extends StatelessWidget {
   final VoidCallback onTap;
-  const _SendButton({required this.onTap});
+
+  /// Сохранить правку — галочка вместо самолётика.
+  final bool confirm;
+  const _SendButton({required this.onTap, this.confirm = false});
 
   @override
   Widget build(BuildContext context) {
@@ -855,7 +1178,416 @@ class _SendButton extends StatelessWidget {
           ],
         ),
         alignment: Alignment.center,
-        child: const VellinIcon(VellinGlyphs.send, size: 16, color: VellinColors.onAccent),
+        // Глиф меняется в две фазы: самолётик уходит, галочка приходит.
+        child: PhaseSwitch(
+          phaseKey: confirm,
+          shift: 0,
+          out: VellinMotion.micro,
+          inDuration: const Duration(milliseconds: 380),
+          child: confirm
+              ? const VellinIcon(VellinGlyphs.check, size: 17, color: VellinColors.onAccent, stroke: 1.6)
+              : const VellinIcon(VellinGlyphs.send, size: 16, color: VellinColors.onAccent),
+        ),
+      ),
+    );
+  }
+}
+
+/// Кнопка в поле ввода, которая уезжает и схлопывает место под собой.
+class _Collapsible extends StatelessWidget {
+  final bool visible;
+  final Widget child;
+  const _Collapsible({required this.visible, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(end: visible ? 1 : 0),
+      duration: visible ? VellinMotion.hover : VellinMotion.quick,
+      curve: visible ? VellinMotion.standard : VellinMotion.exit,
+      builder: (context, t, child) {
+        if (t == 0) return const SizedBox.shrink();
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            widthFactor: t,
+            child: Opacity(opacity: t, child: Transform.scale(scale: 0.8 + 0.2 * t, child: child)),
+          ),
+        );
+      },
+      child: child,
+    );
+  }
+}
+
+/// Полоса закреплённого сообщения под шапкой. Появляется, раскрываясь по
+/// высоте, уходит так же; смена закрепа — две фазы содержимого.
+class _PinBar extends StatefulWidget {
+  final DirectMessage? pinned;
+  final void Function(String messageId) onOpen;
+  final VoidCallback onUnpin;
+
+  const _PinBar({required this.pinned, required this.onOpen, required this.onUnpin});
+
+  @override
+  State<_PinBar> createState() => _PinBarState();
+}
+
+class _PinBarState extends State<_PinBar> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: VellinMotion.state,
+    reverseDuration: VellinMotion.quick,
+    value: widget.pinned == null ? 0 : 1,
+  );
+
+  /// Что показывать: при уходе полосы закреп уже снят, а текст должен
+  /// догаснуть вместе с ней.
+  late DirectMessage? _shown = widget.pinned;
+  bool _hover = false;
+
+  @override
+  void didUpdateWidget(_PinBar old) {
+    super.didUpdateWidget(old);
+    if (widget.pinned != null) {
+      _shown = widget.pinned;
+      _c.forward();
+    } else if (old.pinned != null) {
+      _c.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        if (_c.value == 0) return const SizedBox.shrink();
+        final t = _c.status == AnimationStatus.reverse
+            ? VellinMotion.exit.transform(_c.value)
+            : VellinMotion.standard.transform(_c.value);
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.topCenter,
+            heightFactor: t,
+            child: Opacity(
+              opacity: t.clamp(0.0, 1.0),
+              child: Transform.translate(offset: Offset(0, -6 * (1 - t)), child: child),
+            ),
+          ),
+        );
+      },
+      child: _body(),
+    );
+  }
+
+  Widget _body() {
+    final m = _shown;
+    if (m == null) return const SizedBox.shrink();
+    final preview = m.body.isNotEmpty ? m.body : dmKindLabel(m.kind);
+
+    return Container(
+      height: 50,
+      padding: const EdgeInsets.only(left: 18, right: 12),
+      decoration: const BoxDecoration(
+        color: VellinColors.strip,
+        border: Border(bottom: BorderSide(color: VellinColors.line05)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              onEnter: (_) => setState(() => _hover = true),
+              onExit: (_) => setState(() => _hover = false),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => widget.onOpen(m.id),
+                child: Row(
+                  children: [
+                    AnimatedContainer(
+                      duration: VellinMotion.hover,
+                      curve: VellinMotion.standard,
+                      width: 2,
+                      height: _hover ? 32 : 26,
+                      decoration: BoxDecoration(
+                        color: VellinColors.accent,
+                        borderRadius: BorderRadius.circular(1),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    VellinIcon(VellinGlyphs.pin, size: 15, color: _hover ? VellinColors.accent : VellinColors.ink45),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      // Другой закреп — старый текст уходит, новый приходит.
+                      child: PhaseSwitch(
+                        phaseKey: m.id,
+                        shift: 8,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Закреплённое сообщение',
+                              style: VellinType.author.copyWith(fontSize: 11.5, color: VellinColors.accent),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              preview,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: VellinType.caption.copyWith(
+                                fontSize: 12.5,
+                                color: _hover ? VellinColors.ink82 : VellinColors.ink62,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          VellinIconButton(
+            glyph: VellinGlyphs.cross,
+            onPressed: widget.onUnpin,
+            size: 30,
+            radius: VellinRadius.mini,
+            glyphSize: 14,
+            filled: false,
+            tooltip: 'Открепить',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Полоса над полем ввода: на что отвечаем или что правим.
+class _ComposeStrip extends StatefulWidget {
+  final DirectMessage? reply;
+  final DirectMessage? editing;
+  final String Function(DirectMessage m) authorOf;
+  final VoidCallback onCancel;
+  final void Function(String messageId) onOpen;
+
+  const _ComposeStrip({
+    required this.reply,
+    required this.editing,
+    required this.authorOf,
+    required this.onCancel,
+    required this.onOpen,
+  });
+
+  @override
+  State<_ComposeStrip> createState() => _ComposeStripState();
+}
+
+class _ComposeStripState extends State<_ComposeStrip> with SingleTickerProviderStateMixin {
+  DirectMessage? get _target => widget.editing ?? widget.reply;
+
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: VellinMotion.state,
+    reverseDuration: VellinMotion.quick,
+    value: _target == null ? 0 : 1,
+  );
+
+  late DirectMessage? _shown = _target;
+  late bool _shownEditing = widget.editing != null;
+
+  @override
+  void didUpdateWidget(_ComposeStrip old) {
+    super.didUpdateWidget(old);
+    if (_target != null) {
+      _shown = _target;
+      _shownEditing = widget.editing != null;
+      _c.forward();
+    } else if (old.editing != null || old.reply != null) {
+      _c.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        if (_c.value == 0) return const SizedBox.shrink();
+        final t = _c.status == AnimationStatus.reverse
+            ? VellinMotion.exit.transform(_c.value)
+            : VellinMotion.standard.transform(_c.value);
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            heightFactor: t,
+            child: Opacity(
+              opacity: t.clamp(0.0, 1.0),
+              child: Transform.translate(offset: Offset(0, 8 * (1 - t)), child: child),
+            ),
+          ),
+        );
+      },
+      child: _body(),
+    );
+  }
+
+  Widget _body() {
+    final m = _shown;
+    if (m == null) return const SizedBox.shrink();
+    final editing = _shownEditing;
+    final preview = m.body.isNotEmpty ? m.body : dmKindLabel(m.kind);
+    final author = widget.authorOf(m);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          const SizedBox(width: 6),
+          // Смена ответа на правку или на другое сообщение — в две фазы.
+          Expanded(
+            child: PhaseSwitch(
+              phaseKey: '${editing ? 'e' : 'r'}:${m.id}',
+              shift: 8,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => widget.onOpen(m.id),
+                  child: Row(
+                    children: [
+                      VellinIcon(
+                        editing ? VellinGlyphs.edit : VellinGlyphs.reply,
+                        size: 16,
+                        color: VellinColors.accent,
+                      ),
+                      const SizedBox(width: 12),
+                      Container(
+                        width: 2,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: VellinColors.accent,
+                          borderRadius: BorderRadius.circular(1),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              editing ? 'Редактирование' : 'Ответ · $author',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: VellinType.author.copyWith(fontSize: 11.5, color: VellinColors.accent),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              preview,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: VellinType.caption.copyWith(fontSize: 12.5, color: VellinColors.ink62),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          VellinIconButton(
+            glyph: VellinGlyphs.cross,
+            onPressed: widget.onCancel,
+            size: 28,
+            radius: VellinRadius.mini,
+            glyphSize: 13,
+            filled: false,
+            tooltip: editing ? 'Отменить правку' : 'Отменить ответ',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Панель режима выделения на месте поля ввода.
+class _SelectionBar extends StatelessWidget {
+  final int count;
+  final VoidCallback onCancel;
+  final VoidCallback? onForward;
+  final VoidCallback? onDelete;
+
+  const _SelectionBar({
+    required this.count,
+    required this.onCancel,
+    required this.onForward,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: VellinLayout.composerMinHeight,
+      child: Row(
+        children: [
+          VellinIconButton(
+            glyph: VellinGlyphs.cross,
+            onPressed: onCancel,
+            size: 32,
+            radius: VellinRadius.mini,
+            glyphSize: 15,
+            filled: false,
+            tooltip: 'Снять выделение',
+          ),
+          const SizedBox(width: 10),
+          // Ширина под двузначное число: подпись не дёргается при выборе.
+          SizedBox(
+            width: 110,
+            child: Text(
+              'Выбрано: $count',
+              style: VellinType.body.copyWith(
+                fontSize: 13,
+                color: VellinColors.ink82,
+                fontFeatures: VellinType.tabular,
+              ),
+            ),
+          ),
+          const Spacer(),
+          VellinButton(
+            label: 'Переслать',
+            glyph: VellinGlyphs.forward,
+            tone: VellinButtonTone.secondary,
+            height: 36,
+            onPressed: onForward,
+          ),
+          const SizedBox(width: 8),
+          VellinButton(
+            label: 'Удалить',
+            glyph: VellinGlyphs.trash,
+            tone: VellinButtonTone.danger,
+            height: 36,
+            onPressed: onDelete,
+          ),
+        ],
       ),
     );
   }

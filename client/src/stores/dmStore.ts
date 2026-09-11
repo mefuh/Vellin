@@ -85,6 +85,8 @@ interface DmState {
   applyVoicePlayed: (messageId: string) => void;
   /** Собеседник посмотрел мой кружок. */
   applyVideoPlayed: (messageId: string) => void;
+  /** Сообщения удалены (для всех или скрыты мной на другом устройстве). */
+  applyDeleted: (messageIds: string[]) => void;
   /** Кто-то прочитал (своё эхо или собеседник). */
   applyRead: (
     payload: { conversationId: string; byUserId: string; readAt: string; unreadTotal?: number },
@@ -368,6 +370,21 @@ export const useDmStore = create<DmState>((set, get) => ({
           const msgs = t.messages.slice();
           msgs[idx] = { ...msgs[idx], voicePlayed: true };
           threads[pid] = { ...t, messages: msgs };
+        }
+      }
+      return changed ? { threads } : s;
+    }),
+
+  applyDeleted: (messageIds) =>
+    set((s) => {
+      const gone = new Set(messageIds);
+      const threads = { ...s.threads };
+      let changed = false;
+      for (const [pid, t] of Object.entries(threads)) {
+        const messages = t.messages.filter((m) => !gone.has(m.id));
+        if (messages.length !== t.messages.length) {
+          changed = true;
+          threads[pid] = { ...t, messages };
         }
       }
       return changed ? { threads } : s;

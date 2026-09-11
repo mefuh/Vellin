@@ -23,6 +23,10 @@ import {
   handleDmSend,
   handleDmTyping,
   handleDmVideoPlayed,
+  handleDmEdit,
+  handleDmDelete,
+  handleDmPin,
+  handleDmForward,
   handleDmVoicePlayed,
 } from '../dm/realtime.js';
 import { unreadTotal as dmUnreadTotal } from '../dm/service.js';
@@ -67,6 +71,11 @@ const MAX_MESSAGE_BYTES = 32 * 1024;
  * рвёт соединение, а рвать его посреди звонка нельзя.
  */
 const MAX_USER_MESSAGE_BYTES = 96 * 1024;
+
+/** Непустой список строк из сообщения клиента — id сообщений для пачечных действий. */
+function isStringList(v: unknown): v is string[] {
+  return Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string');
+}
 
 export async function registerWebSocket(app: FastifyInstance): Promise<void> {
   // ── Пользовательский realtime-канал (личные уведомления + presence) ─────
@@ -161,7 +170,10 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         videoUploadId?: string;
         videoDurationSec?: number;
         videoMirrored?: boolean;
-        messageId?: string;
+        messageId?: string | null;
+        messageIds?: unknown;
+        forAll?: boolean;
+        replyToId?: string;
         conversationId?: string | null;
         visible?: boolean;
         active?: boolean;
@@ -205,7 +217,16 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
                 mirrored: m.videoMirrored === true,
               }
             : undefined;
-        void handleDmSend(principal.userId, m.toUserId, m.body, m.nonce, image, voice, video);
+        void handleDmSend(
+          principal.userId,
+          m.toUserId,
+          m.body,
+          m.nonce,
+          image,
+          voice,
+          video,
+          typeof m.replyToId === 'string' ? m.replyToId : undefined,
+        );
       } else if (m.t === 'dm_typing' && typeof m.toUserId === 'string' && typeof m.typing === 'boolean') {
         handleDmTyping(
           principal.userId,
@@ -219,6 +240,14 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         void handleDmVoicePlayed(principal.userId, m.messageId);
       } else if (m.t === 'dm_video_played' && typeof m.messageId === 'string') {
         void handleDmVideoPlayed(principal.userId, m.messageId);
+      } else if (m.t === 'dm_edit' && typeof m.messageId === 'string' && typeof m.body === 'string') {
+        void handleDmEdit(principal.userId, m.messageId, m.body);
+      } else if (m.t === 'dm_delete' && isStringList(m.messageIds)) {
+        void handleDmDelete(principal.userId, m.messageIds, m.forAll === true);
+      } else if (m.t === 'dm_pin' && typeof m.peerId === 'string' && (typeof m.messageId === 'string' || m.messageId === null)) {
+        void handleDmPin(principal.userId, m.peerId, m.messageId);
+      } else if (m.t === 'dm_forward' && typeof m.toUserId === 'string' && isStringList(m.messageIds)) {
+        void handleDmForward(principal.userId, m.toUserId, m.messageIds);
       } else if (m.t === 'presence_focus') {
         // Какой диалог открыт + видима ли вкладка — для подавления push о ЛС.
         const convId = typeof m.conversationId === 'string' ? m.conversationId : null;

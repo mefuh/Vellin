@@ -114,6 +114,12 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }): R
           // Видео-«кружок» дотранскодирован (processing→ready) — подменяем бабл.
           useDmStore.getState().applyMessageUpdate(msg.message, msg.peer);
           break;
+        case 'dm_message_deleted':
+          useDmStore.getState().applyDeleted(msg.messageIds);
+          break;
+        case 'dm_pinned':
+          // Закреп пока показывает только клиент Windows — веб о нём просто знает.
+          break;
         case 'dm_read':
           useDmStore.getState().applyRead(msg, myId);
           break;

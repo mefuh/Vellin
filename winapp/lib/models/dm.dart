@@ -1,6 +1,66 @@
 // Модели личных сообщений, зеркалят типы `@vellin/shared` (domain.ts/api.ts).
 import 'social.dart';
 
+/// Что за сообщение — для цитаты ответа и полосы закрепа (shared: DirectMessageKind).
+enum DmKind { text, image, voice, video, invite, call }
+
+DmKind _kindFrom(String? v) => switch (v) {
+      'image' => DmKind.image,
+      'voice' => DmKind.voice,
+      'video' => DmKind.video,
+      'invite' => DmKind.invite,
+      'call' => DmKind.call,
+      _ => DmKind.text,
+    };
+
+/// Подпись вложения без текста: в цитате и закрепе глиф стоит отдельно.
+String dmKindLabel(DmKind kind) => switch (kind) {
+      DmKind.image => 'Изображение',
+      DmKind.voice => 'Голосовое сообщение',
+      DmKind.video => 'Видеосообщение',
+      DmKind.invite => 'Приглашение в комнату',
+      DmKind.call => 'Звонок',
+      DmKind.text => '',
+    };
+
+/// Ссылка на сообщение в цитате ответа (shared: DirectMessageReplyRef).
+class DmReplyRef {
+  final String id;
+
+  /// Оригинал удалён для всех: цитата остаётся, содержимого нет.
+  final bool deleted;
+  final String? senderId;
+  final DmKind kind;
+  final String body;
+
+  const DmReplyRef({
+    required this.id,
+    this.deleted = false,
+    this.senderId,
+    this.kind = DmKind.text,
+    this.body = '',
+  });
+
+  factory DmReplyRef.fromJson(Map<String, dynamic> j) => DmReplyRef(
+        id: j['id'] as String? ?? '',
+        deleted: j['deleted'] as bool? ?? false,
+        senderId: j['senderId'] as String?,
+        kind: _kindFrom(j['kind'] as String?),
+        body: j['body'] as String? ?? '',
+      );
+
+  /// Ссылка на загруженное сообщение — для оптимистичной отправки ответа.
+  factory DmReplyRef.of(DirectMessage m) =>
+      DmReplyRef(id: m.id, senderId: m.senderId, kind: m.kind, body: m.body);
+
+  /// Текст цитаты: начало реплики либо подпись вложения.
+  String get preview {
+    if (deleted) return 'Сообщение удалено';
+    if (body.isNotEmpty) return body;
+    return dmKindLabel(kind);
+  }
+}
+
 /// Сообщение (shared: DirectMessageDTO — текстовое подмножество + маркеры вложений).
 class DirectMessage {
   final String id;
@@ -36,6 +96,21 @@ class DirectMessage {
   final String? callOutcome;
   final int? callDurationSec;
 
+  /// Цитата сообщения, на которое это — ответ.
+  final DmReplyRef? replyTo;
+
+  /// Пересланное: имя автора оригинала. Null — написано отправителем.
+  final String? forwardedFromName;
+
+  /// Когда текст последний раз меняли (ISO). Null — не менялся.
+  final String? editedAt;
+
+  /// Когда получатель прочитал именно это сообщение (ISO).
+  final String? readAt;
+
+  /// Когда голосовое или кружок впервые прослушали (ISO).
+  final String? playedAt;
+
   /// Эхо оптимистичной отправки (только у отправителя).
   final String? nonce;
   /// Локальный флаг «ещё отправляется» (оптимистичный бабл до эха с сервера).
@@ -64,6 +139,11 @@ class DirectMessage {
     this.callKind,
     this.callOutcome,
     this.callDurationSec,
+    this.replyTo,
+    this.forwardedFromName,
+    this.editedAt,
+    this.readAt,
+    this.playedAt,
     this.nonce,
     this.pending = false,
   });
@@ -71,13 +151,45 @@ class DirectMessage {
   /// Сообщение — запись о звонке, а не переписка.
   bool get isCallRecord => callId != null && callId!.isNotEmpty;
 
-  /// Копия с изменённой отметкой «прослушано»: остальные поля сообщения после
-  /// отправки не меняются, поэтому общего copyWith на все поля не нужно.
-  DirectMessage copyWith({bool? voicePlayed, bool? videoPlayed}) => DirectMessage(
+  DmKind get kind {
+    if (isCallRecord) return DmKind.call;
+    if (inviteRoomId != null) return DmKind.invite;
+    if (videoStatus != null) return DmKind.video;
+    if (voiceUrl != null) return DmKind.voice;
+    if (imageUrl != null) return DmKind.image;
+    return DmKind.text;
+  }
+
+  bool get isForwarded => forwardedFromName != null;
+
+  /// Текст можно править: у голосовых и кружков нечего, приглашение и звонок —
+  /// не реплики, а пересланное — чужие слова.
+  bool get isEditable =>
+      !pending && voiceUrl == null && videoStatus == null && inviteRoomId == null && !isCallRecord && !isForwarded;
+
+  /// Пересылается всё, что можно показать у другого человека: звонок и
+  /// приглашение привязаны к этой паре, недотранскодированный кружок — пустой.
+  bool get isForwardable =>
+      !pending && !isCallRecord && inviteRoomId == null && (videoStatus == null || videoStatus == 'ready');
+
+  static const _keep = Object();
+
+  /// Копия с изменёнными полями. Для nullable-полей [_keep] значит «оставить»,
+  /// а явный null — «очистить».
+  DirectMessage copyWith({
+    String? body,
+    bool? voicePlayed,
+    bool? videoPlayed,
+    Object? replyTo = _keep,
+    Object? editedAt = _keep,
+    Object? readAt = _keep,
+    Object? playedAt = _keep,
+  }) =>
+      DirectMessage(
         id: id,
         conversationId: conversationId,
         senderId: senderId,
-        body: body,
+        body: body ?? this.body,
         createdAt: createdAt,
         imageUrl: imageUrl,
         imageWidth: imageWidth,
@@ -96,6 +208,11 @@ class DirectMessage {
         callKind: callKind,
         callOutcome: callOutcome,
         callDurationSec: callDurationSec,
+        replyTo: identical(replyTo, _keep) ? this.replyTo : replyTo as DmReplyRef?,
+        forwardedFromName: forwardedFromName,
+        editedAt: identical(editedAt, _keep) ? this.editedAt : editedAt as String?,
+        readAt: identical(readAt, _keep) ? this.readAt : readAt as String?,
+        playedAt: identical(playedAt, _keep) ? this.playedAt : playedAt as String?,
         nonce: nonce,
         pending: pending,
       );
@@ -123,6 +240,13 @@ class DirectMessage {
         callKind: j['callKind'] as String?,
         callOutcome: j['callOutcome'] as String?,
         callDurationSec: (j['callDurationSec'] as num?)?.toInt(),
+        replyTo: j['replyTo'] is Map<String, dynamic>
+            ? DmReplyRef.fromJson(j['replyTo'] as Map<String, dynamic>)
+            : null,
+        forwardedFromName: (j['forwardedFrom'] as Map<String, dynamic>?)?['name'] as String?,
+        editedAt: j['editedAt'] as String?,
+        readAt: j['readAt'] as String?,
+        playedAt: j['playedAt'] as String?,
         nonce: j['nonce'] as String?,
       );
 
@@ -225,6 +349,9 @@ class ConversationThread {
   /// проставляются галочки «прочитано» у своих сообщений.
   final String? peerLastReadAt;
 
+  /// Закреплённое в диалоге сообщение.
+  final DirectMessage? pinned;
+
   const ConversationThread({
     required this.conversationId,
     required this.peer,
@@ -232,6 +359,7 @@ class ConversationThread {
     required this.hasMore,
     required this.online,
     this.peerLastReadAt,
+    this.pinned,
   });
 
   factory ConversationThread.fromJson(Map<String, dynamic> j) => ConversationThread(
@@ -243,5 +371,8 @@ class ConversationThread {
         hasMore: j['hasMore'] as bool? ?? false,
         online: j['online'] as bool? ?? false,
         peerLastReadAt: j['peerLastReadAt'] as String?,
+        pinned: j['pinned'] is Map<String, dynamic>
+            ? DirectMessage.fromJson(j['pinned'] as Map<String, dynamic>)
+            : null,
       );
 }

@@ -34,6 +34,26 @@ class MessageRow extends StatelessWidget {
   final void Function(String messageId)? onVideoPlayed;
   final void Function(String url)? onImageTap;
 
+  /// Мой id — чтобы подписать автора цитаты «Вы» или именем собеседника.
+  final String myUserId;
+
+  /// Режим выделения: слева появляется отметка, щелчок выбирает строку.
+  final bool selecting;
+  final bool selected;
+
+  /// Над строкой открыто контекстное меню — она подсвечена, пока меню живо.
+  final bool menuOpen;
+
+  /// Номер вспышки: растёт, когда к сообщению прокрутили (закреп, цитата).
+  final int flash;
+
+  /// Сообщение удаляется — строка сворачивается.
+  final bool removing;
+
+  final void Function(DirectMessage message, Offset globalPosition)? onContextMenu;
+  final VoidCallback? onToggleSelect;
+  final void Function(String messageId)? onQuoteTap;
+
   const MessageRow({
     super.key,
     required this.message,
@@ -43,20 +63,48 @@ class MessageRow extends StatelessWidget {
     required this.myUsername,
     required this.myAvatarUrl,
     required this.peerReadAt,
+    this.myUserId = '',
+    this.selecting = false,
+    this.selected = false,
+    this.menuOpen = false,
+    this.flash = 0,
+    this.removing = false,
     this.onVoicePlayed,
     this.onVideoPlayed,
     this.onImageTap,
+    this.onContextMenu,
+    this.onToggleSelect,
+    this.onQuoteTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (message.isCallRecord) return _CallRecord(message: message, mine: mine);
+    final content = message.isCallRecord ? _CallRecord(message: message, mine: mine) : _message(context);
+    return _Collapse(
+      removing: removing,
+      child: _RowShell(
+        selecting: selecting,
+        selected: selected,
+        menuOpen: menuOpen,
+        flash: flash,
+        topInset: message.isCallRecord || groupStart ? 12 : 4,
+        onTap: selecting ? onToggleSelect : null,
+        onSecondaryTapUp: selecting || message.pending || onContextMenu == null
+            ? null
+            : (d) => onContextMenu!(message, d.globalPosition),
+        child: content,
+      ),
+    );
+  }
 
+  Widget _message(BuildContext context) {
     final name = mine ? 'Вы' : (peer?.username ?? '');
     final read = mine && _isRead;
 
     return Padding(
-      padding: EdgeInsets.only(top: groupStart ? 12 : 4),
+      // Отступ сверху ставит оболочка строки: подсветка меню и выделения
+      // должна обнимать реплику, а не зазор над ней.
+      padding: EdgeInsets.zero,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -107,12 +155,51 @@ class MessageRow extends StatelessWidget {
     return sent != null && !sent.isAfter(at);
   }
 
+  /// Пометка «переслано» и цитата ответа — над содержимым реплики.
+  List<Widget> _header({double? maxWidth}) {
+    final reply = message.replyTo;
+    return [
+      if (message.forwardedFromName != null)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 5),
+          child: _ForwardedLabel(name: message.forwardedFromName!, mine: mine),
+        ),
+      if (reply != null)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: _ReplyQuote(
+            ref: reply,
+            mine: mine,
+            author: reply.deleted
+                ? ''
+                : reply.senderId == myUserId
+                    ? 'Вы'
+                    : (peer?.username ?? ''),
+            maxWidth: maxWidth,
+            onTap: reply.deleted || onQuoteTap == null || selecting ? null : () => onQuoteTap!(reply.id),
+          ),
+        ),
+    ];
+  }
+
+  /// Шапка отдельно от пузыря — у снимка, кружка и приглашения нет рамки,
+  /// в которую её можно положить.
+  Widget _withHeader(Widget child, {double? maxWidth}) {
+    final header = _header(maxWidth: maxWidth);
+    if (header.isEmpty) return child;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [...header, child],
+    );
+  }
+
   Widget _body(BuildContext context, bool read) {
     if (message.voiceUrl != null) {
       return _Bubble(
         mine: mine,
         padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
-        child: VoiceBubble(
+        child: _withHeader(VoiceBubble(
           messageId: message.id,
           url: AppConfig.mediaUrl(message.voiceUrl)!,
           durationSec: message.voiceDurationSec ?? 0,
@@ -129,12 +216,12 @@ class MessageRow extends StatelessWidget {
             read: read,
             pending: message.pending,
           ),
-        ),
+        ), maxWidth: 300),
       );
     }
 
     if (message.videoStatus != null) {
-      return VideoBubble(
+      return _withHeader(maxWidth: 240, VideoBubble(
         messageId: message.id,
         status: message.videoStatus,
         videoUrl: AppConfig.mediaUrl(message.videoUrl),
@@ -152,11 +239,11 @@ class MessageRow extends StatelessWidget {
         played: message.videoPlayed,
         onFirstPlay: mine ? null : () => onVideoPlayed?.call(message.id),
         mine: mine,
-      );
+      ));
     }
 
     if (message.inviteRoomId != null) {
-      return RoomInviteCard(messageId: message.id, mine: mine);
+      return _withHeader(RoomInviteCard(messageId: message.id, mine: mine), maxWidth: 300);
     }
 
     if (message.imageUrl != null) {
@@ -164,6 +251,7 @@ class MessageRow extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          ..._header(maxWidth: 232),
           _ImageBubble(
             url: url,
             mine: mine,
@@ -174,6 +262,7 @@ class MessageRow extends StatelessWidget {
                     mine: mine,
                     read: read,
                     pending: message.pending,
+                    edited: message.editedAt != null,
                   )
                 : null,
           ),
@@ -185,7 +274,17 @@ class MessageRow extends StatelessWidget {
       );
     }
 
-    return _Bubble(mine: mine, child: _textWithMeta(read));
+    final header = _header(maxWidth: 420);
+    return _Bubble(
+      mine: mine,
+      child: header.isEmpty
+          ? _textWithMeta(read)
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [...header, _textWithMeta(read)],
+            ),
+    );
   }
 
   /// Текст с меткой времени в одной строке: короткая реплика и метка встают
@@ -195,7 +294,15 @@ class MessageRow extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Flexible(child: _text(message.body)),
+        // Правка текста меняет размер пузыря плавно, а не скачком.
+        Flexible(
+          child: AnimatedSize(
+            duration: VellinMotion.hover,
+            curve: VellinMotion.standard,
+            alignment: Alignment.topLeft,
+            child: _text(message.body),
+          ),
+        ),
         const SizedBox(width: 9),
         Padding(
           // Метка стоит на базовой линии последней строки, а не по её верху.
@@ -205,6 +312,7 @@ class MessageRow extends StatelessWidget {
             mine: mine,
             read: read,
             pending: message.pending,
+            edited: message.editedAt != null,
           ),
         ),
       ],
@@ -431,7 +539,7 @@ class _CallRecord extends StatelessWidget {
     final color = missed ? VellinColors.danger : VellinColors.ink45;
 
     return Padding(
-      padding: const EdgeInsets.only(top: 12, left: 38),
+      padding: const EdgeInsets.only(left: 38),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
@@ -490,29 +598,486 @@ class _Meta extends StatelessWidget {
   final bool read;
   final bool pending;
 
+  /// Текст меняли после отправки — перед временем стоит «изменено».
+  final bool edited;
+
   const _Meta({
     required this.time,
     required this.mine,
     required this.read,
     required this.pending,
+    this.edited = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final color = mine ? const Color(0x7AE2C99B) : VellinColors.ink28;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        _EditedMark(edited: edited, color: color),
         Text(
           time,
-          style: VellinType.time.copyWith(
-            color: mine ? const Color(0x7AE2C99B) : VellinColors.ink28,
-          ),
+          style: VellinType.time.copyWith(color: color),
         ),
         if (mine) ...[
           const SizedBox(width: 5),
           _Ticks(read: read, pending: pending),
         ],
       ],
+    );
+  }
+}
+
+/// Оболочка строки: отметка выделения слева, подсветка под открытым меню и
+/// вспышка, когда к сообщению прокрутили.
+class _RowShell extends StatefulWidget {
+  final bool selecting;
+  final bool selected;
+  final bool menuOpen;
+  final int flash;
+  final double topInset;
+  final VoidCallback? onTap;
+  final GestureTapUpCallback? onSecondaryTapUp;
+  final Widget child;
+
+  const _RowShell({
+    required this.selecting,
+    required this.selected,
+    required this.menuOpen,
+    required this.flash,
+    required this.topInset,
+    required this.onTap,
+    required this.onSecondaryTapUp,
+    required this.child,
+  });
+
+  @override
+  State<_RowShell> createState() => _RowShellState();
+}
+
+class _RowShellState extends State<_RowShell> with SingleTickerProviderStateMixin {
+  // Вспышка: быстро загорается и долго гаснет — глаз успевает найти строку.
+  late final AnimationController _flash = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.flash > 0) _flash.forward(from: 0);
+  }
+
+  @override
+  void didUpdateWidget(_RowShell old) {
+    super.didUpdateWidget(old);
+    if (widget.flash != old.flash && widget.flash > 0) _flash.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _flash.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final base = widget.selected
+        ? const Color(0x14E2C99B)
+        : widget.menuOpen
+            ? VellinColors.fill045
+            : const Color(0x00000000);
+
+    return Padding(
+      padding: EdgeInsets.only(top: widget.topInset),
+      child: MouseRegion(
+        cursor: widget.selecting ? SystemMouseCursors.click : MouseCursor.defer,
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: widget.onTap,
+          onSecondaryTapUp: widget.onSecondaryTapUp,
+          child: AnimatedBuilder(
+            animation: _flash,
+            builder: (context, child) {
+              final v = _flash.value;
+              // 0–15 % — разгорание, дальше — медленное угасание.
+              final glow = v == 0 || v == 1
+                  ? 0.0
+                  : v < 0.15
+                      ? VellinMotion.standard.transform(v / 0.15)
+                      : 1 - VellinMotion.standard.transform((v - 0.15) / 0.85);
+              return AnimatedContainer(
+                duration: VellinMotion.micro,
+                curve: VellinMotion.standard,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Color.lerp(base, const Color(0x24E2C99B), glow),
+                  borderRadius: BorderRadius.circular(VellinRadius.row),
+                ),
+                child: child,
+              );
+            },
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                _SelectMark(visible: widget.selecting, selected: widget.selected),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    // В режиме выделения щелчок выбирает строку целиком: плеер,
+                    // снимок и цитата внутри не должны перехватывать его.
+                    child: IgnorePointer(ignoring: widget.selecting, child: widget.child),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Кружок выделения. Выезжает слева, раздвигая строку, и уезжает обратно;
+/// галочка внутри прочерчивается при выборе.
+class _SelectMark extends StatefulWidget {
+  final bool visible;
+  final bool selected;
+  const _SelectMark({required this.visible, required this.selected});
+
+  @override
+  State<_SelectMark> createState() => _SelectMarkState();
+}
+
+class _SelectMarkState extends State<_SelectMark> with TickerProviderStateMixin {
+  late final AnimationController _show = AnimationController(
+    vsync: this,
+    duration: VellinMotion.hover,
+    reverseDuration: VellinMotion.quick,
+    value: widget.visible ? 1 : 0,
+  );
+  late final AnimationController _check = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 320),
+    reverseDuration: VellinMotion.micro,
+    value: widget.selected ? 1 : 0,
+  );
+
+  @override
+  void didUpdateWidget(_SelectMark old) {
+    super.didUpdateWidget(old);
+    if (widget.visible != old.visible) widget.visible ? _show.forward() : _show.reverse();
+    if (widget.selected != old.selected) widget.selected ? _check.forward() : _check.reverse();
+  }
+
+  @override
+  void dispose() {
+    _show.dispose();
+    _check.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge([_show, _check]),
+      builder: (context, _) {
+        if (_show.value == 0) return const SizedBox.shrink();
+        final s = _show.status == AnimationStatus.reverse
+            ? VellinMotion.exit.transform(_show.value)
+            : VellinMotion.standard.transform(_show.value);
+        final c = VellinMotion.standard.transform(_check.value);
+        return SizedBox(
+          width: 34 * s,
+          child: Opacity(
+            opacity: s.clamp(0.0, 1.0),
+            child: Transform.translate(
+              offset: Offset(-10 * (1 - s), 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Color.lerp(const Color(0x00000000), VellinColors.accent, c),
+                    border: Border.all(
+                      color: Color.lerp(VellinColors.ink28, VellinColors.accent, c)!,
+                      width: 1.25,
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: c == 0
+                      ? null
+                      : VellinIcon(
+                          VellinGlyphs.check,
+                          size: 13,
+                          color: VellinColors.onAccent,
+                          stroke: 1.8,
+                          progress: c,
+                        ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Уход удалённой строки: гаснет, чуть сжимается и схлопывает высоту, чтобы
+/// соседи съехались, а не прыгнули.
+class _Collapse extends StatefulWidget {
+  final bool removing;
+  final Widget child;
+  const _Collapse({required this.removing, required this.child});
+
+  @override
+  State<_Collapse> createState() => _CollapseState();
+}
+
+class _CollapseState extends State<_Collapse> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+    value: widget.removing ? 0 : 1,
+  );
+
+  @override
+  void didUpdateWidget(_Collapse old) {
+    super.didUpdateWidget(old);
+    if (widget.removing != old.removing) widget.removing ? _c.reverse() : _c.forward();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.removing && _c.value == 1) return widget.child;
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        final t = VellinMotion.exit.transform(_c.value);
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.topLeft,
+            heightFactor: t,
+            child: Opacity(
+              opacity: t,
+              child: Transform.scale(scale: 0.96 + 0.04 * t, alignment: Alignment.centerLeft, child: child),
+            ),
+          ),
+        );
+      },
+      child: widget.child,
+    );
+  }
+}
+
+/// «изменено» перед временем. У давно изменённых стоит сразу, у изменённых на
+/// глазах — раздвигает метку и проявляется.
+class _EditedMark extends StatefulWidget {
+  final bool edited;
+  final Color color;
+  const _EditedMark({required this.edited, required this.color});
+
+  @override
+  State<_EditedMark> createState() => _EditedMarkState();
+}
+
+class _EditedMarkState extends State<_EditedMark> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: VellinMotion.state,
+    value: widget.edited ? 1 : 0,
+  );
+
+  @override
+  void didUpdateWidget(_EditedMark old) {
+    super.didUpdateWidget(old);
+    if (widget.edited != old.edited) widget.edited ? _c.forward(from: 0) : _c.reverse();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        if (_c.value == 0) return const SizedBox.shrink();
+        final t = VellinMotion.standard.transform(_c.value);
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.centerRight,
+            widthFactor: t,
+            child: Opacity(opacity: t, child: child),
+          ),
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(right: 5),
+        child: Text('изменено', style: VellinType.time.copyWith(color: widget.color)),
+      ),
+    );
+  }
+}
+
+/// «Переслано от …» над содержимым пересланной реплики.
+class _ForwardedLabel extends StatelessWidget {
+  final String name;
+  final bool mine;
+  const _ForwardedLabel({required this.name, required this.mine});
+
+  @override
+  Widget build(BuildContext context) {
+    final dim = mine ? const Color(0x8CE2C99B) : VellinColors.ink45;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        VellinIcon(VellinGlyphs.forward, size: 12, color: dim),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text.rich(
+            TextSpan(
+              children: [
+                const TextSpan(text: 'Переслано от '),
+                TextSpan(
+                  text: name.isEmpty ? 'пользователя' : name,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: mine ? VellinColors.accent : VellinColors.ink72,
+                  ),
+                ),
+              ],
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: VellinType.caption.copyWith(fontSize: 11.5, color: dim),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Цитата сообщения, на которое ответили. Щелчок — прокрутка к оригиналу.
+class _ReplyQuote extends StatefulWidget {
+  final DmReplyRef ref;
+  final bool mine;
+  final String author;
+  final double? maxWidth;
+  final VoidCallback? onTap;
+
+  const _ReplyQuote({
+    required this.ref,
+    required this.mine,
+    required this.author,
+    required this.maxWidth,
+    required this.onTap,
+  });
+
+  @override
+  State<_ReplyQuote> createState() => _ReplyQuoteState();
+}
+
+class _ReplyQuoteState extends State<_ReplyQuote> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ref = widget.ref;
+    final hot = _hover && widget.onTap != null;
+    final glyph = switch (ref.kind) {
+      DmKind.image => VellinGlyphs.image,
+      DmKind.voice => VellinGlyphs.listened,
+      DmKind.video => VellinGlyphs.viewed,
+      DmKind.invite => VellinGlyphs.screen,
+      DmKind.call => VellinGlyphs.calls,
+      DmKind.text => null,
+    };
+    final showGlyph = !ref.deleted && glyph != null;
+
+    return MouseRegion(
+      cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: widget.maxWidth ?? 420, minWidth: 120),
+          child: AnimatedContainer(
+            duration: VellinMotion.micro,
+            curve: VellinMotion.standard,
+            decoration: BoxDecoration(
+              color: widget.mine
+                  ? (hot ? const Color(0x24E2C99B) : const Color(0x14E2C99B))
+                  : (hot ? VellinColors.fill055 : VellinColors.fill045),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: IntrinsicHeight(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(width: 2, color: ref.deleted ? VellinColors.ink24 : VellinColors.accent),
+                  Flexible(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(9, 5, 10, 6),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (widget.author.isNotEmpty)
+                            Text(
+                              widget.author,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: VellinType.author.copyWith(fontSize: 11.5, color: VellinColors.accent),
+                            ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (showGlyph) ...[
+                                VellinIcon(glyph, size: 12, color: VellinColors.ink45),
+                                const SizedBox(width: 5),
+                              ],
+                              Flexible(
+                                child: Text(
+                                  ref.preview,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: VellinType.caption.copyWith(
+                                    fontSize: 12,
+                                    height: 1.35,
+                                    fontStyle: ref.deleted ? FontStyle.italic : FontStyle.normal,
+                                    color: ref.deleted ? VellinColors.ink34 : VellinColors.ink62,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
