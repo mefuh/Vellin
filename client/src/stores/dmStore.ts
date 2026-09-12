@@ -135,6 +135,7 @@ function bumpConversation(
         peerLastReadAt: null,
         online: false,
         lastMessageAt: message.createdAt,
+        muted: false,
       },
       ...list,
     ];

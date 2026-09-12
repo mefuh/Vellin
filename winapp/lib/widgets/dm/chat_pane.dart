@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 
 import '../../runtime/media_gate.dart';
+import '../../state/app_settings.dart';
 import '../../state/auth_controller.dart';
 import '../../state/call_controller.dart';
 import '../../state/dm_controller.dart';
@@ -21,11 +22,15 @@ import '../ui/vellin_hover.dart';
 import '../ui/vellin_icon.dart';
 import '../shell/phase_switch.dart';
 import '../../models/dm.dart';
+import '../../models/social.dart';
 import '../../state/friends_controller.dart';
 import '../../state/recent_reactions.dart';
+import '../../runtime/clipboard_images.dart';
 import 'message_dialogs.dart';
+import 'photo_send_dialog.dart';
 import 'message_menu.dart';
 import 'message_row.dart';
+import 'peer_panel.dart';
 
 /// Переписка в правой области: шапка, лента и поле ввода.
 class ChatPane extends StatefulWidget {
@@ -53,6 +58,18 @@ class _ChatPaneState extends State<ChatPane> {
   final _inputFocus = FocusNode();
   final _scroll = ScrollController();
   String? _shownPeer;
+
+  /// Чей это диалог. Берётся один раз при создании и больше не меняется:
+  /// правая область меняет диалоги в две фазы, и пока прежняя переписка
+  /// уезжает, она обязана показывать прежнего человека — иначе шапка и
+  /// боковая панель подменяются раньше самого перехода.
+  late final String? _panePeerId = widget.dm.activePeerPublicId;
+
+  /// Снимок собеседника этого диалога: им живут шапка и панель, когда
+  /// контроллер уже переключился на другую переписку.
+  PublicUser? _panePeer;
+  String? _panePeerUserId;
+  bool _paneMuted = false;
   String? _lastMsgId;
   bool _loadingOlder = false;
   String? _watchedPeerId;
@@ -449,16 +466,39 @@ class _ChatPaneState extends State<ChatPane> {
   Future<void> _attach() async {
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
+      allowedExtensions: photoExtensions,
+      allowMultiple: true,
     );
-    final path = picked?.files.single.path;
-    if (path == null) return;
-    final caption = _input.text;
+    final paths = (picked?.files ?? const []).map((f) => f.path).whereType<String>().toList();
+    if (paths.isEmpty || !mounted) return;
+    await _composePhotos(paths);
+  }
+
+  /// Ctrl+V в поле ввода: если в буфере фото — открыть окно отправки с ними.
+  /// Текст вставляется как обычно, окно появляется только при фото в буфере.
+  Future<void> _pastePhotos() async {
+    if (widget.dm.editing != null) return;
+    final photos = await readClipboardPhotos();
+    if (photos.isEmpty || !mounted) return;
+    await _composePhotos(photos);
+  }
+
+  /// Окно отправки: там фото добирают из других папок и буфера и подписывают.
+  /// Набранный в поле текст переезжает в подпись, а после отправки поле
+  /// очищается; закрыли окно — текст остаётся на месте.
+  Future<void> _composePhotos(List<String> paths) async {
+    const max = DmController.maxImages;
+    final draft = await showPhotoSendDialog(context, initial: paths, caption: _input.text, max: max);
+    if (draft == null || !mounted) {
+      _focusInput();
+      return;
+    }
     _input.clear();
+    _focusInput();
     try {
-      await widget.dm.sendImage(path, caption: caption);
+      await widget.dm.sendImages(draft.paths, caption: draft.caption);
     } catch (e) {
-      if (mounted) _toast('Не удалось отправить: $e');
+      if (mounted) _toast('Не удалось отправить фото: $e');
     }
   }
 
@@ -500,12 +540,49 @@ class _ChatPaneState extends State<ChatPane> {
       if (mine) _scrollToBottom();
     }
 
-    return Focus(
+    final settings = context.watch<AppSettings>();
+    // На узком окне панель не ужимает ленту до нечитаемой ширины, а ложится
+    // поверх неё: 940 пикселей окна минус рейл, список и панель оставили бы
+    // переписке меньше трёхсот.
+    final narrow = MediaQuery.sizeOf(context).width < VellinLayout.breakpoint;
+    // Контроллер мог уже уйти в другой диалог: тогда эта переписка доигрывает
+    // свой уход и остаётся при своём человеке до самой подмены.
+    final mine = dm.activePeerPublicId == _panePeerId;
+    if (mine) {
+      _panePeer = dm.activePeer ?? _panePeer;
+      _panePeerUserId = dm.activePeerUserId ?? _panePeerUserId;
+      _paneMuted = dm.peerMuted;
+    }
+    final panelOpen = settings.peerPanelOpen && _panePeerId != null;
+
+    final panel = _PanelSlot(
+      open: panelOpen,
+      floating: narrow,
+      child: PeerPanel(
+        key: ValueKey(_panePeerId),
+        dm: dm,
+        publicId: _panePeerId,
+        peer: _panePeer,
+        peerUserId: _panePeerUserId,
+        muted: _paneMuted,
+        onOpenProfile: widget.onOpenProfile,
+        onClose: () => settings.setPeerPanelOpen(false),
+      ),
+    );
+
+    final body = Focus(
       focusNode: _paneFocus,
       onKeyEvent: _onPaneKey,
       child: Column(
       children: [
-        _ChatHeader(dm: dm, onOpenProfile: widget.onOpenProfile),
+        _ChatHeader(
+          peer: _panePeer,
+          peerUserId: _panePeerUserId,
+          activity: mine ? dm.peerActivity : null,
+          onOpenProfile: widget.onOpenProfile,
+          panelOpen: settings.peerPanelOpen,
+          onTogglePanel: () => settings.setPeerPanelOpen(!settings.peerPanelOpen),
+        ),
         _PinBar(
           pinned: dm.pinned,
           onOpen: (id) => _scrollToMessage(id),
@@ -529,7 +606,8 @@ class _ChatPaneState extends State<ChatPane> {
                       onPressed: _animateToBottom,
                       size: 34,
                       radius: 17,
-                      glyphSize: 12,
+                      glyphSize: 13,
+                      glyphBox: const Size(12, 12),
                     ),
                   ),
                 ),
@@ -540,6 +618,21 @@ class _ChatPaneState extends State<ChatPane> {
         _composer(),
       ],
       ),
+    );
+
+    if (narrow) {
+      return Stack(
+        children: [
+          body,
+          Positioned(top: 0, right: 0, bottom: 0, child: panel),
+        ],
+      );
+    }
+    return Row(
+      children: [
+        Expanded(child: body),
+        panel,
+      ],
     );
   }
 
@@ -711,6 +804,7 @@ class _ChatPaneState extends State<ChatPane> {
           focusNode: _inputFocus,
           editing: dm.editing != null,
           onSubmit: _send,
+          onPaste: _pastePhotos,
           onAttach: _attach,
           onVoice: _startRecord,
         ),
@@ -722,19 +816,131 @@ class _ChatPaneState extends State<ChatPane> {
       '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
 }
 
+/// Место боковой панели собеседника: на широком окне раздвигает ленту, на
+/// узком — наезжает на неё справа.
+///
+/// Закрытая панель не просто спрятана, а размонтирована: иначе её витрина
+/// продолжала бы тянуть снимки для диалога, которого не видно.
+class _PanelSlot extends StatefulWidget {
+  final bool open;
+
+  /// Панель лежит поверх ленты, а не раздвигает её.
+  final bool floating;
+
+  final Widget child;
+
+  const _PanelSlot({required this.open, required this.floating, required this.child});
+
+  @override
+  State<_PanelSlot> createState() => _PanelSlotState();
+}
+
+class _PanelSlotState extends State<_PanelSlot> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: VellinMotion.state,
+    reverseDuration: VellinMotion.quick,
+    value: widget.open ? 1 : 0,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    // Уход доигран — снимаем панель с дерева.
+    _c.addStatusListener((s) {
+      if (s == AnimationStatus.dismissed && mounted) setState(() {});
+    });
+  }
+
+  @override
+  void didUpdateWidget(_PanelSlot old) {
+    super.didUpdateWidget(old);
+    if (widget.open != old.open) {
+      if (widget.open) {
+        _c.forward();
+      } else {
+        _c.reverse();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.open && _c.isDismissed) return const SizedBox.shrink();
+    const w = VellinLayout.peerPanel;
+
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        final t = VellinMotion.standard.transform(_c.value);
+        return SizedBox(
+          // Наезжающая панель ширину не меняет — она въезжает целиком;
+          // раздвигающая открывает ленте ровно столько, сколько заняла.
+          width: widget.floating ? w : w * t,
+          child: ClipRect(
+            child: OverflowBox(
+              alignment: Alignment.centerLeft,
+              minWidth: w,
+              maxWidth: w,
+              child: Opacity(
+                opacity: t,
+                child: Transform.translate(
+                  offset: Offset(w * (1 - t) * (widget.floating ? 1 : 0.3), 0),
+                  child: child,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+      child: widget.floating
+          ? DecoratedBox(
+              decoration: const BoxDecoration(
+                boxShadow: [BoxShadow(color: Color(0x66000000), blurRadius: 28, offset: Offset(-10, 0))],
+              ),
+              child: widget.child,
+            )
+          : widget.child,
+    );
+  }
+}
+
 /// Шапка чата: аватар, имя, живая строка состояния и кнопки звонка.
 class _ChatHeader extends StatelessWidget {
-  final DmController dm;
+  /// Собеседник этой переписки. Не берётся из контроллера напрямую: пока
+  /// прежний диалог уезжает, шапка обязана держать прежнего человека.
+  final PublicUser? peer;
+  final String? peerUserId;
+
+  /// Что собеседник делает прямо сейчас: null — ничего.
+  final String? activity;
+
   final VoidCallback onOpenProfile;
 
-  const _ChatHeader({required this.dm, required this.onOpenProfile});
+  /// Открыта ли боковая панель собеседника — кнопка показывает это золотом.
+  final bool panelOpen;
+  final VoidCallback onTogglePanel;
+
+  const _ChatHeader({
+    required this.peer,
+    required this.peerUserId,
+    required this.activity,
+    required this.onOpenProfile,
+    required this.panelOpen,
+    required this.onTogglePanel,
+  });
 
   @override
   Widget build(BuildContext context) {
     final presence = context.watch<PresenceController>();
     final call = context.watch<CallController>();
-    final peer = dm.activePeer;
-    final peerId = dm.activePeerUserId;
+    final peerId = peerUserId;
     final info = peerId != null ? presence.of(peerId) : null;
     final state = presenceFromStatus(info?.status);
     final busy = call.call != null;
@@ -768,7 +974,7 @@ class _ChatHeader extends StatelessWidget {
                       Text(peer?.username ?? '', style: VellinType.chatName),
                       const SizedBox(height: 2),
                       _StatusLine(
-                        activity: dm.peerActivity,
+                        activity: activity,
                         presence: state,
                         lastSeenAt: info?.lastSeenAt,
                       ),
@@ -785,6 +991,15 @@ class _ChatHeader extends StatelessWidget {
             onPressed: busy || peerId == null ? null : () => call.invite(peerId, video: false),
             size: 34,
             radius: VellinRadius.button,
+          ),
+          const SizedBox(width: 8),
+          VellinIconButton(
+            glyph: VellinGlyphs.sidePanel,
+            onPressed: onTogglePanel,
+            size: 34,
+            radius: VellinRadius.button,
+            color: panelOpen ? VellinColors.accent : null,
+            tooltip: panelOpen ? 'Скрыть панель собеседника' : 'Показать панель собеседника',
           ),
         ],
       ),
@@ -1040,6 +1255,9 @@ class _InputField extends StatefulWidget {
   /// самолётика, вложений и голосового при правке нет.
   final bool editing;
   final VoidCallback onSubmit;
+
+  /// Ctrl+V — проверить буфер на фото. Текст вставляется как обычно.
+  final VoidCallback onPaste;
   final VoidCallback onAttach;
   final VoidCallback onVoice;
 
@@ -1048,6 +1266,7 @@ class _InputField extends StatefulWidget {
     required this.focusNode,
     this.editing = false,
     required this.onSubmit,
+    required this.onPaste,
     required this.onAttach,
     required this.onVoice,
   });
@@ -1113,6 +1332,10 @@ class _InputFieldState extends State<_InputField> {
               skipTraversal: true,
               onKeyEvent: (node, event) {
                 if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                if (event.logicalKey == LogicalKeyboardKey.keyV && HardwareKeyboard.instance.isControlPressed) {
+                  widget.onPaste();
+                  return KeyEventResult.ignored;
+                }
                 final enter = event.logicalKey == LogicalKeyboardKey.enter ||
                     event.logicalKey == LogicalKeyboardKey.numpadEnter;
                 if (!enter) return KeyEventResult.ignored;

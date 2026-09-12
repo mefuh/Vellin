@@ -13,6 +13,7 @@ class AppSettings extends ChangeNotifier {
   static const _kRingtone = 'vellin_ringtone_enabled';
   static const _kReduceMotion = 'vellin_reduce_motion';
   static const _kTextScale = 'vellin_text_scale';
+  static const _kPeerPanel = 'vellin_peer_panel_open';
 
   bool _toasts = true;
   bool _toastPreview = true;
@@ -20,6 +21,7 @@ class AppSettings extends ChangeNotifier {
   bool _ringtone = true;
   bool _reduceMotion = false;
   double _textScale = 1;
+  bool _peerPanel = true;
 
   /// Показывать всплывающие уведомления, когда окно не в фокусе.
   bool get toasts => _toasts;
@@ -39,6 +41,10 @@ class AppSettings extends ChangeNotifier {
   /// Масштаб текста: 0.9 · 1.0 · 1.1.
   double get textScale => _textScale;
 
+  /// Боковая панель собеседника в чате. Новому человеку она открыта — закроет
+  /// сам, и тогда выбор сохранится.
+  bool get peerPanelOpen => _peerPanel;
+
   Future<void> load() async {
     try {
       final p = await openPrefs();
@@ -48,6 +54,7 @@ class AppSettings extends ChangeNotifier {
       _ringtone = p.getBool(_kRingtone) ?? true;
       _reduceMotion = p.getBool(_kReduceMotion) ?? false;
       _textScale = p.getDouble(_kTextScale) ?? 1;
+      _peerPanel = p.getBool(_kPeerPanel) ?? true;
     } catch (_) {
       // Настройки не прочитались — работаем на значениях по умолчанию.
     }
@@ -59,6 +66,7 @@ class AppSettings extends ChangeNotifier {
   Future<void> setToastPreview(bool v) => _setBool(_kToastPreview, v, () => _toastPreview = v);
   Future<void> setMessageSound(bool v) => _setBool(_kMessageSound, v, () => _messageSound = v);
   Future<void> setRingtone(bool v) => _setBool(_kRingtone, v, () => _ringtone = v);
+  Future<void> setPeerPanelOpen(bool v) => _setBool(_kPeerPanel, v, () => _peerPanel = v);
 
   Future<void> setReduceMotion(bool v) async {
     await _setBool(_kReduceMotion, v, () => _reduceMotion = v);

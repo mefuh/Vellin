@@ -165,6 +165,7 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         imageUrl?: string;
         imageWidth?: number;
         imageHeight?: number;
+        images?: unknown;
         voiceUrl?: string;
         voiceDurationSec?: number;
         voicePeaks?: number[];
@@ -195,14 +196,24 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         typeof m.nonce === 'string' &&
         m.body.length <= MAX_DM_BODY
       ) {
-        const image =
-          typeof m.imageUrl === 'string'
-            ? {
-                url: m.imageUrl,
-                width: typeof m.imageWidth === 'number' ? m.imageWidth : 0,
-                height: typeof m.imageHeight === 'number' ? m.imageHeight : 0,
-              }
-            : undefined;
+        // Альбом приходит списком, одиночный снимок — старыми полями.
+        const images = Array.isArray(m.images)
+          ? m.images
+              .filter((i): i is { url: string; width?: unknown; height?: unknown } => !!i && typeof i.url === 'string')
+              .map((i) => ({
+                url: i.url,
+                width: typeof i.width === 'number' ? i.width : 0,
+                height: typeof i.height === 'number' ? i.height : 0,
+              }))
+          : typeof m.imageUrl === 'string'
+            ? [
+                {
+                  url: m.imageUrl,
+                  width: typeof m.imageWidth === 'number' ? m.imageWidth : 0,
+                  height: typeof m.imageHeight === 'number' ? m.imageHeight : 0,
+                },
+              ]
+            : [];
         const voice =
           typeof m.voiceUrl === 'string'
             ? {
@@ -224,7 +235,7 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
           m.toUserId,
           m.body,
           m.nonce,
-          image,
+          images,
           voice,
           video,
           typeof m.replyToId === 'string' ? m.replyToId : undefined,

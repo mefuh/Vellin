@@ -19,6 +19,7 @@ import type {
   RoomPermissions,
   RoomRole,
   DmConversation,
+  DmMediaItem,
   DirectMessageDTO,
   DmEligibility,
   PublicUser,
@@ -320,6 +321,23 @@ export interface ConversationThreadResponse {
   eligibility: DmEligibility;
   /** Закреплённое в диалоге сообщение. Null — ничего не закреплено. */
   pinned: DirectMessageDTO | null;
+  /** Уведомления диалога выключены мной. */
+  muted: boolean;
+}
+
+/** Страница витрины вложений диалога: снимки от новых к старым. */
+export interface ListDmMediaResponse {
+  items: DmMediaItem[];
+  /** Есть снимки старше последнего в выдаче. */
+  hasMore: boolean;
+}
+
+/** Переключение уведомлений одного диалога. */
+export interface SetDmMutedRequest {
+  muted: boolean;
+}
+export interface SetDmMutedResponse {
+  muted: boolean;
 }
 
 /** Ответ на загрузку изображения для ЛС (multipart). */

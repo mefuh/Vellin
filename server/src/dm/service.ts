@@ -2,14 +2,17 @@ import type { Conversation, DirectMessage, Room } from '@prisma/client';
 import type {
   CallHistoryEntry,
   DirectMessageDTO,
+  DirectMessageImage,
   DirectMessageKind,
   DirectMessageReactionDTO,
   DirectMessageReplyRef,
   DmConversation,
   DmEligibility,
+  DmMediaItem,
   Gender,
   PublicUser,
 } from '@vellin/shared';
+import { DM_MAX_IMAGES } from '@vellin/shared';
 import { prisma } from '../db/prisma.js';
 import { canSee, parsePrivacy } from '../privacy/privacy.js';
 import { PUBLIC_USER_SELECT, toPublicUser } from '../friends/mappers.js';
@@ -54,6 +57,20 @@ function parseVoicePeaks(json: string | null): number[] | undefined {
   }
 }
 
+/** Альбом из базы с абсолютными ссылками. Битый JSON — как будто альбома нет. */
+function parseImages(json: string | null): DirectMessageImage[] {
+  if (!json) return [];
+  try {
+    const v = JSON.parse(json) as unknown;
+    if (!Array.isArray(v)) return [];
+    return v
+      .filter((x): x is DirectMessageImage => !!x && typeof (x as DirectMessageImage).url === 'string')
+      .map((x) => ({ url: absoluteUrl(x.url), width: Number(x.width) || 0, height: Number(x.height) || 0 }));
+  } catch {
+    return [];
+  }
+}
+
 export function dmRowToDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
   return {
     id: m.id,
@@ -75,6 +92,10 @@ export function dmRowToDto(m: DirectMessage, nonce?: string): DirectMessageDTO {
           imageUrl: absoluteUrl(m.imageUrl),
           ...(m.imageWidth != null ? { imageWidth: m.imageWidth } : {}),
           ...(m.imageHeight != null ? { imageHeight: m.imageHeight } : {}),
+          ...(() => {
+            const images = parseImages(m.imagesJson);
+            return images.length > 1 ? { images } : {};
+          })(),
         }
       : {}),
     ...(m.voiceUrl
@@ -317,15 +338,19 @@ export async function sendMessage(
   meId: string,
   peerId: string,
   rawBody: string,
-  image?: SendImage,
+  images: SendImage[] = [],
   voice?: SendVoice,
   video?: SendVideoNote,
   replyToId?: string,
 ): Promise<SendResult> {
   const body = rawBody.trim();
+  const image = images[0];
   if (!body && !image && !voice && !video) throw new DmError('ok', 'Пустое сообщение');
   if (body.length > MAX_DM_BODY) throw new DmError('ok', 'Сообщение слишком длинное');
-  if (image && !isDmImageUrl(image.url)) throw new DmError('ok', 'Некорректное изображение');
+  if (images.length > DM_MAX_IMAGES) {
+    throw new DmError('ok', `В одном сообщении не больше ${DM_MAX_IMAGES} фотографий`);
+  }
+  if (images.some((i) => !isDmImageUrl(i.url))) throw new DmError('ok', 'Некорректное изображение');
   if (voice && !isDmVoiceUrl(voice.url)) throw new DmError('ok', 'Некорректное голосовое');
 
   const peer = await loadPeerOrThrow(peerId);
@@ -354,6 +379,13 @@ export async function sendMessage(
       ...(replyTo ? { replyToId: replyTo.id } : {}),
       ...(image
         ? { imageUrl: image.url, imageWidth: Math.round(image.width), imageHeight: Math.round(image.height) }
+        : {}),
+      ...(images.length > 1
+        ? {
+            imagesJson: JSON.stringify(
+              images.map((i) => ({ url: i.url, width: Math.round(i.width), height: Math.round(i.height) })),
+            ),
+          }
         : {}),
       ...(voice
         ? {
@@ -793,6 +825,7 @@ export async function listConversations(
       peerLastReadAt: peerRead ? peerRead.toISOString() : null,
       online: showOnline && userHub.isOnline(other.id),
       lastMessageAt: c.lastMessageAt.toISOString(),
+      muted: meIsA ? c.aMuted : c.bMuted,
     });
   }
   return { conversations, unreadTotal: total };
@@ -809,6 +842,7 @@ export interface ThreadResult {
   peerGender: Gender | null;
   eligibility: DmEligibility;
   pinned: DirectMessageDTO | null;
+  muted: boolean;
 }
 
 /**
@@ -863,6 +897,7 @@ export async function getThreadByPublicId(
       peerGender,
       eligibility,
       pinned: null,
+      muted: false,
     };
   }
 
@@ -897,7 +932,100 @@ export async function getThreadByPublicId(
     peerGender,
     eligibility,
     pinned: pinnedRow ? await toDto(pinnedRow) : null,
+    muted: conv.userAId === meId ? conv.aMuted : conv.bMuted,
   };
+}
+
+/** Сколько сообщений со снимками просматриваем за одну страницу витрины. */
+const MEDIA_PAGE = 30;
+
+/**
+ * Витрина вложений диалога: снимки от новых к старым.
+ *
+ * Страница считается по сообщениям, а не по снимкам: альбом — это одно
+ * сообщение, и разрывать его между страницами незачем. Скрытые у себя
+ * сообщения в витрину не попадают, как и в ленту.
+ */
+export async function listConversationMedia(
+  meId: string,
+  publicId: string,
+  before?: string,
+): Promise<{ items: DmMediaItem[]; hasMore: boolean }> {
+  const u = await prisma.user.findUnique({ where: { publicId }, select: { id: true } });
+  if (!u) return { items: [], hasMore: false };
+  const { aId, bId } = pair(meId, u.id);
+  const conv = await prisma.conversation.findUnique({
+    where: { userAId_userBId: { userAId: aId, userBId: bId } },
+    select: { id: true },
+  });
+  if (!conv) return { items: [], hasMore: false };
+
+  const beforeDate = before ? new Date(before) : null;
+  const rows = await prisma.directMessage.findMany({
+    where: {
+      conversationId: conv.id,
+      imageUrl: { not: null },
+      ...visibleTo(meId),
+      ...(beforeDate && !Number.isNaN(beforeDate.getTime()) ? { createdAt: { lt: beforeDate } } : {}),
+    },
+    orderBy: { createdAt: 'desc' },
+    take: MEDIA_PAGE + 1,
+  });
+
+  const hasMore = rows.length > MEDIA_PAGE;
+  const items: DmMediaItem[] = [];
+  for (const m of rows.slice(0, MEDIA_PAGE)) {
+    const album = parseImages(m.imagesJson);
+    const shots = album.length
+      ? album
+      : [{ url: absoluteUrl(m.imageUrl!), width: m.imageWidth ?? 0, height: m.imageHeight ?? 0 }];
+    for (const s of shots) {
+      items.push({
+        messageId: m.id,
+        url: s.url,
+        width: s.width,
+        height: s.height,
+        senderId: m.senderId,
+        createdAt: m.createdAt.toISOString(),
+      });
+    }
+  }
+  return { items, hasMore };
+}
+
+/** Выключены ли у этого человека уведомления данного диалога. */
+export async function isConversationMuted(conversationId: string, userId: string): Promise<boolean> {
+  const conv = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { userAId: true, aMuted: true, bMuted: true },
+  });
+  if (!conv) return false;
+  return conv.userAId === userId ? conv.aMuted : conv.bMuted;
+}
+
+/**
+ * Включить или выключить уведомления диалога с этим человеком.
+ * Возвращает новое состояние, null — такого пользователя нет.
+ *
+ * Диалог заводится, даже если переписки ещё не было: пустая болванка в списке
+ * не показывается, зато выбор переживёт первое сообщение.
+ */
+export async function setConversationMuted(
+  meId: string,
+  publicId: string,
+  muted: boolean,
+): Promise<boolean | null> {
+  const u = await prisma.user.findUnique({ where: { publicId }, select: { id: true } });
+  if (!u || u.id === meId) return null;
+  const { aId, bId } = pair(meId, u.id);
+  const mine = aId === meId ? { aMuted: muted } : { bMuted: muted };
+  const conv = await prisma.conversation.upsert({
+    where: { userAId_userBId: { userAId: aId, userBId: bId } },
+    create: { userAId: aId, userBId: bId, ...mine },
+    update: mine,
+    select: { userAId: true, aMuted: true, bMuted: true },
+  });
+  return conv.userAId === meId ? conv.aMuted : conv.bMuted;
 }
 
 /** Сколько записей о звонках отдаём за раз. */
@@ -1154,6 +1282,7 @@ export async function forwardMessages(
           imageUrl: r.imageUrl,
           imageWidth: r.imageWidth,
           imageHeight: r.imageHeight,
+          imagesJson: r.imagesJson,
           voiceUrl: r.voiceUrl,
           voiceDurationSec: r.voiceDurationSec,
           voicePeaksJson: r.voicePeaksJson,

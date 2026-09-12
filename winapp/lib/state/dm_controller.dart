@@ -40,6 +40,10 @@ class DmController extends ChangeNotifier {
   /// Закреплённое в активном диалоге сообщение.
   DirectMessage? pinned;
 
+  /// Уведомления активного диалога выключены. Доставка не меняется: молчат
+  /// колокольчик, звук и всплывающее окно.
+  bool peerMuted = false;
+
   /// На что отвечаем из поля ввода. Взаимоисключимо с [editing].
   DirectMessage? replyTarget;
 
@@ -133,6 +137,7 @@ class DmController extends ChangeNotifier {
       activeHasMore = t.hasMore;
       peerLastReadAt = t.peerLastReadAt;
       pinned = t.pinned;
+      peerMuted = t.muted;
       threadLoading = false;
       notifyListeners();
       // Отметить прочитанным (если диалог уже существует).
@@ -158,6 +163,7 @@ class DmController extends ChangeNotifier {
     activeMessages = [];
     activeHasMore = false;
     peerLastReadAt = null;
+    peerMuted = false;
     _resetMessageActions();
     notifyListeners();
   }
@@ -248,42 +254,91 @@ class DmController extends ChangeNotifier {
 
   bool sendingImage = false;
 
-  /// Отправить изображение активному собеседнику: загрузить (REST) → отправить
-  /// (WS dm_send с imageUrl). Необязательная подпись — в body.
-  Future<void> sendImage(String filePath, {String caption = ''}) async {
-    if (_activePeerUserId == null) return;
+  /// Больше снимков в одном сообщении не отправить (shared: DM_MAX_IMAGES).
+  static const maxImages = 10;
+
+  /// Отправить снимки одним сообщением — один или альбом до [maxImages].
+  ///
+  /// Сообщение встаёт в ленту сразу, с превью файлов с диска, и только потом
+  /// снимки загружаются — по нескольку параллельно. Не загрузившиеся из альбома
+  /// выпадают; не загрузился ни один — сообщение убирается, а ошибка уходит
+  /// вызывающему. Необязательная подпись — в body.
+  Future<void> sendImages(List<String> filePaths, {String caption = ''}) async {
+    final peerId = _activePeerUserId;
+    if (peerId == null || filePaths.isEmpty) return;
+    final paths = filePaths.take(maxImages).toList();
+    final nonce = 'n${DateTime.now().millisecondsSinceEpoch}_${_nonceSeq++}';
+    final reply = _takeReply();
+    final body = caption.trim();
+
+    activeMessages.add(DirectMessage(
+      id: nonce,
+      conversationId: _activeConversationId ?? '',
+      senderId: _myUserId,
+      body: body,
+      createdAt: DateTime.now().toIso8601String(),
+      imageUrl: '',
+      images: [for (final p in paths) DmImage(url: '', localPath: p)],
+      replyTo: reply == null ? null : DmReplyRef.of(reply),
+      nonce: nonce,
+      pending: true,
+    ));
     sendingImage = true;
     notifyListeners();
+
+    final uploaded = List<({String url, int width, int height})?>.filled(paths.length, null);
+    Object? lastError;
     try {
-      final img = await _api.uploadImage(filePath);
-      final nonce = 'n${DateTime.now().millisecondsSinceEpoch}_${_nonceSeq++}';
-      final reply = _takeReply();
-      activeMessages.add(DirectMessage(
-        id: nonce,
-        conversationId: _activeConversationId ?? '',
-        senderId: _myUserId,
-        body: caption.trim(),
-        createdAt: DateTime.now().toIso8601String(),
-        imageUrl: img.url,
-        imageWidth: img.width,
-        imageHeight: img.height,
-        replyTo: reply == null ? null : DmReplyRef.of(reply),
-        nonce: nonce,
-        pending: true,
-      ));
-      _socket.send({
-        't': 'dm_send',
-        'toUserId': _activePeerUserId,
-        'body': caption.trim(),
-        'nonce': nonce,
-        'imageUrl': img.url,
-        'imageWidth': img.width,
-        'imageHeight': img.height,
-        'replyToId': ?reply?.id,
-      });
+      // По три за раз: десять снимков разом забивают канал, и первый
+      // доходит не раньше последнего.
+      var next = 0;
+      Future<void> worker() async {
+        while (next < paths.length) {
+          final i = next++;
+          try {
+            uploaded[i] = await _api.uploadImage(paths[i]);
+          } catch (e) {
+            lastError = e;
+          }
+        }
+      }
+
+      await Future.wait([for (var w = 0; w < 3; w++) worker()]);
     } finally {
       sendingImage = false;
+    }
+
+    final ok = <(int, ({String url, int width, int height}))>[
+      for (var i = 0; i < paths.length; i++)
+        if (uploaded[i] != null) (i, uploaded[i]!),
+    ];
+    final idx = activeMessages.indexWhere((m) => m.nonce == nonce);
+    if (ok.isEmpty) {
+      if (idx >= 0) activeMessages.removeAt(idx);
       notifyListeners();
+      throw lastError ?? StateError('upload failed');
+    }
+    if (idx >= 0) {
+      activeMessages[idx] = activeMessages[idx].copyWith(
+        images: [
+          for (final (i, img) in ok) DmImage(url: img.url, width: img.width, height: img.height, localPath: paths[i]),
+        ],
+      );
+    }
+    notifyListeners();
+
+    _socket.send({
+      't': 'dm_send',
+      'toUserId': peerId,
+      'body': body,
+      'nonce': nonce,
+      'images': [
+        for (final (_, img) in ok) {'url': img.url, 'width': img.width, 'height': img.height},
+      ],
+      'replyToId': ?reply?.id,
+    });
+    if (ok.length < paths.length) {
+      _errors.add('Не все фото загрузились: отправлено ${ok.length} из ${paths.length}');
     }
   }
 
@@ -734,7 +789,7 @@ class DmController extends ChangeNotifier {
     final isActive = _activeConversationId != null && m.conversationId == _activeConversationId;
     // Звук новой реплики — только чужой и только когда окно не в фокусе: при
     // открытом окне человек и так видит, что пришло.
-    if (m.senderId != _myUserId) _chimeIfAway();
+    if (m.senderId != _myUserId && !_mutedConversation(m.conversationId)) _chimeIfAway();
     // Первый ответ создаёт диалог — привяжем conversationId к активному треду,
     // если сообщение от текущего собеседника, а треда ещё не было.
     if (_activeConversationId == null && (m.senderId == _activePeerUserId || (m.nonce != null && m.senderId == _myUserId))) {
@@ -746,7 +801,7 @@ class DmController extends ChangeNotifier {
       // Эхо своей оптимистичной отправки — заменяем pending по nonce.
       final idx = m.nonce != null ? activeMessages.indexWhere((x) => x.nonce == m.nonce) : -1;
       if (idx >= 0) {
-        activeMessages[idx] = m;
+        activeMessages[idx] = _keepLocalImages(activeMessages[idx], m);
       } else if (activeMessages.every((x) => x.id != m.id)) {
         activeMessages.add(m);
       }
@@ -758,6 +813,17 @@ class DmController extends ChangeNotifier {
     }
     // Обновляем список диалогов (превью/порядок/непрочитанные) из источника истины.
     loadConversations();
+  }
+
+  /// Эхо своего альбома: снимки те же, что уже на экране с диска. Пути к
+  /// файлам переносим, чтобы кадры не мигнули, перезагружаясь по сети.
+  DirectMessage _keepLocalImages(DirectMessage pending, DirectMessage echo) {
+    if (pending.images.isEmpty || echo.images.length != pending.images.length) return echo;
+    return echo.copyWith(
+      images: [
+        for (var i = 0; i < echo.images.length; i++) echo.images[i].withLocal(pending.images[i].localPath),
+      ],
+    );
   }
 
   /// Настройки уведомлений задаются в оболочке; контроллер о них знает через
@@ -774,20 +840,38 @@ class DmController extends ChangeNotifier {
     CallTones.instance.playMessage();
   }
 
+  /// Диалог с выключенными уведомлениями: звука по нему не даём. Колокольчик
+  /// и всплывающее окно гасит сервер — выбор хранится у него.
+  bool _mutedConversation(String conversationId) =>
+      conversations.any((c) => c.id == conversationId && c.muted);
+
+  /// Включить или выключить уведомления активного диалога. Переключатель
+  /// встаёт сразу, а не по ответу сервера; не вышло — возвращается обратно.
+  Future<void> setMuted(bool muted) async {
+    final publicId = activePeerPublicId;
+    if (publicId == null) return;
+    final before = peerMuted;
+    _applyMuted(publicId, muted);
+    try {
+      final now = await _api.setMuted(publicId, muted);
+      if (now != peerMuted) _applyMuted(publicId, now);
+    } catch (_) {
+      _applyMuted(publicId, before);
+      _errors.add('Не удалось изменить уведомления диалога');
+    }
+  }
+
+  void _applyMuted(String publicId, bool muted) {
+    peerMuted = muted;
+    conversations = conversations
+        .map((c) => c.peer.publicId == publicId ? c.copyWith(muted: muted) : c)
+        .toList();
+    notifyListeners();
+  }
+
   void _clearUnread(String publicId) {
     conversations = conversations
-        .map((c) => c.peer.publicId == publicId && c.unreadCount > 0
-            ? DmConversation(
-                id: c.id,
-                peer: c.peer,
-                lastBody: c.lastBody,
-                lastKind: c.lastKind,
-                lastSenderId: c.lastSenderId,
-                unreadCount: 0,
-                online: c.online,
-                lastMessageAt: c.lastMessageAt,
-              )
-            : c)
+        .map((c) => c.peer.publicId == publicId && c.unreadCount > 0 ? c.copyWith(unreadCount: 0) : c)
         .toList();
     unreadTotal = conversations.fold(0, (s, c) => s + c.unreadCount);
     notifyListeners();

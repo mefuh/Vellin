@@ -437,6 +437,10 @@ model Conversation {
   /// Закреплённое сообщение — общее для обоих участников. Null — ничего не закреплено.
   /// Без внешнего ключа: при удалении сообщения поле чистится явно, вместе с рассылкой.
   pinnedMessageId String?
+  /// Сторона A / сторона B выключила уведомления этого диалога. Сама доставка
+  /// не меняется: гаснут только колокольчик, звук и всплывающее окно.
+  aMuted          Boolean  @default(false)
+  bMuted          Boolean  @default(false)
 
   messages DirectMessage[]
 
@@ -457,6 +461,10 @@ model DirectMessage {
   imageUrl       String?
   imageWidth     Int?
   imageHeight    Int?
+  /// Альбом: JSON-массив {url, width, height} до 10 снимков. Первый снимок
+  /// дублируется в imageUrl/imageWidth/imageHeight — по нему работают превью
+  /// в списке диалогов и клиенты, которые альбомов не знают. Null — один снимок.
+  imagesJson     String?
   /// Голосовое сообщение (/api/uploads/dm-voice/...). Null — не голосовое.
   voiceUrl       String?
   /// Длительность голосового в секундах.

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/widgets.dart';
 
 import '../../app_config.dart';
@@ -259,16 +261,21 @@ class MessageRow extends StatelessWidget {
       return _withHeader(RoomInviteCard(messageId: message.id, mine: mine), maxWidth: 300);
     }
 
-    if (message.imageUrl != null) {
-      final url = AppConfig.mediaUrl(message.imageUrl);
+    if (message.images.isNotEmpty) {
+      final album = message.images.length > 1;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ..._header(maxWidth: 232),
+          ..._header(maxWidth: album ? _albumWidth : 232),
           _ImageBubble(
-            url: url,
+            images: message.images,
             mine: mine,
-            onTap: url == null ? null : () => onImageTap?.call(url),
+            uploading: message.pending,
+            onTap: (i) {
+              final url = AppConfig.mediaUrl(message.images[i].url);
+              // Пока снимок грузится, ссылки у него нет — открывать нечего.
+              if (url != null && message.images[i].url.isNotEmpty) onImageTap?.call(url);
+            },
             meta: message.body.isEmpty
                 ? _Meta(
                     time: _time(message.createdAt),
@@ -278,11 +285,15 @@ class MessageRow extends StatelessWidget {
                     edited: message.editedAt != null,
                   )
                 : null,
+            // Подпись — часть того же сообщения: живёт в рамке под снимками,
+            // а не отдельным пузырём, который читается как новая реплика.
+            caption: message.body.isEmpty
+                ? null
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(9, 7, 9, 5),
+                    child: _textWithMeta(read, fill: true),
+                  ),
           ),
-          if (message.body.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            _Bubble(mine: mine, child: _textWithMeta(read)),
-          ],
         ],
       );
     }
@@ -292,30 +303,38 @@ class MessageRow extends StatelessWidget {
       mine: mine,
       child: header.isEmpty
           ? _textWithMeta(read)
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [...header, _textWithMeta(read)],
+          // Цитата или «переслано» бывают шире текста: пузырь по ширине самого
+          // широкого, а строка текста растягивается до неё — метка встаёт у
+          // правого края пузыря, а не сразу за коротким текстом.
+          : IntrinsicWidth(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [...header, _textWithMeta(read, fill: true)],
+              ),
             ),
     );
   }
 
   /// Текст с меткой времени в одной строке: короткая реплика и метка встают
   /// рядом, длинная переносится, и метка садится в конец последней строки.
-  Widget _textWithMeta(bool read) {
+  ///
+  /// [fill] — строка занимает всю ширину пузыря, и метка прижата к его правому
+  /// краю. Нужно, когда пузырь шире текста: подпись под снимками, текст под
+  /// цитатой.
+  Widget _textWithMeta(bool read, {bool fill = false}) {
+    // Правка текста меняет размер пузыря плавно, а не скачком.
+    final text = AnimatedSize(
+      duration: VellinMotion.hover,
+      curve: VellinMotion.standard,
+      alignment: Alignment.topLeft,
+      child: _text(message.body),
+    );
     return Row(
-      mainAxisSize: MainAxisSize.min,
+      mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        // Правка текста меняет размер пузыря плавно, а не скачком.
-        Flexible(
-          child: AnimatedSize(
-            duration: VellinMotion.hover,
-            curve: VellinMotion.standard,
-            alignment: Alignment.topLeft,
-            child: _text(message.body),
-          ),
-        ),
+        if (fill) Expanded(child: Align(alignment: Alignment.bottomLeft, child: text)) else Flexible(child: text),
         const SizedBox(width: 9),
         Padding(
           // Метка стоит на базовой линии последней строки, а не по её верху.
@@ -375,91 +394,276 @@ class _Bubble extends StatelessWidget {
   }
 }
 
-/// Изображение: рамка баббла, кадр 232×150, курсор увеличения.
-class _ImageBubble extends StatefulWidget {
-  final String? url;
-  final bool mine;
-  final VoidCallback? onTap;
+/// Ширина альбома в ленте. Одиночный снимок остаётся прежним — 232.
+const double _albumWidth = 312;
 
-  /// Время и галочки — капсулой поверх правого нижнего угла кадра.
+/// Раскладка альбома по рядам: сколько снимков в каждом. Рядов не больше
+/// трёх в ширину — мельче кадры уже не читаются.
+List<int> _albumRows(int n) => switch (n) {
+      1 => [1],
+      2 => [2],
+      3 => [1, 2],
+      4 => [2, 2],
+      5 => [2, 3],
+      6 => [3, 3],
+      7 => [1, 3, 3],
+      8 => [2, 3, 3],
+      9 => [3, 3, 3],
+      _ => [1, 3, 3, 3],
+    };
+
+/// Высота ряда по числу кадров в нём: одиночный — крупный, тройка — ниже.
+double _rowHeight(int inRow) => switch (inRow) {
+      1 => 176,
+      2 => 132,
+      _ => 100,
+    };
+
+/// Снимок или альбом: рамка баббла, кадры с курсором увеличения.
+class _ImageBubble extends StatelessWidget {
+  final List<DmImage> images;
+  final bool mine;
+
+  /// Сообщение ещё отправляется — кадры под дышащей вуалью.
+  final bool uploading;
+  final void Function(int index) onTap;
+
+  /// Время и галочки — капсулой поверх правого нижнего угла.
   final Widget? meta;
 
-  const _ImageBubble({required this.url, required this.mine, this.onTap, this.meta});
+  /// Подпись под снимками в той же рамке (с её временем и галочками).
+  final Widget? caption;
+
+  const _ImageBubble({
+    required this.images,
+    required this.mine,
+    required this.uploading,
+    required this.onTap,
+    this.meta,
+    this.caption,
+  });
+
+  static const _gap = 2.0;
 
   @override
-  State<_ImageBubble> createState() => _ImageBubbleState();
+  Widget build(BuildContext context) {
+    final album = images.length > 1;
+    final width = album ? _albumWidth : 232.0;
+    final rows = _albumRows(images.length);
+
+    var index = 0;
+    final rowWidgets = <Widget>[];
+    for (var r = 0; r < rows.length; r++) {
+      final count = rows[r];
+      final height = album ? _rowHeight(count) : 150.0;
+      final cells = <Widget>[];
+      for (var c = 0; c < count; c++) {
+        final i = index++;
+        if (c > 0) cells.add(const SizedBox(width: _gap));
+        cells.add(
+          Expanded(
+            child: _AlbumTile(
+              image: images[i],
+              height: height,
+              order: i,
+              uploading: uploading,
+              onTap: () => onTap(i),
+            ),
+          ),
+        );
+      }
+      if (r > 0) rowWidgets.add(const SizedBox(height: _gap));
+      rowWidgets.add(Row(children: cells));
+    }
+
+    return Container(
+      width: width,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: mine ? VellinColors.accentWash : VellinColors.bubble,
+        borderRadius: VellinRadius.bubble,
+        border: Border.all(color: mine ? VellinColors.accentLine : VellinColors.line06),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            // Под подписью нижние углы снимков мягче: кадр переходит в текст,
+            // а не заканчивает пузырь.
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(2),
+              topRight: const Radius.circular(10),
+              bottomLeft: Radius.circular(caption == null ? 10 : 6),
+              bottomRight: Radius.circular(caption == null ? 10 : 6),
+            ),
+            child: Stack(
+              children: [
+                Column(mainAxisSize: MainAxisSize.min, children: rowWidgets),
+                // У снимков без подписи метке негде встать в тексте — кладём
+                // её капсулой на последний кадр.
+                if (meta != null)
+                  Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xA6080706),
+                        borderRadius: BorderRadius.circular(VellinRadius.pill),
+                      ),
+                      child: meta,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          ?caption,
+        ],
+      ),
+    );
+  }
 }
 
-class _ImageBubbleState extends State<_ImageBubble> with SingleTickerProviderStateMixin {
+/// Кадр альбома. Приходит лесенкой за соседом, при наведении чуть
+/// приближается внутри рамки, пока грузится — под дышащей вуалью.
+class _AlbumTile extends StatefulWidget {
+  final DmImage image;
+  final double height;
+  final int order;
+  final bool uploading;
+  final VoidCallback onTap;
+
+  const _AlbumTile({
+    required this.image,
+    required this.height,
+    required this.order,
+    required this.uploading,
+    required this.onTap,
+  });
+
+  @override
+  State<_AlbumTile> createState() => _AlbumTileState();
+}
+
+class _AlbumTileState extends State<_AlbumTile> with TickerProviderStateMixin {
   late final AnimationController _in = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 480),
-  )..forward();
+  );
+
+  /// Дыхание вуали загрузки — скелет, а не крутящийся индикатор.
+  late final AnimationController _veil = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  );
+
+  bool _hover = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.delayed(VellinMotion.stagger * widget.order, () {
+      if (mounted) _in.forward();
+    });
+    if (widget.uploading) _veil.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(_AlbumTile old) {
+    super.didUpdateWidget(old);
+    if (widget.uploading && !_veil.isAnimating) _veil.repeat(reverse: true);
+    if (!widget.uploading && _veil.isAnimating) _veil.stop();
+  }
 
   @override
   void dispose() {
     _in.dispose();
+    _veil.dispose();
     super.dispose();
+  }
+
+  Widget _picture() {
+    final local = widget.image.localPath;
+    final placeholder = Container(height: widget.height, color: VellinColors.skeleton);
+    if (local != null) {
+      return Image.file(
+        File(local),
+        height: widget.height,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        errorBuilder: (_, _, _) => placeholder,
+      );
+    }
+    final url = AppConfig.mediaUrl(widget.image.url);
+    if (url == null || widget.image.url.isEmpty) return placeholder;
+    return Image.network(
+      url,
+      height: widget.height,
+      width: double.infinity,
+      fit: BoxFit.cover,
+      gaplessPlayback: true,
+      frameBuilder: (context, child, frame, sync) {
+        // Кадр проявляется, когда догрузился, а не выскакивает на скелете.
+        if (sync) return child;
+        return Stack(
+          fit: StackFit.passthrough,
+          children: [
+            placeholder,
+            AnimatedOpacity(
+              duration: VellinMotion.hover,
+              curve: VellinMotion.standard,
+              opacity: frame == null ? 0 : 1,
+              child: child,
+            ),
+          ],
+        );
+      },
+      errorBuilder: (_, _, _) => placeholder,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final curve = CurvedAnimation(parent: _in, curve: VellinMotion.standard);
-
     return FadeTransition(
       opacity: curve,
       child: AnimatedBuilder(
         animation: curve,
-        builder: (context, child) => Transform.translate(
-          offset: Offset(0, 6 * (1 - curve.value)),
-          child: Transform.scale(scale: 0.94 + 0.06 * curve.value, alignment: Alignment.topLeft, child: child),
-        ),
+        builder: (context, child) => Transform.scale(scale: 0.94 + 0.06 * curve.value, child: child),
         child: MouseRegion(
-          cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.zoomIn,
+          cursor: widget.uploading ? MouseCursor.defer : SystemMouseCursors.zoomIn,
+          onEnter: (_) => setState(() => _hover = true),
+          onExit: (_) => setState(() => _hover = false),
           child: GestureDetector(
-            onTap: widget.onTap,
-            child: Container(
-              width: 232,
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: widget.mine ? VellinColors.accentWash : VellinColors.bubble,
-                borderRadius: VellinRadius.bubble,
-                border: Border.all(color: widget.mine ? VellinColors.accentLine : VellinColors.line06),
-              ),
-              child: ClipRRect(
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(2),
-                  topRight: Radius.circular(10),
-                  bottomLeft: Radius.circular(10),
-                  bottomRight: Radius.circular(10),
-                ),
+            onTap: widget.uploading ? null : widget.onTap,
+            child: SizedBox(
+              height: widget.height,
+              child: ClipRect(
                 child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    if (widget.url == null)
-                      Container(height: 150, color: VellinColors.skeleton)
-                    else
-                      Image.network(
-                        widget.url!,
-                        height: 150,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => Container(height: 150, color: VellinColors.skeleton),
-                      ),
-                    // У снимка без подписи метке негде встать в тексте —
-                    // кладём её капсулой на сам кадр.
-                    if (widget.meta != null)
-                      Positioned(
-                        right: 6,
-                        bottom: 6,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xA6080706),
-                            borderRadius: BorderRadius.circular(VellinRadius.pill),
+                    AnimatedScale(
+                      duration: VellinMotion.state,
+                      curve: VellinMotion.standard,
+                      scale: _hover && !widget.uploading ? 1.04 : 1,
+                      child: _picture(),
+                    ),
+                    // Вуаль загрузки гаснет, когда сообщение ушло.
+                    IgnorePointer(
+                      child: AnimatedOpacity(
+                        duration: VellinMotion.state,
+                        curve: VellinMotion.standard,
+                        opacity: widget.uploading ? 1 : 0,
+                        child: AnimatedBuilder(
+                          animation: _veil,
+                          builder: (context, _) => ColoredBox(
+                            color: Color.fromRGBO(8, 7, 6, 0.30 + 0.22 * VellinMotion.breathe.transform(_veil.value)),
                           ),
-                          child: widget.meta,
                         ),
                       ),
+                    ),
                   ],
                 ),
               ),

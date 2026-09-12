@@ -3,6 +3,9 @@ import type {
   ConversationThreadResponse,
   ListCallHistoryResponse,
   ListConversationsResponse,
+  ListDmMediaResponse,
+  SetDmMutedRequest,
+  SetDmMutedResponse,
   RoomInviteInfoResponse,
   RoomInviteRespondRequest,
   RoomInviteRespondResponse,
@@ -16,8 +19,10 @@ import {
   getRoomInviteInfo,
   getThreadByPublicId,
   listCallHistory,
+  listConversationMedia,
   listConversations,
   respondRoomInvite,
+  setConversationMuted,
 } from './service.js';
 import { broadcastRoomInviteUpdate } from './realtime.js';
 import { ALLOWED_DM_IMAGE_MIME, MAX_DM_IMAGE_BYTES, processAndSaveDmImage } from './image.js';
@@ -65,6 +70,37 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
       if (!p) return;
       const thread = await getThreadByPublicId(p.userId, req.params.publicId, req.query.before);
       reply.send(thread satisfies ConversationThreadResponse);
+    },
+  );
+
+  // Витрина вложений диалога — для боковой панели собеседника.
+  app.get<{ Params: { publicId: string }; Querystring: { before?: string } }>(
+    '/dm/with/:publicId/media',
+    async (req, reply) => {
+      const p = requireUser(req, reply);
+      if (!p) return;
+      const page = await listConversationMedia(p.userId, req.params.publicId, req.query.before);
+      reply.send(page satisfies ListDmMediaResponse);
+    },
+  );
+
+  // Уведомления одного диалога. Доставку сообщений не трогает: молчат только
+  // колокольчик, звук и всплывающее окно.
+  app.post<{ Params: { publicId: string }; Body: SetDmMutedRequest }>(
+    '/dm/with/:publicId/mute',
+    async (req, reply) => {
+      const p = requireUser(req, reply);
+      if (!p) return;
+      if (typeof req.body?.muted !== 'boolean') {
+        deny(reply, 400, 'BadRequest', 'Некорректное значение');
+        return;
+      }
+      const muted = await setConversationMuted(p.userId, req.params.publicId, req.body.muted);
+      if (muted === null) {
+        deny(reply, 404, 'NotFound', 'Пользователь не найден');
+        return;
+      }
+      reply.send({ muted } satisfies SetDmMutedResponse);
     },
   );
 

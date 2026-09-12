@@ -765,6 +765,12 @@ export interface UserC2SDmSend {
   imageUrl?: string;
   imageWidth?: number;
   imageHeight?: number;
+  /**
+   * Альбом: заранее загруженные снимки (каждый через POST /dm/image), не больше
+   * `DM_MAX_IMAGES`. Если задан, поля `imageUrl`/`imageWidth`/`imageHeight`
+   * не нужны — сервер возьмёт первый снимок сам.
+   */
+  images?: { url: string; width: number; height: number }[];
   /** URL заранее загруженного голосового (через POST /dm/voice), либо отсутствует. */
   voiceUrl?: string;
   voiceDurationSec?: number;

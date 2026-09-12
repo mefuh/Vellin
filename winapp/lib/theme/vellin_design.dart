@@ -174,6 +174,10 @@ class VellinLayout {
   static const railButton = 44.0;
   static const panelWidth = 344.0;
   static const panelWidthNarrow = 300.0;
+
+  /// Боковая панель собеседника в чате. На узком окне она не ужимает ленту,
+  /// а ложится поверх неё — ширина остаётся прежней.
+  static const peerPanel = 300.0;
   static const settingsSidebar = 232.0;
   static const chatHeader = 60.0;
   static const settingsHeader = 56.0;

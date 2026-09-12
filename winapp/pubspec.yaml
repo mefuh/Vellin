@@ -73,6 +73,12 @@ dependencies:
   # Звонки один на один в личных сообщениях. Пакет несёт готовый libwebrtc.dll,
   # без загрузок и nuget на сборке — по тем же соображениям, что и media_kit.
   flutter_webrtc: ^1.5.2
+  # Картинки и файлы из буфера обмена Windows — стандартный буфер Flutter
+  # умеет только текст, а фото в сообщение вставляют по Ctrl+V.
+  pasteboard: ^0.5.0
+  # Перекодирование картинки из буфера: Windows отдаёт BMP, а сервер
+  # принимает JPEG, PNG и WebP.
+  image: ^4.9.2
 
 dev_dependencies:
   flutter_test:

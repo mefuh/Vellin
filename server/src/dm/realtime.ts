@@ -13,6 +13,7 @@ import {
   deleteMessages,
   editMessage,
   forwardMessages,
+  isConversationMuted,
   pinMessage,
   reactToMessage,
   markRead,
@@ -136,7 +137,7 @@ export async function handleDmSend(
   toUserId: string,
   body: string,
   nonce: string,
-  image?: SendImage,
+  images: SendImage[] = [],
   voice?: SendVoice,
   video?: SendVideoNote,
   replyToId?: string,
@@ -146,7 +147,7 @@ export async function handleDmSend(
     return;
   }
   try {
-    const res = await sendMessage(senderId, toUserId, body, image, voice, video, replyToId);
+    const res = await sendMessage(senderId, toUserId, body, images, voice, video, replyToId);
     // Видео: привязать сырой файл к сообщению и поставить в очередь транскода.
     if (video) {
       const ok = await promoteRawToMessage(video.uploadId, res.message.id, video.mirrored);
@@ -173,17 +174,21 @@ export async function handleDmSend(
     });
     const preview =
       body.trim() ||
-      (image ? '📷 Фото' : voice ? '🎤 Голосовое сообщение' : video ? '🎥 Видеосообщение' : '');
-    await pushDmNotification(toUserId, res.sender, res.conversationId, preview);
-    // Web-Push получателю — но НЕ если он прямо сейчас читает этот же диалог
-    // (видимая вкладка + открыт именно он). Прочее гейтится настройками внутри.
-    if (!userHub.isViewingConversation(toUserId, res.conversationId)) {
-      notifyAsync(toUserId, 'direct_message', {
-        username: res.sender.username,
-        publicId: res.sender.publicId,
-        message: dmPushPreview(body, !!image, !!voice, !!video),
-        conversationId: res.conversationId,
-      });
+      (images.length > 1 ? `📷 Фото (${images.length})` : images.length ? '📷 Фото' : voice ? '🎤 Голосовое сообщение' : video ? '🎥 Видеосообщение' : '');
+    // Диалог с выключенными уведомлениями: сообщение доставлено и в списке
+    // видно, но колокольчик, звук и всплывающее окно молчат.
+    if (!(await isConversationMuted(res.conversationId, toUserId))) {
+      await pushDmNotification(toUserId, res.sender, res.conversationId, preview);
+      // Web-Push получателю — но НЕ если он прямо сейчас читает этот же диалог
+      // (видимая вкладка + открыт именно он). Прочее гейтится настройками внутри.
+      if (!userHub.isViewingConversation(toUserId, res.conversationId)) {
+        notifyAsync(toUserId, 'direct_message', {
+          username: res.sender.username,
+          publicId: res.sender.publicId,
+          message: dmPushPreview(body, images.length > 0, !!voice, !!video),
+          conversationId: res.conversationId,
+        });
+      }
     }
   } catch (err) {
     if (err instanceof DmError) {
@@ -347,6 +352,7 @@ export async function handleDmForward(meId: string, toUserId: string, messageIds
     if (self) return;
     const preview =
       r.messages.length === 1 ? 'Пересланное сообщение' : `Пересланные сообщения: ${r.messages.length}`;
+    if (await isConversationMuted(r.conversationId, toUserId)) return;
     await pushDmNotification(toUserId, r.sender, r.conversationId, preview);
     if (!userHub.isViewingConversation(toUserId, r.conversationId)) {
       notifyAsync(toUserId, 'direct_message', {

@@ -299,6 +299,7 @@ class _NotificationTile extends StatelessWidget {
                   size: 24,
                   radius: 12,
                   glyphSize: 9,
+                  glyphBox: const Size(11, 11),
                   filled: false,
                   tooltip: 'Убрать уведомление',
                 ),

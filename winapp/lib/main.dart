@@ -31,6 +31,7 @@ import 'runtime/auth_window.dart';
 import 'runtime/toast_host.dart';
 import 'runtime/toast_window.dart';
 import 'runtime/updater_splash.dart';
+import 'runtime/window_placement.dart';
 import 'screens/settings/settings_layer.dart';
 import 'widgets/call_overlay.dart';
 import 'widgets/notifications_bell.dart';
@@ -200,15 +201,25 @@ class _VellinAppState extends State<VellinApp> {
     await windowManager.setMinimizable(true);
     await windowManager.setHasShadow(true);
     await windowManager.setMinimumSize(_appMinSize);
-    await windowManager.setSize(_appSize);
     await windowManager.setTitle('Vellin');
-    await windowManager.center();
+    // Где и каким окно было в прошлый раз: положение, размер, разворот или
+    // полный экран. Ничего не запомнено (первый запуск) или прежний монитор
+    // отключён — открываемся по умолчанию, посередине экрана.
+    if (!await WindowPlacement.instance.restore()) {
+      await windowManager.setSize(_appSize);
+      await windowManager.center();
+    }
+    WindowPlacement.instance.start();
   }
 
   /// Окно входа — того же семейства, что апдейтер: маленькое, без ресайза.
   /// Сюда же возвращаемся после выхода из аккаунта, поэтому снимаем всё, что
   /// включало окно приложения (разворот, изменение размера).
   Future<void> _enterAuthWindow() async {
+    // Окно входа намеренно маленькое и фиксированное: запоминать его размер
+    // нельзя, иначе после выхода из аккаунта он подменил бы окно приложения.
+    WindowPlacement.instance.stop();
+    if (await windowManager.isFullScreen()) await windowManager.setFullScreen(false);
     if (await windowManager.isMaximized()) await windowManager.unmaximize();
     await windowManager.setResizable(false);
     await windowManager.setMaximizable(false);

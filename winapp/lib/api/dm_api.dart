@@ -43,6 +43,25 @@ class DmApi {
     return ConversationThread.fromJson(j);
   }
 
+  /// Витрина вложений диалога: снимки от новых к старым (before — ISO для
+  /// подгрузки более старых).
+  Future<({List<DmMediaItem> items, bool hasMore})> media(String publicId, {String? before}) async {
+    final q = before != null ? '?before=${Uri.encodeQueryComponent(before)}' : '';
+    final j = await _c.get('/dm/with/$publicId/media$q') as Map<String, dynamic>;
+    return (
+      items: (j['items'] as List? ?? [])
+          .map((e) => DmMediaItem.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      hasMore: j['hasMore'] as bool? ?? false,
+    );
+  }
+
+  /// Включить или выключить уведомления диалога. Возвращает новое состояние.
+  Future<bool> setMuted(String publicId, bool muted) async {
+    final j = await _c.post('/dm/with/$publicId/mute', {'muted': muted}) as Map<String, dynamic>;
+    return j['muted'] as bool? ?? muted;
+  }
+
   /// Загрузить изображение для ЛС (multipart). Возвращает url + размеры для
   /// последующей отправки по WS (dm_send с imageUrl).
   Future<({String url, int width, int height})> uploadImage(String filePath) async {

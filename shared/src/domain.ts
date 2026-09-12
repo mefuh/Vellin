@@ -519,6 +519,16 @@ export interface DirectMessageReplyRef {
   body?: string;
 }
 
+/** Больше снимков в одном сообщении не отправить. */
+export const DM_MAX_IMAGES = 10;
+
+/** Снимок альбома. */
+export interface DirectMessageImage {
+  url: string;
+  width: number;
+  height: number;
+}
+
 /** Реакция одного участника на сообщение. */
 export interface DirectMessageReactionDTO {
   userId: string;
@@ -538,6 +548,11 @@ export interface DirectMessageDTO {
   /** Исходные размеры изображения — чтобы зарезервировать место без скачка вёрстки. */
   imageWidth?: number;
   imageHeight?: number;
+  /**
+   * Альбом: все снимки сообщения по порядку (2–10). Первый совпадает с
+   * `imageUrl`. Отсутствует — снимок один или его нет.
+   */
+  images?: DirectMessageImage[];
   /** URL голосового сообщения (`/api/uploads/dm-voice/...`), либо отсутствует. */
   voiceUrl?: string;
   /** Длительность голосового в секундах. */
@@ -638,6 +653,22 @@ export interface DmConversation {
   online: boolean;
   /** Время последнего сообщения (ISO) — для сортировки списка. */
   lastMessageAt: string;
+  /** Уведомления этого диалога выключены мной. Доставка сообщений не меняется. */
+  muted: boolean;
+}
+
+/**
+ * Снимок в «витрине» вложений диалога: одна картинка, а не сообщение —
+ * альбом из десяти фото даёт десять записей подряд.
+ */
+export interface DmMediaItem {
+  /** Сообщение, в котором пришёл снимок: по нему открывается место в ленте. */
+  messageId: string;
+  url: string;
+  width: number;
+  height: number;
+  senderId: string;
+  createdAt: string;
 }
 
 /**

@@ -166,6 +166,10 @@ class VellinIconButton extends StatelessWidget {
   final double size;
   final double radius;
   final double glyphSize;
+
+  /// Бокс, в котором заданы пути глифа. У большинства 18×18, но шеврон и
+  /// мелкий крестик нарисованы в своих — без этого они сжимаются в угол.
+  final Size glyphBox;
   final String? tooltip;
 
   /// Тон в покое: с фоном (кнопки строк) или без (ячейки заголовка).
@@ -183,6 +187,7 @@ class VellinIconButton extends StatelessWidget {
     this.size = 34,
     this.radius = VellinRadius.button,
     this.glyphSize = 17,
+    this.glyphBox = const Size(18, 18),
     this.tooltip,
     this.filled = true,
     this.goldHover = false,
@@ -224,7 +229,7 @@ class VellinIconButton extends StatelessWidget {
               border: Border.all(color: border),
             ),
             alignment: Alignment.center,
-            child: VellinIcon(glyph, size: glyphSize, color: fg),
+            child: VellinIcon(glyph, size: glyphSize, box: glyphBox, color: fg),
           ),
         );
       },

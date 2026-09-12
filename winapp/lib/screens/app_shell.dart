@@ -376,9 +376,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           onOpenImage: (url) {
             // Листать можно по всем картинкам переписки, а не только по той,
             // на которую нажали.
+            // Альбом разворачивается в ленту лайтбокса по снимку.
             final images = dm.activeMessages
-                .where((m) => m.imageUrl != null)
-                .map((m) => AppConfig.mediaUrl(m.imageUrl))
+                .expand((m) => m.images)
+                .where((i) => i.url.isNotEmpty)
+                .map((i) => AppConfig.mediaUrl(i.url))
                 .whereType<String>()
                 .toList();
             final at = images.indexOf(url);

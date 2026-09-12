@@ -23,6 +23,28 @@ String dmKindLabel(DmKind kind) => switch (kind) {
       DmKind.text => '',
     };
 
+/// Снимок сообщения (shared: DirectMessageImage).
+class DmImage {
+  final String url;
+  final int width;
+  final int height;
+
+  /// Файл на этом компьютере — у снимка, который ещё загружается. Пока он
+  /// есть, снимок рисуется с диска: так превью видно сразу и не мигает, когда
+  /// придёт ссылка с сервера.
+  final String? localPath;
+
+  const DmImage({required this.url, this.width = 0, this.height = 0, this.localPath});
+
+  factory DmImage.fromJson(Map<String, dynamic> j) => DmImage(
+        url: j['url'] as String? ?? '',
+        width: (j['width'] as num?)?.toInt() ?? 0,
+        height: (j['height'] as num?)?.toInt() ?? 0,
+      );
+
+  DmImage withLocal(String? path) => DmImage(url: url, width: width, height: height, localPath: path);
+}
+
 /// Реакция одного участника (shared: DirectMessageReactionDTO).
 class DmReaction {
   final String userId;
@@ -81,6 +103,9 @@ class DirectMessage {
   final String? imageUrl;
   final int? imageWidth;
   final int? imageHeight;
+
+  /// Все снимки сообщения по порядку: у альбома — до 10, у одиночного — один.
+  final List<DmImage> images;
   final String? voiceUrl;
   final int? voiceDurationSec;
   final List<int>? voicePeaks;
@@ -138,6 +163,7 @@ class DirectMessage {
     this.imageUrl,
     this.imageWidth,
     this.imageHeight,
+    this.images = const [],
     this.voiceUrl,
     this.voiceDurationSec,
     this.voicePeaks,
@@ -207,6 +233,7 @@ class DirectMessage {
     Object? readAt = _keep,
     Object? playedAt = _keep,
     List<DmReaction>? reactions,
+    List<DmImage>? images,
   }) =>
       DirectMessage(
         id: id,
@@ -217,6 +244,7 @@ class DirectMessage {
         imageUrl: imageUrl,
         imageWidth: imageWidth,
         imageHeight: imageHeight,
+        images: images ?? this.images,
         voiceUrl: voiceUrl,
         voiceDurationSec: voiceDurationSec,
         voicePeaks: voicePeaks,
@@ -250,6 +278,7 @@ class DirectMessage {
         imageUrl: j['imageUrl'] as String?,
         imageWidth: (j['imageWidth'] as num?)?.toInt(),
         imageHeight: (j['imageHeight'] as num?)?.toInt(),
+        images: _imagesFrom(j),
         voiceUrl: j['voiceUrl'] as String?,
         voiceDurationSec: (j['voiceDurationSec'] as num?)?.toInt(),
         voicePeaks: (j['voicePeaks'] as List?)?.map((e) => (e as num).toInt()).toList(),
@@ -277,6 +306,21 @@ class DirectMessage {
             .toList(),
         nonce: j['nonce'] as String?,
       );
+
+  /// Альбом — список из сервера; одиночный снимок — из старых полей.
+  static List<DmImage> _imagesFrom(Map<String, dynamic> j) {
+    final list = (j['images'] as List? ?? const []).whereType<Map<String, dynamic>>().map(DmImage.fromJson).toList();
+    if (list.isNotEmpty) return list;
+    final url = j['imageUrl'] as String?;
+    if (url == null) return const [];
+    return [
+      DmImage(
+        url: url,
+        width: (j['imageWidth'] as num?)?.toInt() ?? 0,
+        height: (j['imageHeight'] as num?)?.toInt() ?? 0,
+      ),
+    ];
+  }
 
   bool get hasAttachment =>
       imageUrl != null || voiceUrl != null || videoStatus != null || inviteRoomId != null || isCallRecord;
@@ -315,6 +359,10 @@ class DmConversation {
   final bool online;
   final String lastMessageAt;
 
+  /// Уведомления этого диалога выключены мной: сообщения приходят как обычно,
+  /// молчат колокольчик, звук и всплывающее окно.
+  final bool muted;
+
   const DmConversation({
     required this.id,
     required this.peer,
@@ -324,6 +372,7 @@ class DmConversation {
     required this.online,
     required this.lastMessageAt,
     this.lastKind = DmPreviewKind.text,
+    this.muted = false,
   });
 
   factory DmConversation.fromJson(Map<String, dynamic> j) {
@@ -361,8 +410,52 @@ class DmConversation {
       unreadCount: (j['unreadCount'] as num?)?.toInt() ?? 0,
       online: j['online'] as bool? ?? false,
       lastMessageAt: j['lastMessageAt'] as String? ?? '',
+      muted: j['muted'] as bool? ?? false,
     );
   }
+
+  DmConversation copyWith({int? unreadCount, bool? muted}) => DmConversation(
+        id: id,
+        peer: peer,
+        lastBody: lastBody,
+        lastKind: lastKind,
+        lastSenderId: lastSenderId,
+        unreadCount: unreadCount ?? this.unreadCount,
+        online: online,
+        lastMessageAt: lastMessageAt,
+        muted: muted ?? this.muted,
+      );
+}
+
+/// Снимок в витрине вложений диалога (shared: DmMediaItem).
+///
+/// Единица витрины — картинка, а не сообщение: альбом из десяти фото даёт
+/// десять плиток подряд.
+class DmMediaItem {
+  final String messageId;
+  final String url;
+  final int width;
+  final int height;
+  final String senderId;
+  final String createdAt;
+
+  const DmMediaItem({
+    required this.messageId,
+    required this.url,
+    required this.width,
+    required this.height,
+    required this.senderId,
+    required this.createdAt,
+  });
+
+  factory DmMediaItem.fromJson(Map<String, dynamic> j) => DmMediaItem(
+        messageId: j['messageId'] as String? ?? '',
+        url: j['url'] as String? ?? '',
+        width: (j['width'] as num?)?.toInt() ?? 0,
+        height: (j['height'] as num?)?.toInt() ?? 0,
+        senderId: j['senderId'] as String? ?? '',
+        createdAt: j['createdAt'] as String? ?? '',
+      );
 }
 
 /// Тред переписки (shared: ConversationThreadResponse).
@@ -380,6 +473,9 @@ class ConversationThread {
   /// Закреплённое в диалоге сообщение.
   final DirectMessage? pinned;
 
+  /// Уведомления диалога выключены мной.
+  final bool muted;
+
   const ConversationThread({
     required this.conversationId,
     required this.peer,
@@ -388,6 +484,7 @@ class ConversationThread {
     required this.online,
     this.peerLastReadAt,
     this.pinned,
+    this.muted = false,
   });
 
   factory ConversationThread.fromJson(Map<String, dynamic> j) => ConversationThread(
@@ -402,5 +499,6 @@ class ConversationThread {
         pinned: j['pinned'] is Map<String, dynamic>
             ? DirectMessage.fromJson(j['pinned'] as Map<String, dynamic>)
             : null,
+        muted: j['muted'] as bool? ?? false,
       );
 }
