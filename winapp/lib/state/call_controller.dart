@@ -16,6 +16,29 @@ import '../webrtc/screen_share.dart';
 /// Как показан звонок в окне.
 enum CallUiMode { hidden, minimized, expanded }
 
+/// Этап звонка — по нему слой звонка решает, что показывать: окно вызова
+/// (первые три) или экран разговора.
+///
+/// Собрано в одном месте нарочно: этапы выводятся сразу из нескольких полей
+/// (входящий, чей звонок, дозвон, поднялась ли связь), и раскладывать эту
+/// логику по виджетам — верный способ получить разные ответы в разных местах.
+enum CallPhase {
+  /// Звонка нет.
+  none,
+
+  /// Нам звонят, ответа ещё не было.
+  incoming,
+
+  /// Мы звоним, собеседник ещё не ответил.
+  outgoing,
+
+  /// Ответ есть, связь поднимается — звука и картинки ещё нет.
+  connecting,
+
+  /// Разговор идёт.
+  active,
+}
+
 /// Состояние связи — им подписана пилюля вверху экрана разговора.
 enum CallNetState {
   /// Соединение ещё поднимается.
@@ -191,6 +214,28 @@ class CallController extends ChangeNotifier {
   /// поднимается соединение.
   bool get isRinging => call?.isRinging ?? false;
 
+  /// Связь поднялась: WebRTC подтвердил соединение, звук и картинка идут.
+  ///
+  /// Именно этим, а не состоянием сети, отделяется «подключение» от разговора:
+  /// [netState] выходит из `connecting` по первому же замеру статистики — то
+  /// есть ещё до того, как через соединение прошёл хоть один пакет.
+  bool _mediaLive = false;
+
+  /// Ответ уже отправлен, свой снимок звонка ещё не пришёл.
+  ///
+  /// Без этого окно вызова успевало мигнуть: входящий уже снят, а звонок с
+  /// сервера, где мы значимся участником, приходит только следующим сообщением.
+  bool _accepting = false;
+
+  /// Этап звонка для интерфейса.
+  CallPhase get phase {
+    if (incoming != null) return CallPhase.incoming;
+    final c = call;
+    if (c == null || !isMine) return _accepting ? CallPhase.connecting : CallPhase.none;
+    if (c.isRinging) return CallPhase.outgoing;
+    return _mediaLive ? CallPhase.active : CallPhase.connecting;
+  }
+
   /// Порог голоса. Ниже — фон комнаты и дыхание, выше — речь.
   static const _voiceThreshold = 0.02;
 
@@ -329,6 +374,7 @@ class CallController extends ChangeNotifier {
     call = null;
     peer = null;
     incoming = null;
+    _accepting = false;
     uiMode = CallUiMode.hidden;
     notifyListeners();
   }
@@ -425,6 +471,7 @@ class CallController extends ChangeNotifier {
         incoming = null;
         call = null;
         peer = null;
+        _accepting = false;
         uiMode = CallUiMode.hidden;
         _stopRinging();
         _teardownSession();
@@ -445,6 +492,7 @@ class CallController extends ChangeNotifier {
       call = null;
       peer = null;
       incoming = null;
+      _accepting = false;
       uiMode = CallUiMode.hidden;
       _stopRinging();
       await _teardownSession();
@@ -463,6 +511,7 @@ class CallController extends ChangeNotifier {
     // Ответили на другом устройстве — гасим у себя входящий и не поднимаем медиа.
     if (!isMine) {
       incoming = null;
+      _accepting = false;
       uiMode = CallUiMode.hidden;
       _stopRinging();
       await _teardownSession();
@@ -470,6 +519,8 @@ class CallController extends ChangeNotifier {
       return;
     }
 
+    // Свой снимок пришёл — дальше этап звонка читается по нему самому.
+    _accepting = false;
     if (uiMode == CallUiMode.hidden) uiMode = CallUiMode.expanded;
 
     // Гудки — пока идёт дозвон, и только у звонящего: у принимающей стороны
@@ -602,6 +653,9 @@ class CallController extends ChangeNotifier {
           _socket.send({'t': 'dmcall_signal', 'callId': snapshot.callId, 'payload': payload}),
       onConnected: () {
         _socket.send({'t': 'dmcall_connected', 'callId': snapshot.callId});
+        // Связь поднялась — окно вызова уступает место экрану разговора.
+        _mediaLive = true;
+        notifyListeners();
         _applyChosenAudioDevices();
       },
       onLinkChanged: (alive) {
@@ -638,6 +692,7 @@ class CallController extends ChangeNotifier {
   Future<void> _teardownSession() async {
     final s = _session;
     _session = null;
+    _mediaLive = false;
     _stopStatsPolling();
     final share = screenShare;
     screenShare = null;
@@ -709,6 +764,10 @@ class CallController extends ChangeNotifier {
     final inc = incoming;
     if (inc == null) return;
     incoming = null;
+    _accepting = true;
+    // Собеседник известен из входящего — показываем его, пока не пришёл снимок
+    // звонка: иначе окно на миг осталось бы без имени и лица.
+    peer = inc.from;
     _stopRinging();
     notifyListeners();
     _socket.send({'t': 'dmcall_accept', 'callId': inc.call.callId, 'video': video});
@@ -718,6 +777,7 @@ class CallController extends ChangeNotifier {
     final inc = incoming;
     if (inc == null) return;
     incoming = null;
+    _accepting = false;
     _stopRinging();
     notifyListeners();
     _socket.send({'t': 'dmcall_decline', 'callId': inc.call.callId});

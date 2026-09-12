@@ -136,21 +136,19 @@ class _CallRow extends StatelessWidget {
                     ),
                   ],
                 ),
-                // Перезвонить — только при наведении: в покое строка читается
-                // как запись, а не как кнопка.
-                AnimatedOpacity(
-                  duration: VellinMotion.hover,
-                  curve: VellinMotion.standard,
-                  opacity: hot ? 1 : 0,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: VellinIconButton(
-                      glyph: VellinGlyphs.calls,
-                      onPressed: hot ? onCallBack : null,
-                      size: 30,
-                      radius: VellinRadius.mini,
-                      glyphSize: 15,
-                    ),
+                // Перезвонить — кнопка видна всегда: в списке звонков это
+                // главное действие, и искать его наведением незачем. В покое
+                // она держится тише самой записи — на своём приглушённом фоне
+                // с бледным глифом, а подсвечивается только под курсором.
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: VellinIconButton(
+                    glyph: VellinGlyphs.calls,
+                    onPressed: onCallBack,
+                    tooltip: 'Позвонить',
+                    size: 30,
+                    radius: VellinRadius.mini,
+                    glyphSize: 15,
                   ),
                 ),
               ],

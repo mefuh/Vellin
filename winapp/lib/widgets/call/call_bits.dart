@@ -312,7 +312,18 @@ class EndCallButton extends StatefulWidget {
   final VoidCallback onTap;
   final double width;
   final double height;
-  const EndCallButton({super.key, required this.onTap, this.width = 74, this.height = 54});
+
+  /// Подсказка: в разговоре звонок завершают, на вызове — отклоняют или
+  /// отменяют, и называть это одинаково нельзя.
+  final String tooltip;
+
+  const EndCallButton({
+    super.key,
+    required this.onTap,
+    this.width = 74,
+    this.height = 54,
+    this.tooltip = 'Завершить звонок',
+  });
 
   @override
   State<EndCallButton> createState() => _EndCallButtonState();
@@ -325,7 +336,7 @@ class _EndCallButtonState extends State<EndCallButton> {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'Завершить звонок',
+      message: widget.tooltip,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hover = true),
