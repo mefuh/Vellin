@@ -12,6 +12,7 @@ import '../state/friends_controller.dart';
 import '../state/presence_controller.dart';
 import '../theme/vellin_design.dart';
 import '../theme/vellin_glyphs.dart';
+import '../widgets/media/profile_photo.dart';
 import '../widgets/ui/vellin_avatar.dart';
 import '../widgets/ui/vellin_button.dart';
 import '../widgets/ui/vellin_hover.dart';
@@ -303,11 +304,18 @@ class _Header extends StatelessWidget {
                     color: Color(0xFF0F0D0C),
                     shape: BoxShape.circle,
                   ),
-                  child: VellinAvatar(
-                    username: profile.user.username,
-                    avatarUrl: profile.user.avatarUrl,
-                    size: avatar,
-                    bedColor: const Color(0xFF0F0D0C),
+                  child: Builder(
+                    builder: (context) => VellinAvatar(
+                      username: profile.user.username,
+                      avatarUrl: profile.user.avatarUrl,
+                      size: avatar,
+                      bedColor: const Color(0xFF0F0D0C),
+                      onOpenPhoto: () => showProfilePhoto(
+                        context,
+                        username: profile.user.username,
+                        avatarUrl: profile.user.avatarUrl,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 22),

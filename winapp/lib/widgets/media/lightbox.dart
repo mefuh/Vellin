@@ -20,25 +20,42 @@ void showVellinLightbox(
   BuildContext context, {
   required List<String> images,
   required int index,
+  String? caption,
 }) {
   final overlay = Overlay.of(context, rootOverlay: true);
   late final OverlayEntry entry;
   entry = OverlayEntry(
-    builder: (_) =>
-        _Lightbox(images: images, initialIndex: index, onClose: entry.remove),
+    builder: (_) => _Lightbox(
+      images: images,
+      initialIndex: index,
+      caption: caption,
+      onClose: entry.remove,
+    ),
   );
   overlay.insert(entry);
 }
+
+/// Фильтр подложки. Один на все открытия: собранный заново, он каждый раз
+/// стоит кадра на весь экран.
+final ui.ImageFilter _backdropBlur = ui.ImageFilter.blur(
+  sigmaX: VellinBlur.overlay,
+  sigmaY: VellinBlur.overlay,
+);
 
 class _Lightbox extends StatefulWidget {
   final List<String> images;
   final int initialIndex;
   final VoidCallback onClose;
 
+  /// Что это за снимок — например, «Фото профиля Маням». Без подписи вверху
+  /// остаётся только счётчик, как было.
+  final String? caption;
+
   const _Lightbox({
     required this.images,
     required this.initialIndex,
     required this.onClose,
+    this.caption,
   });
 
   @override
@@ -259,16 +276,18 @@ class _LightboxState extends State<_Lightbox> with TickerProviderStateMixin {
             child: Stack(
               children: [
                 // Подложка: единственный блюр на весь экран во всём клиенте.
+                //
+                // Радиус постоянный, а проявляется подложка прозрачностью —
+                // той же, что ведёт всё открытие. Радиус, меняющийся каждый
+                // кадр, заставляет пересобирать фильтр на весь экран заново, и
+                // блюр заметно отставал от остальной анимации.
                 Positioned.fill(
                   child: GestureDetector(
                     onTap: _fullscreen
                         ? () => setState(() => _fullscreen = false)
                         : _close,
                     child: BackdropFilter(
-                      filter: ui.ImageFilter.blur(
-                        sigmaX: VellinBlur.overlay * t,
-                        sigmaY: VellinBlur.overlay * t,
-                      ),
+                      filter: _backdropBlur,
                       child: const ColoredBox(color: VellinColors.scrim),
                     ),
                   ),
@@ -288,7 +307,7 @@ class _LightboxState extends State<_Lightbox> with TickerProviderStateMixin {
                     ignoring: _fullscreen,
                     child: Stack(
                       children: [
-                        if (widget.images.length > 1) _counter(),
+                        if (widget.caption != null || widget.images.length > 1) _counter(),
                         if (_index > 0) _arrow(left: true),
                         if (_index < widget.images.length - 1)
                           _arrow(left: false),
@@ -400,11 +419,21 @@ class _LightboxState extends State<_Lightbox> with TickerProviderStateMixin {
     );
   }
 
+  /// Плашка вверху: подпись, счётчик — или то и другое одной строкой, чтобы
+  /// они не спорили за место по центру.
   Widget _counter() {
+    final many = widget.images.length > 1;
+    final caption = widget.caption;
+    final text = switch ((caption, many)) {
+      (final String c, true) => '$c · ${_index + 1} из ${widget.images.length}',
+      (final String c, false) => c,
+      _ => '${_index + 1} из ${widget.images.length}',
+    };
+
     return Positioned(
       top: 44,
-      left: 0,
-      right: 0,
+      left: 64,
+      right: 64,
       child: Center(
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -414,7 +443,9 @@ class _LightboxState extends State<_Lightbox> with TickerProviderStateMixin {
             border: Border.all(color: VellinColors.line10),
           ),
           child: Text(
-            '${_index + 1} из ${widget.images.length}',
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: VellinType.caption.copyWith(
               color: VellinColors.ink62,
               fontFeatures: VellinType.tabular,

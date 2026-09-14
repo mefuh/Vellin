@@ -36,7 +36,7 @@ extension VellinPresenceColor on VellinPresence {
 /// Заглушка нейтральная (белый градиент на просвет), а не цветная по seed:
 /// в новом языке единственный цвет — золото, и разноцветные кружки в списке
 /// спорили бы с ним.
-class VellinAvatar extends StatelessWidget {
+class VellinAvatar extends StatefulWidget {
   final String username;
   final String? avatarUrl;
   final double size;
@@ -51,6 +51,14 @@ class VellinAvatar extends StatelessWidget {
   /// Обводка самого аватара. У своих реплик в ленте она золотая.
   final Color? ringColor;
 
+  /// Открыть фотографию. Задан — аватар нажимается: под курсором снимок
+  /// притемняется и на нём проступает значок.
+  ///
+  /// Затемнение идёт фильтром самой картинки, а не кружком поверх неё:
+  /// накладка отдельным слоем расходилась с кругом на доли пикселя и оставляла
+  /// по краю светлый серп.
+  final VoidCallback? onOpenPhoto;
+
   const VellinAvatar({
     super.key,
     required this.username,
@@ -59,48 +67,110 @@ class VellinAvatar extends StatelessWidget {
     this.presence,
     this.bedColor = VellinColors.panel,
     this.ringColor,
+    this.onOpenPhoto,
   });
 
   @override
+  State<VellinAvatar> createState() => _VellinAvatarState();
+}
+
+class _VellinAvatarState extends State<VellinAvatar> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
-    final url = AppConfig.mediaUrl(avatarUrl);
-    final initial = username.isNotEmpty ? username.characters.first.toUpperCase() : '?';
+    final size = widget.size;
+    final presence = widget.presence;
+    final url = AppConfig.mediaUrl(widget.avatarUrl);
+    final initial =
+        widget.username.isNotEmpty ? widget.username.characters.first.toUpperCase() : '?';
 
-    final avatar = Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: VellinColors.avatarBed,
-        border: Border.all(color: ringColor ?? VellinAvatarSpec.border, width: 1),
-        gradient: url == null
-            ? const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [VellinAvatarSpec.gradientBegin, VellinAvatarSpec.gradientEnd],
-              )
-            : null,
-        image: url != null
-            ? DecorationImage(image: NetworkImage(url), fit: BoxFit.cover)
-            : null,
-      ),
-      alignment: Alignment.center,
-      child: url == null
-          ? Text(
-              initial,
-              style: TextStyle(
-                fontFamily: VellinType.family,
-                fontSize: VellinAvatarSpec.initialSize(size),
-                fontWeight: FontWeight.w300,
-                letterSpacing: VellinAvatarSpec.initialSize(size) * 0.04,
-                color: VellinColors.ink72,
-              ),
-            )
-          : null,
+    // Нажимается только настоящая фотография: над заглушкой с инициалом
+    // курсор-палец обещал бы снимок, которого нет.
+    final tappable = widget.onOpenPhoto != null && url != null;
+
+    /// Круг аватара при затемнении [t] (0 — покой, 1 — под курсором).
+    ///
+    /// Затемнение идёт прозрачностью фильтра, а не подменой самого фильтра:
+    /// `DecorationImage` между состояниями не интерполируется, и включение
+    /// «как есть» срабатывало бы рывком.
+    Container circle(double t) => Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: VellinColors.avatarBed,
+            border: Border.all(color: widget.ringColor ?? VellinAvatarSpec.border, width: 1),
+            gradient: url == null
+                ? const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [VellinAvatarSpec.gradientBegin, VellinAvatarSpec.gradientEnd],
+                  )
+                : null,
+            image: url != null
+                ? DecorationImage(
+                    image: NetworkImage(url),
+                    fit: BoxFit.cover,
+                    colorFilter: t == 0
+                        ? null
+                        : ColorFilter.mode(
+                            Color.fromRGBO(0, 0, 0, 0.54 * t),
+                            BlendMode.srcATop,
+                          ),
+                  )
+                : null,
+          ),
+          alignment: Alignment.center,
+          child: url == null
+              ? Text(
+                  initial,
+                  style: TextStyle(
+                    fontFamily: VellinType.family,
+                    fontSize: VellinAvatarSpec.initialSize(size),
+                    fontWeight: FontWeight.w300,
+                    letterSpacing: VellinAvatarSpec.initialSize(size) * 0.04,
+                    color: VellinColors.ink72,
+                  ),
+                )
+              : (t == 0
+                  ? null
+                  : Opacity(
+                      opacity: t,
+                      child: VellinIcon(
+                        VellinGlyphs.fullscreen,
+                        size: size * 0.24,
+                        color: VellinColors.ink88,
+                      ),
+                    )),
+        );
+
+    // Аватаров в списках сотни, и лишний кадр анимации им ни к чему: она
+    // появляется только там, где аватар вообще нажимается.
+    final avatar = !tappable
+        ? circle(0)
+        : TweenAnimationBuilder<double>(
+            tween: Tween(end: _hover ? 1.0 : 0.0),
+            duration: VellinMotion.hover,
+            curve: VellinMotion.standard,
+            builder: (context, t, _) => circle(t),
+          );
+
+    final body = presence == null ? avatar : _withPresence(avatar, presence);
+    if (!tappable) return body;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(onTap: widget.onOpenPhoto, child: body),
     );
+  }
 
-    if (presence == null) return avatar;
-
+  /// Аватар с точкой присутствия в углу.
+  Widget _withPresence(Widget avatar, VellinPresence presence) {
+    final size = widget.size;
+    final bedColor = widget.bedColor;
     final dot = VellinAvatarSpec.dotSize(size);
     return SizedBox(
       width: size,
@@ -132,7 +202,7 @@ class VellinAvatar extends StatelessWidget {
                     height: dot,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: presence!.color,
+                      color: presence.color,
                       border: Border.all(color: bedColor, width: 2),
                     ),
                   ),

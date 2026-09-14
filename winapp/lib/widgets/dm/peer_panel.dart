@@ -13,6 +13,7 @@ import '../../state/presence_controller.dart';
 import '../../theme/vellin_design.dart';
 import '../../theme/vellin_glyphs.dart';
 import '../media/lightbox.dart';
+import '../media/profile_photo.dart';
 import '../ui/vellin_avatar.dart';
 import '../ui/vellin_button.dart';
 import '../ui/vellin_hover.dart';
@@ -332,12 +333,19 @@ class _Identity extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
       child: Column(
         children: [
-          VellinAvatar(
-            username: peer?.username ?? '',
-            avatarUrl: peer?.avatarUrl,
-            size: 88,
-            presence: presence,
-            bedColor: VellinColors.panel,
+          Builder(
+            builder: (context) => VellinAvatar(
+              username: peer?.username ?? '',
+              avatarUrl: peer?.avatarUrl,
+              size: 88,
+              presence: presence,
+              bedColor: VellinColors.panel,
+              onOpenPhoto: () => showProfilePhoto(
+                context,
+                username: peer?.username ?? '',
+                avatarUrl: peer?.avatarUrl,
+              ),
+            ),
           ),
           const SizedBox(height: 14),
           Text(
