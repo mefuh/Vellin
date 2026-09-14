@@ -20,6 +20,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'fixed_window.dart';
+
 /// Фазы апдейтера, как в макете.
 enum SplashPhase { checking, downloading, installing, ready, error }
 
@@ -229,7 +231,7 @@ class _VellinUpdaterSplashState extends State<VellinUpdaterSplash> with TickerPr
         // жёлтое подчёркивание. Прозрачный — фон задаёт градиент ниже.
         child: Material(
           type: MaterialType.transparency,
-          child: DragToMoveArea(
+          child: WindowDragArea(
             child: CustomPaint(
               painter: const VellinBackdropPainter(),
               child: Stack(

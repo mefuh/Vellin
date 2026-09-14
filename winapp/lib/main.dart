@@ -27,6 +27,7 @@ import 'storage/session_store.dart';
 import 'webrtc/call_settings.dart';
 import 'theme/vellin_design.dart';
 import 'theme/vellin_theme.dart';
+import 'runtime/fixed_window.dart';
 import 'runtime/auth_window.dart';
 import 'runtime/toast_host.dart';
 import 'runtime/toast_window.dart';
@@ -113,6 +114,9 @@ Future<void> main(List<String> args) async {
       await windowManager.setResizable(false);
       await windowManager.setMaximizable(false);
       await windowManager.setMinimizable(false);
+      // Окно апдейтера и входа держит свой размер до самого перехода в
+      // приложение — чем бы разворот ни был вызван.
+      FixedWindowGuard.instance.enable();
       // Окно здесь НЕ показываем: до runApp у Flutter нет ни одного кадра, и
       // пустое окно на мгновение мелькает белым. Показ — после первого кадра.
     },
@@ -195,6 +199,8 @@ class _VellinAppState extends State<VellinApp> {
     // Окно приложения — БЕЗ нативного заголовка (свой титлбар), но ресайзное,
     // с тенью и системным скруглением. Возвращаем рамку после безрамочного
     // апдейтера (setAsFrameless) через titleBarStyle.hidden.
+    // Размер меняет только окно приложения — с него страж и снимается.
+    FixedWindowGuard.instance.disable();
     await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: false);
     await windowManager.setResizable(true);
     await windowManager.setMaximizable(true);
@@ -223,6 +229,8 @@ class _VellinAppState extends State<VellinApp> {
     if (await windowManager.isMaximized()) await windowManager.unmaximize();
     await windowManager.setResizable(false);
     await windowManager.setMaximizable(false);
+    // Вернулись из окна приложения — снова держим размер.
+    FixedWindowGuard.instance.enable();
     // Снимаем минимум окна приложения: он больше окна входа и не дал бы
     // ужаться. Ставим до смены размера, иначе окно дёрнется дважды.
     await windowManager.setMinimumSize(const Size(200, 200));

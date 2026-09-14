@@ -25,6 +25,7 @@ import 'package:window_manager/window_manager.dart';
 import '../theme/avatar_tint.dart';
 import '../theme/vellin_glyphs.dart';
 import '../widgets/ui/vellin_icon.dart';
+import 'fixed_window.dart';
 
 /// Размер карточки уведомления (и всего окна — оно ровно по ней).
 const double kToastWidth = 384;
@@ -135,6 +136,9 @@ Future<void> runToastApp(int port) async {
       await windowManager.setAsFrameless();
       await windowManager.setSkipTaskbar(true);
       await windowManager.setAlwaysOnTop(true);
+      // Окно уведомлений живёт ровно по карточке и растягиваться не должно
+      // никогда — ни жестом, ни программно.
+      FixedWindowGuard.instance.enable();
     },
   );
 

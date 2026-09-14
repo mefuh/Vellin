@@ -16,6 +16,7 @@ import '../api/api_client.dart';
 import '../api/auth_api.dart';
 import '../app_config.dart';
 import '../state/auth_controller.dart';
+import 'fixed_window.dart';
 import 'updater_splash.dart';
 
 /// Размер окна авторизации (клиентская область).
@@ -209,7 +210,7 @@ class _AuthWindowState extends State<AuthWindow> {
   Widget build(BuildContext context) {
     return Material(
       type: MaterialType.transparency,
-      child: DragToMoveArea(
+      child: WindowDragArea(
         child: CustomPaint(
           painter: const VellinBackdropPainter(),
           child: Stack(
