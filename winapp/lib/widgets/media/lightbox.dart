@@ -35,13 +35,6 @@ void showVellinLightbox(
   overlay.insert(entry);
 }
 
-/// Фильтр подложки. Один на все открытия: собранный заново, он каждый раз
-/// стоит кадра на весь экран.
-final ui.ImageFilter _backdropBlur = ui.ImageFilter.blur(
-  sigmaX: VellinBlur.overlay,
-  sigmaY: VellinBlur.overlay,
-);
-
 class _Lightbox extends StatefulWidget {
   final List<String> images;
   final int initialIndex;
@@ -271,53 +264,68 @@ class _LightboxState extends State<_Lightbox> with TickerProviderStateMixin {
               ? VellinMotion.exit.transform(_open.value)
               : VellinMotion.standard.transform(_open.value);
 
-          return Opacity(
-            opacity: t,
-            child: Stack(
-              children: [
-                // Подложка: единственный блюр на весь экран во всём клиенте.
-                //
-                // Радиус постоянный, а проявляется подложка прозрачностью —
-                // той же, что ведёт всё открытие. Радиус, меняющийся каждый
-                // кадр, заставляет пересобирать фильтр на весь экран заново, и
-                // блюр заметно отставал от остальной анимации.
-                Positioned.fill(
-                  child: GestureDetector(
-                    onTap: _fullscreen
-                        ? () => setState(() => _fullscreen = false)
-                        : _close,
-                    child: BackdropFilter(
-                      filter: _backdropBlur,
-                      child: const ColoredBox(color: VellinColors.scrim),
+          return Stack(
+            children: [
+              // Подложка: единственный блюр на весь экран во всём клиенте.
+              //
+              // Она НЕ внутри общей прозрачности открытия — и это главное.
+              // `Opacity` рисует детей в отдельный слой, а размывает
+              // `BackdropFilter` то, что уже легло в текущий слой: внутри
+              // прозрачности размывать ему нечего, и блюр не нарастал вместе с
+              // остальным, а появлялся скачком в самом конце. Поэтому подложка
+              // проявляется сама — радиусом и плотностью затемнения.
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: _fullscreen
+                      ? () => setState(() => _fullscreen = false)
+                      : _close,
+                  child: BackdropFilter(
+                    filter: ui.ImageFilter.blur(
+                      sigmaX: VellinBlur.overlay * t,
+                      sigmaY: VellinBlur.overlay * t,
+                    ),
+                    child: ColoredBox(
+                      color: VellinColors.scrim.withValues(
+                        alpha: VellinColors.scrim.a * t,
+                      ),
                     ),
                   ),
                 ),
-                Positioned.fill(
-                  child: Transform.scale(
-                    scale: 0.92 + 0.08 * t,
-                    child: _image(),
-                  ),
-                ),
-                // Вся обвязка гаснет в полноэкранном режиме.
-                AnimatedOpacity(
-                  duration: VellinMotion.hover,
-                  curve: VellinMotion.standard,
-                  opacity: _fullscreen ? 0 : 1,
-                  child: IgnorePointer(
-                    ignoring: _fullscreen,
-                    child: Stack(
-                      children: [
-                        if (widget.caption != null || widget.images.length > 1) _counter(),
-                        if (_index > 0) _arrow(left: true),
-                        if (_index < widget.images.length - 1)
-                          _arrow(left: false),
-                        _toolbar(),
-                      ],
+              ),
+              // Всё остальное — снимок и обвязка — гаснет общей прозрачностью:
+              // размывать им нечего, и отдельный слой тут ничему не мешает.
+              Opacity(
+                opacity: t,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: Transform.scale(
+                        scale: 0.92 + 0.08 * t,
+                        child: _image(),
+                      ),
                     ),
-                  ),
+                    // Вся обвязка гаснет в полноэкранном режиме.
+                    AnimatedOpacity(
+                      duration: VellinMotion.hover,
+                      curve: VellinMotion.standard,
+                      opacity: _fullscreen ? 0 : 1,
+                      child: IgnorePointer(
+                        ignoring: _fullscreen,
+                        child: Stack(
+                          children: [
+                            if (widget.caption != null || widget.images.length > 1) _counter(),
+                            if (_index > 0) _arrow(left: true),
+                            if (_index < widget.images.length - 1)
+                              _arrow(left: false),
+                            _toolbar(),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           );
         },
       ),
