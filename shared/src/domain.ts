@@ -129,6 +129,8 @@ export interface DeviceSession {
   deviceLabel: string;
   browser: string;
   os: string;
+  /** Вход из нативного клиента Vellin, а не из браузера. */
+  app: boolean;
   ip: string | null;
   createdAt: string;
   lastSeenAt: string;

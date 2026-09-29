@@ -180,7 +180,9 @@ export function DevicesSection() {
                 ...(s.current ? ({ ['--hero-pulse' as string]: 'color-mix(in srgb, var(--ok) 50%, transparent)', animation: 'heroDotPulse 2.4s infinite' } as React.CSSProperties) : {}),
               }}
             >
-              <Icon name="cast" size={18} />
+              {/* Приложение для Windows — фирменным знаком системы: вход из
+                  клиента должен отличаться от браузера с одного взгляда. */}
+              <Icon name={s.app && s.os === 'Windows' ? 'windows' : 'cast'} size={18} />
             </div>
 
             <div style={{ flex: 1, minWidth: 0 }}>

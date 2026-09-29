@@ -44,7 +44,7 @@ import {
   assertRegistrationEnabled,
   assertUploadsEnabled,
 } from '../admin/platform/gate.js';
-import { createSession, forgetTouch, toDeviceSession, type DbSession } from './sessions.js';
+import { createSession, deviceUserAgent, forgetTouch, toDeviceSession, type DbSession } from './sessions.js';
 import { isKnownCity } from '../geo/cities.js';
 import {
   ALLOWED_AVATAR_MIME,
@@ -644,7 +644,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           pollTokenHash: qrHash(pollToken),
           expiresAt,
           ip: req.ip || null,
-          userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
+          // Из заявки потом берётся устройство новой сессии — то есть
+          // компьютера с клиентом, а у него своя метка вместо User-Agent.
+          userAgent: deviceUserAgent(req),
         },
       });
       reply.send({
