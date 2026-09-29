@@ -1,0 +1,137 @@
+/* Вход, регистрация и гостевой вход — окно входа приложения на странице. */
+
+.vx-auth {
+  position: relative;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: clip;
+  background: var(--vx-bg0);
+}
+
+/* Фон окна входа (VellinBackdropPainter): тёплый эллипс сверху и световое
+   пятно над знаком. */
+.vx-auth::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(440px 440px at 50% 22%, rgba(255, 246, 232, 0.075), transparent 62%),
+    radial-gradient(130% 105% at 50% 30%, #241d18 0%, #14100d 55%, var(--vx-bg0) 100%);
+}
+
+/* Затемнение у нижнего края — как у окна входа. */
+.vx-auth::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 180px;
+  pointer-events: none;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.55), transparent);
+}
+
+.vx-auth > * {
+  position: relative;
+  z-index: 1;
+}
+
+.vx-auth__top {
+  padding: 22px var(--vx-gutter);
+}
+
+.vx-auth__main {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 12px var(--vx-gutter) clamp(40px, 9vh, 96px);
+}
+
+.vx-auth__column {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+}
+
+.vx-auth__heading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.vx-auth__heading h1 {
+  font-size: clamp(26px, 3vw, 32px);
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  color: var(--vx-ink94);
+}
+
+.vx-auth__heading p {
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--vx-ink62);
+  max-width: 30em;
+}
+
+.vx-auth__body {
+  width: 100%;
+}
+
+.vx-auth__form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.vx-auth__submit {
+  --h: 48px;
+  width: 100%;
+  margin-top: 6px;
+  font-size: 14px;
+}
+
+.vx-auth__footer {
+  font-size: 13.5px;
+  line-height: 1.6;
+  text-align: center;
+  color: var(--vx-ink62);
+}
+
+.vx-field__hint {
+  font-size: 12px;
+  color: var(--vx-ink55);
+}
+
+/* Напоминание, куда поведёт вход: ссылка с лэндинга ждёт своей комнаты. */
+.vx-auth__carry {
+  padding: 11px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vx-ink72);
+  background: var(--vx-gold-wash);
+  border: 1px solid var(--vx-gold-line);
+}
+
+.vx-auth__carry b {
+  font-weight: 600;
+  color: var(--vx-gold);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .vx-auth__top {
+    padding-top: 16px;
+    padding-bottom: 8px;
+  }
+
+  .vx-auth__column {
+    gap: 22px;
+  }
+}

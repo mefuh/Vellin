@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   AnnouncementDTO,
   FeatureFlagDTO,
+  LandingMode,
   PlatformSettingsDTO,
   PlatformWindows,
   UpsertAnnouncementRequest,
@@ -302,6 +303,24 @@ function WindowsSettings({ value, onChange }: { value: PlatformWindows; onChange
           </div>
         </div>
       )}
+
+      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8, borderBottom: '1px solid var(--line-1)' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-3)' }}>Главная страница</span>
+          <div style={{ display: 'flex' }}>
+            <Select
+              value={value.landing}
+              onChange={(v) => onChange({ ...value, landing: v as LandingMode })}
+              options={[['watch', 'Обычная — совместный просмотр'], ['watchApp', 'С приложением — скачивание, затем просмотр']]}
+            />
+          </div>
+        </label>
+        <div style={{ fontSize: 12, color: value.landing === 'watchApp' && !value.downloadPage ? 'var(--warn)' : 'var(--text-3)', lineHeight: 1.5 }}>
+          {value.landing === 'watchApp' && !value.downloadPage
+            ? 'Страница скачивания выключена — пока её не включить, главная показывает обычный вариант: рекламировать приложение без скачивания нельзя.'
+            : 'Вариант с приложением видит только тот, кому доступна страница скачивания; остальным открывается обычная главная.'}
+        </div>
+      </div>
 
       <ToggleRow
         label="Добавление устройства по QR"

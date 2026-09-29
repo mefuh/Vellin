@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Button } from '../shared';
 import { AuthShell, ErrorBanner, Field } from './AuthShell';
 import { useAuthStore } from '../stores/authStore';
+import { destinationAfterAuth } from '../landing/pendingRoom';
+import { PendingVideoNote } from '../landing/PendingVideoNote';
 
 export function Login() {
   const navigate = useNavigate();
@@ -18,43 +19,29 @@ export function Login() {
     e.preventDefault();
     try {
       await login(email, password);
-      navigate('/library');
     } catch {
-      /* error rendered from store */
+      return; // ошибку показывает стор
     }
+    // Ссылка с лэндинга, если она ждёт, становится комнатой.
+    navigate(await destinationAfterAuth());
   };
 
   return (
     <AuthShell
-      title="Войти в Vellin"
+      title="Вход в Vellin"
       subtitle="Email и пароль от вашего аккаунта."
       footer={
         <>
           Нет аккаунта?{' '}
-          <Link to="/register" style={{ color: 'var(--accent-hi)' }}>
-            Зарегистрируйтесь
-          </Link>{' '}
-          или{' '}
-          <Link to="/guest" style={{ color: 'var(--accent-hi)' }}>
-            войдите гостем
+          <Link to="/register" className="vx-link">
+            Создайте его
           </Link>
         </>
       }
     >
-      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {blocked && (
-          <div
-            style={{
-              padding: '12px 14px',
-              borderRadius: 'var(--r-md)',
-              background: 'rgba(209,39,27,0.12)',
-              color: 'var(--accent-hi)',
-              fontSize: 13,
-            }}
-          >
-            Ваш аккаунт заблокирован администратором.
-          </div>
-        )}
+      <form onSubmit={submit} className="vx-auth__form">
+        {blocked && <ErrorBanner message="Ваш аккаунт заблокирован администратором." />}
+        <PendingVideoNote after="входа" />
         <Field
           label="Email"
           type="email"
@@ -75,9 +62,13 @@ export function Login() {
           minLength={8}
         />
         <ErrorBanner message={error} />
-        <Button type="submit" variant="primary" size="lg" full disabled={loading || !email || !password}>
+        <button
+          type="submit"
+          className="vx-btn vx-btn--paper vx-auth__submit"
+          disabled={loading || !email || !password}
+        >
           {loading ? 'Входим…' : 'Войти'}
-        </Button>
+        </button>
       </form>
     </AuthShell>
   );

@@ -1,7 +1,8 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { MountainPoster, VellinLogo } from '../shared';
-import { useMediaQuery } from '../hooks/useMediaQuery';
+import { VellinLockup, VellinMark } from '../landing/VellinMark';
+import '../landing/vx.css';
+import '../landing/auth.css';
 
 interface AuthShellProps {
   title: string;
@@ -10,86 +11,32 @@ interface AuthShellProps {
   footer: ReactNode;
 }
 
+/**
+ * Оболочка входа, регистрации и гостевого входа — окно входа клиента для
+ * Windows, развёрнутое на страницу: тот же тёплый свет сверху, знак V над
+ * формой, поля с подписями прописными и светлая кнопка-пилюля. Формы без
+ * карточки: в приложении её нет, и форма стоит прямо на свету.
+ */
 export function AuthShell({ title, subtitle, children, footer }: AuthShellProps) {
-  const isMobile = useMediaQuery('(max-width: 768px)');
-
-  const surfaceStyle: CSSProperties = {
-    background: 'var(--bg-1)',
-    borderRadius: 'var(--r-xl)',
-    border: '1px solid var(--line-2)',
-    boxShadow: 'var(--shadow-2)',
-    padding: isMobile ? '28px 22px 24px' : '36px 36px 32px',
-    width: '100%',
-    maxWidth: 440,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 20,
-  };
-
+  const titleId = useId();
   return (
-    <div
-      style={{
-        minHeight: '100svh',
-        display: 'grid',
-        gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
-        background: 'var(--bg-0)',
-      }}
-    >
-      {!isMobile && (
-        <aside
-          style={{
-            position: 'relative',
-            overflow: 'hidden',
-            background: 'var(--bg-2)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            padding: 48,
-          }}
-        >
-          <div style={{ position: 'absolute', inset: 0 }}>
-            <MountainPoster seed={1} />
-          </div>
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              background:
-                'linear-gradient(180deg, rgba(0,0,0,0.4), rgba(0,0,0,0.2) 40%, rgba(0,0,0,0.7))',
-            }}
-          />
-          <Link to="/" style={{ position: 'relative', zIndex: 1 }}>
-            <VellinLogo />
-          </Link>
-          <div style={{ position: 'relative', zIndex: 1, maxWidth: 460, color: '#fff' }}>
-            <h2 style={{ fontSize: 32, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>
-              Один поток. Все вместе.
-            </h2>
-            <p style={{ marginTop: 12, fontSize: 15, color: 'rgba(255,255,255,0.8)', lineHeight: 1.5 }}>
-              Vellin синхронизирует видео между всеми участниками — без задержек, с реакциями и чатом.
-            </p>
-          </div>
-        </aside>
-      )}
+    <div className="vx vx-auth">
+      <header className="vx-auth__top">
+        <Link to="/" aria-label="Vellin — на главную">
+          <VellinLockup size={24} direction="row" />
+        </Link>
+      </header>
 
-      <main style={{ display: 'grid', placeItems: 'center', padding: isMobile ? '24px 16px' : 32 }}>
-        <div style={surfaceStyle}>
-          {isMobile && (
-            <Link to="/" style={{ alignSelf: 'flex-start' }}>
-              <VellinLogo size={20} />
-            </Link>
-          )}
-          <div>
-            <h1 style={{ fontSize: isMobile ? 22 : 26, margin: 0, fontWeight: 600, letterSpacing: '-0.02em' }}>
-              {title}
-            </h1>
-            <p style={{ marginTop: 6, color: 'var(--text-1)', fontSize: 14 }}>{subtitle}</p>
+      <main className="vx-auth__main">
+        <section className="vx-auth__column vx-intro" aria-labelledby={titleId}>
+          <VellinMark size={60} />
+          <div className="vx-auth__heading">
+            <h1 id={titleId}>{title}</h1>
+            <p>{subtitle}</p>
           </div>
-          {children}
-          <div style={{ marginTop: 4, color: 'var(--text-2)', fontSize: 13, textAlign: 'center' }}>
-            {footer}
-          </div>
-        </div>
+          <div className="vx-auth__body">{children}</div>
+          <p className="vx-auth__footer">{footer}</p>
+        </section>
       </main>
     </div>
   );
@@ -104,10 +51,11 @@ interface FieldProps {
   autoComplete?: string;
   minLength?: number;
   /**
-   * Имя поля. Нужно браузерам/менеджерам паролей: без `name`/`id` Chrome и
-   * Safari не предлагают сохранённые email/пароль. `id` дублирует `name`.
+   * Имя поля. Нужно браузерам и менеджерам паролей: без `name`/`id` Chrome и
+   * Safari не предлагают сохранённые email и пароль. `id` дублирует `name`.
    */
   name?: string;
+  hint?: string;
 }
 
 export function Field({
@@ -119,50 +67,41 @@ export function Field({
   autoComplete,
   minLength,
   name,
+  hint,
 }: FieldProps) {
+  const fallbackId = useId();
+  const id = name ?? fallbackId;
+  const hintId = `${id}-hint`;
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span style={{ fontSize: 12, color: 'var(--text-2)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+    <div className="vx-field">
+      <label htmlFor={id} className="vx-field__label">
         {label}
-      </span>
+      </label>
       <input
+        className="vx-field__input"
         type={type}
         name={name}
-        id={name}
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         autoComplete={autoComplete}
         minLength={minLength}
-        style={{
-          height: 44,
-          padding: '0 14px',
-          borderRadius: 'var(--r-md)',
-          border: '1px solid var(--line-2)',
-          background: 'var(--bg-2)',
-          color: 'var(--text-0)',
-          fontSize: 15,
-          letterSpacing: '-0.01em',
-          width: '100%',
-        }}
+        aria-describedby={hint ? hintId : undefined}
       />
-    </label>
+      {hint && (
+        <span id={hintId} className="vx-field__hint">
+          {hint}
+        </span>
+      )}
+    </div>
   );
 }
 
 export function ErrorBanner({ message }: { message: string | null }) {
   if (!message) return null;
   return (
-    <div
-      style={{
-        background: 'rgba(209,39,27,0.12)',
-        color: 'var(--accent-hi)',
-        padding: '10px 14px',
-        borderRadius: 'var(--r-md)',
-        fontSize: 13,
-        border: '1px solid rgba(209,39,27,0.3)',
-      }}
-    >
+    <div className="vx-notice" role="alert">
       {message}
     </div>
   );

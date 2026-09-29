@@ -541,6 +541,14 @@ export interface PlatformLimits {
  */
 export type WindowsAudienceKind = 'everyone' | 'admins' | 'users';
 
+/**
+ * Чем открывается главная страница сайта:
+ * - `watch` — только совместный просмотр;
+ * - `watchApp` — сначала клиент для Windows с кнопкой скачивания, за ним
+ *   совместный просмотр.
+ */
+export type LandingMode = 'watch' | 'watchApp';
+
 /** Настройки, относящиеся к Windows-клиенту (страница скачивания). */
 export interface PlatformWindows {
   /**
@@ -558,6 +566,12 @@ export interface PlatformWindows {
   audience: WindowsAudienceKind;
   /** Ники для `audience='users'` (сравнение без учёта регистра). */
   usernames: string[];
+  /**
+   * Режим главной страницы. `watchApp` действует, только пока посетителю
+   * видна страница скачивания: рекламировать приложение, которое нельзя
+   * скачать, нельзя — тогда главная показывает обычный вариант.
+   */
+  landing: LandingMode;
 }
 
 export interface PlatformSettingsDTO {

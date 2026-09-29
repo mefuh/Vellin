@@ -24,7 +24,7 @@ import type {
   DmEligibility,
   PublicUser,
 } from './domain.js';
-import type { PlatformToggles, PlatformMaintenance, PlatformLimits } from './admin.js';
+import type { LandingMode, PlatformToggles, PlatformMaintenance, PlatformLimits } from './admin.js';
 
 // ── Auth ────────────────────────────────────────────────────────────────
 export interface RegisterRequest {
@@ -586,6 +586,11 @@ export interface AppConfigResponse {
    * полностью спрятать страницу и все ссылки на неё.
    */
   windowsDownloadVisible: boolean;
+  /**
+   * Каким вариантом открыть главную для этого посетителя. Сервер уже учёл,
+   * видна ли ему страница скачивания: без неё всегда `watch`.
+   */
+  landingMode: LandingMode;
 }
 
 /** Публикация обновления десктоп-клиента: версия + URL установщика. */

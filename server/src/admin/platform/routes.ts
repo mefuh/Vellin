@@ -58,6 +58,7 @@ const settingsSchema = z.object({
     usernames: z.array(z.string().trim().min(1).max(60)).max(200)
       .transform((list) => [...new Set(list.map((u) => u.trim()))])
       .optional(),
+    landing: z.enum(['watch', 'watchApp']).optional(),
   }).optional(),
 }).refine((p) => Object.keys(p).length > 0, { message: 'Нужна хотя бы одна секция' });
 
