@@ -53,6 +53,13 @@ import { prisma } from './db/prisma.js';
 import { APP_VERSION, getMinVersions, isClientOutdated, isClientPlatform } from './appMeta.js';
 import { configRoutes } from './config/routes.js';
 import { registerOpenApi } from './openapi/register.js';
+import type { Principal } from './auth/jwt.js';
+
+/**
+ * Адреса самой машины. Раньше был только IPv4, а локальный клиент ходит на
+ * `localhost`, который Windows разрешает в `::1`, — и попадал под лимит.
+ */
+const LOCAL_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 export async function buildApp(): Promise<FastifyInstance> {
   const env = loadEnv();
@@ -79,9 +86,33 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
   await app.register(jwt, { secret: env.JWT_SECRET });
   await app.register(rateLimit, {
-    max: 100,
+    // Вошедший человек считается по своему аккаунту, а не по адресу. По
+    // адресу счёт общий у всех, кто за одним NAT, и у одного человека на
+    // сайте и в клиенте сразу: лимит кончался за пару переключений разделов.
+    keyGenerator: (req) => {
+      const token = req.headers.authorization?.startsWith('Bearer ')
+        ? req.headers.authorization.slice(7)
+        : null;
+      if (token) {
+        try {
+          // Подпись проверяется: иначе поддельным токеном можно было бы
+          // раскладывать запросы по чужим счётчикам и обходить лимит.
+          const p = app.jwt.verify<Partial<Principal> & { ticket?: true }>(token);
+          if (!p.ticket && p.userId) return `${p.kind === 'guest' ? 'g' : 'u'}:${p.userId}`;
+        } catch {
+          // Просроченный или чужой токен — считаем по адресу, как аноним.
+        }
+      }
+      return req.ip;
+    },
+    // Аккаунту — с запасом на живое приложение, анониму — как было.
+    max: (_req, key) => (key.startsWith('u:') || key.startsWith('g:') ? 300 : 100),
     timeWindow: '1 minute',
-    allowList: ['127.0.0.1'],
+    // Загруженные файлы под лимит не идут: это отдача готового файла, а не
+    // работа сервера. Каждый аватар и снимок в списке был отдельным запросом,
+    // и браузер вдобавок перепроверял их на каждом показе.
+    allowList: (req, key) =>
+      LOCAL_ADDRESSES.has(key) || (req.url ?? '').startsWith('/api/uploads/'),
   });
   await app.register(websocket, {
     options: { maxPayload: 64 * 1024 },
@@ -104,6 +135,11 @@ export async function buildApp(): Promise<FastifyInstance> {
     root: path.resolve(env.UPLOADS_DIR),
     prefix: '/api/uploads/',
     decorateReply: false,
+    // Каждый файл пишется под новым случайным именем и больше не меняется:
+    // новый аватар — новое имя. Значит, его можно не перепроверять. Без этого
+    // браузер спрашивал сервер про каждую картинку на каждом показе списка.
+    maxAge: '30d',
+    immutable: true,
   });
 
   // Версионный гейтинг клиентов (force-update). Нативные приложения шлют
