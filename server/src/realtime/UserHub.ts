@@ -1,4 +1,4 @@
-import type { FriendPresence, PrivacyRule, RoomRef, UserS2C } from '@vellin/shared';
+import type { FriendPresence, PresenceStatus, PrivacyRule, RoomRef, UserS2C } from '@vellin/shared';
 import { DEFAULT_PRIVACY_RULE } from '@vellin/shared';
 import { logger } from '../utils/logger.js';
 import { canSee } from '../privacy/privacy.js';
@@ -18,6 +18,8 @@ export interface UserConnection {
 type FriendResolver = (userId: string) => Promise<string[]>;
 /** Персистит «был в сети» в БД при уходе пользователя в офлайн. */
 type LastSeenWriter = (userId: string, at: Date) => void;
+/** Возвращает выбранный руками статус присутствия. */
+type PresenceStatusResolver = (userId: string) => Promise<PresenceStatus>;
 /** Возвращает правило приватности категории «online» для пользователя. */
 type OnlinePrivacyResolver = (userId: string) => Promise<PrivacyRule>;
 
@@ -30,6 +32,8 @@ type OnlinePrivacyResolver = (userId: string) => Promise<PrivacyRule>;
 class UserHub {
   /** userId → набор открытых соединений. */
   private readonly conns = new Map<string, Set<UserConnection>>();
+  /** connId → соединение: адресная доставка конкретной вкладке (звонки). */
+  private readonly connsById = new Map<string, UserConnection>();
   /** userId → комната, которую он сейчас смотрит. */
   private readonly rooms = new Map<string, RoomRef>();
   /** userId → момент последнего ухода в офлайн (ms). In-memory, дублируется в БД. */
@@ -51,12 +55,20 @@ class UserHub {
   private friendResolver: FriendResolver | null = null;
   private lastSeenWriter: LastSeenWriter | null = null;
   private onlinePrivacyResolver: OnlinePrivacyResolver | null = null;
+  private presenceStatusResolver: PresenceStatusResolver | null = null;
+  /** userId → выбранный им статус. Пусто — ещё не читали из базы. */
+  private readonly presenceStatus = new Map<string, PresenceStatus>();
   /**
    * Хук на смену играющего видео комнаты — живая синхронизация карточек-
    * приглашений в ЛС (DI разрывает цикл импортов realtime↔dm). В отличие от
    * `broadcastRoomVideo`, вызывается ВСЕГДА (не гейтится подписчиками библиотеки).
    */
   private roomVideoChanged: ((p: { roomId: string; slug: string; videoPoster: string | null; videoTitle: string | null }) => void) | null = null;
+  /**
+   * Хук на закрытие соединения — звонкам нужно знать, что вкладка, которая
+   * вела разговор, отвалилась (DI разрывает цикл импортов realtime↔calls).
+   */
+  private connectionClosed: ((conn: UserConnection) => void) | null = null;
 
   setFriendResolver(fn: FriendResolver): void {
     this.friendResolver = fn;
@@ -67,8 +79,36 @@ class UserHub {
   setOnlinePrivacyResolver(fn: OnlinePrivacyResolver): void {
     this.onlinePrivacyResolver = fn;
   }
+  setPresenceStatusResolver(fn: PresenceStatusResolver): void {
+    this.presenceStatusResolver = fn;
+  }
+
+  /** Сменить выбранный статус и сразу разослать его тем, кто видит присутствие. */
+  setPresenceStatus(userId: string, status: PresenceStatus): void {
+    this.presenceStatus.set(userId, status);
+    void this.broadcastPresence(userId);
+  }
+
+  /**
+   * Подтянуть статус из базы, если он ещё не в памяти. Вызывается при первом
+   * подключении: дальше значение живёт в кэше и обновляется через
+   * [setPresenceStatus].
+   */
+  private async ensurePresenceStatus(userId: string): Promise<void> {
+    if (this.presenceStatus.has(userId) || !this.presenceStatusResolver) return;
+    try {
+      const status = await this.presenceStatusResolver(userId);
+      this.presenceStatus.set(userId, status);
+      if (status !== 'online') void this.broadcastPresence(userId);
+    } catch (err) {
+      logger.error({ err, userId }, 'presence: status resolver failed');
+    }
+  }
   setRoomVideoChangedHook(fn: (p: { roomId: string; slug: string; videoPoster: string | null; videoTitle: string | null }) => void): void {
     this.roomVideoChanged = fn;
+  }
+  setConnectionClosedHook(fn: (conn: UserConnection) => void): void {
+    this.connectionClosed = fn;
   }
 
   attach(conn: UserConnection): void {
@@ -79,8 +119,10 @@ class UserHub {
     }
     const wasOnline = this.isOnline(conn.userId);
     set.add(conn);
+    this.connsById.set(conn.id, conn);
     // Только что подключился — считаем активным, пока клиент не пришлёт иначе.
     this.activeByConn.set(conn, true);
+    void this.ensurePresenceStatus(conn.userId);
     if (!wasOnline) {
       this.lastSeen.delete(conn.userId); // снова онлайн
       void this.broadcastPresence(conn.userId);
@@ -88,6 +130,10 @@ class UserHub {
   }
 
   detach(conn: UserConnection): void {
+    this.connsById.delete(conn.id);
+    // Звонок мог вестись именно из этой вкладки — сообщаем до того, как
+    // соединение исчезнет из реестра.
+    this.connectionClosed?.(conn);
     // Снять все подписки этого соединения.
     const watched = this.watchedByConn.get(conn);
     if (watched) {
@@ -179,12 +225,20 @@ class UserHub {
   }
 
   presenceOf(userId: string): FriendPresence {
-    const online = this.isOnline(userId);
-    const seen = online ? null : this.lastSeen.get(userId);
+    const connected = this.isOnline(userId);
+    // Выбранный статус показывается только при живом соединении: «в сети» без
+    // связи — неправда, а «не беспокоить» без связи неотличимо от «не в сети».
+    const chosen = this.presenceStatus.get(userId) ?? 'online';
+    const status: PresenceStatus = connected ? chosen : 'offline';
+    // «Не беспокоить» — человек на связи и не прячется: тишина у него, а не
+    // невидимость для других. Скрывает присутствие только «не в сети».
+    const online = status === 'online' || status === 'dnd';
+    const seen = connected ? null : this.lastSeen.get(userId);
     return {
       userId,
       online,
-      currentRoom: this.roomOf(userId),
+      status,
+      currentRoom: online ? this.roomOf(userId) : null,
       lastSeenAt: seen ? new Date(seen).toISOString() : null,
     };
   }
@@ -283,6 +337,47 @@ class UserHub {
   }
 
   /**
+   * Отправить сообщение ОДНОМУ соединению. Нужно звонкам: разговор ведёт
+   * конкретная вкладка, и ICE-конфиг с сигналингом уходят только ей.
+   */
+  pushToConn(connId: string, msg: UserS2C): void {
+    const conn = this.connsById.get(connId);
+    if (conn?.isOpen()) conn.send(msg);
+  }
+
+  /**
+   * Всем соединениям пользователя, КРОМЕ одного. Ведущая разговор вкладка
+   * получает свою версию сообщения (с ICE-конфигом), остальные — общую, и
+   * никто не должен получить обе.
+   */
+  pushToExcept(userId: string, exceptConnId: string | null, msg: UserS2C): void {
+    const set = this.conns.get(userId);
+    if (!set) return;
+    for (const c of set) {
+      if (c.id === exceptConnId) continue;
+      if (c.isOpen()) c.send(msg);
+    }
+  }
+
+  /**
+   * Есть ли у пользователя хоть одно открытое соединение. В отличие от
+   * `isOnline`, не требует активности вкладки: простаивающая вкладка не
+   * показывается «в сети», но звонок в ней прозвенеть обязан.
+   */
+  hasConnection(userId: string): boolean {
+    return (this.conns.get(userId)?.size ?? 0) > 0;
+  }
+
+  /**
+   * Комната пользователя без гейта активности — для запрета звонков тому, кто
+   * смотрит. `roomOf` для этого не годится: у простаивающей вкладки он вернёт
+   * null, и звонок прорвался бы к человеку в комнате.
+   */
+  roomOfAny(userId: string): RoomRef | null {
+    return this.rooms.get(userId) ?? null;
+  }
+
+  /**
    * Разослать сообщение ВСЕМ онлайн-соединениям (все пользователи, все вкладки).
    * Используется для мгновенного применения рантайм-эффектов вроде тех.работ.
    */
@@ -320,7 +415,7 @@ class UserHub {
   ): FriendPresence {
     const visible = canSee(rule, { isSelf: viewerId === ownerId, isFriend, viewerId });
     if (visible) return raw;
-    return { userId: ownerId, online: false, currentRoom: null, lastSeenAt: null };
+    return { userId: ownerId, online: false, status: 'offline', currentRoom: null, lastSeenAt: null };
   }
 
   /** Отдать одному подписчику текущий презенс цели с учётом приватности. */

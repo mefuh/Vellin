@@ -94,6 +94,9 @@ export function PublicProfile() {
       usePresenceStore.getState().apply({
         userId: res.profile.id,
         online: res.profile.online,
+        // Профиль по REST отдаёт только «онлайн да/нет»: выбранный статус
+        // приходит живым presence по сокету и перезапишет это значение.
+        status: res.profile.online ? 'online' : 'offline',
         currentRoom: res.profile.currentRoom,
         lastSeenAt: res.profile.lastSeenAt,
       });

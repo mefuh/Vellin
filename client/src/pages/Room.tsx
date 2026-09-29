@@ -9,8 +9,10 @@ import { useUIStore } from '../stores/uiStore';
 import { roomsApi } from '../api/rooms';
 import { ApiHttpError } from '../api/client';
 import { useRoomSync } from '../hooks/useRoomSync';
-import { useCall } from '../hooks/useCall';
+import { useCall, type CallTransport } from '../hooks/useCall';
 import { CallProvider } from '../hooks/CallContext';
+import { callSignalBus } from '../ws/callSignalBus';
+import { callSpeakingBus } from '../ws/callSpeakingBus';
 import { useIsMobile } from '../hooks/useMediaQuery';
 import { VideoPlayer } from '../components/room/VideoPlayer';
 import { RoomChat } from '../components/room/RoomChat';
@@ -137,13 +139,39 @@ export function Room() {
   const rtcConfig = useRoomStore((s) => s.rtc);
   const callMembers = useRoomStore((s) => s.call.members);
   const setMyCallStateStore = useRoomStore((s) => s.setMyCallState);
+  // Транспорт комнаты: те же сообщения, что и раньше, просто теперь хук знает
+  // о них через интерфейс, а не через комнатный протокол напрямую.
+  const callTransport = useMemo<CallTransport>(
+    () => ({
+      join: (wantVideo) => {
+        send({ t: 'call_join', wantVideo, clientTs: Date.now() });
+      },
+      leave: () => {
+        send({ t: 'call_leave', clientTs: Date.now() });
+      },
+      signal: (toUserId, payload) => {
+        send({ t: 'call_signal', toUserId, payload, clientTs: Date.now() });
+      },
+      media: (audio, video) => {
+        send({ t: 'call_media', audio, video, clientTs: Date.now() });
+      },
+      speaking: (speaking) => {
+        send({ t: 'call_speaking', speaking, clientTs: Date.now() });
+      },
+    }),
+    [send],
+  );
+  const setMyMedia = useRoomStore((s) => s.setMyMedia);
   const callApi = useCall({
     myUserId: you?.userId ?? null,
     myUserKind: you?.kind ?? null,
     rtcConfig,
     callMembers,
     wsState,
-    send,
+    transport: callTransport,
+    signalBus: callSignalBus,
+    speakingBus: callSpeakingBus,
+    onLocalMedia: setMyMedia,
   });
   useEffect(() => {
     setMyCallStateStore(callApi.state);

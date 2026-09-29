@@ -91,6 +91,7 @@ export async function configRoutes(app: FastifyInstance): Promise<void> {
     const settings = await getSettings();
     const vapid = getVapidPublicKey();
     const principal = await optionalPrincipal(request);
+    const downloadVisible = await isWindowsDownloadVisible(settings.windows, principal);
     const response: AppConfigResponse = {
       version: APP_VERSION,
       minVersions: getMinVersions(),
@@ -100,7 +101,10 @@ export async function configRoutes(app: FastifyInstance): Promise<void> {
       limits: settings.limits,
       push: { mode: 'webpush', vapidPublicKey: vapid },
       update: { windows: windowsUpdate() },
-      windowsDownloadVisible: await isWindowsDownloadVisible(settings.windows, principal),
+      windowsDownloadVisible: downloadVisible,
+      // Главная с приложением — только тому, кто может его скачать: иначе
+      // её главная кнопка вела бы в никуда.
+      landingMode: settings.windows.landing === 'watchApp' && downloadVisible ? 'watchApp' : 'watch',
       windowsQrLoginEnabled: settings.windows.qrLogin,
     };
     return response;

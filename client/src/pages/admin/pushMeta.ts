@@ -11,6 +11,7 @@ export interface TypeMeta { label: string; description: string; icon: string; }
 
 export const PUSH_TYPE_META: Record<PushNotificationType, TypeMeta> = {
   direct_message: { label: 'Личное сообщение', description: 'Когда пользователю пишут в личку', icon: 'chat' },
+  dm_call_missed: { label: 'Пропущенный звонок', description: 'Когда пользователю звонили и не дозвонились', icon: 'phone' },
   friend_request: { label: 'Заявка в друзья', description: 'Когда пользователю отправили заявку', icon: 'userPlus' },
   friend_accepted: { label: 'Заявку приняли', description: 'Когда заявку пользователя приняли', icon: 'check' },
   room_invite: { label: 'Приглашение в комнату', description: 'Когда пользователя зовут смотреть вместе', icon: 'link' },
@@ -46,6 +47,7 @@ export const PUSH_VARIABLES: Record<string, VarMeta> = {
  */
 export const TYPE_VARIABLES: Record<PushNotificationType, string[]> = {
   direct_message: ['username', 'message', 'publicId', 'conversationId'],
+  dm_call_missed: ['username', 'publicId', 'conversationId'],
   friend_request: ['username', 'actorId'],
   friend_accepted: ['username', 'actorId'],
   room_invite: ['username', 'roomName', 'roomSlug'],

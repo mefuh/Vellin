@@ -1,23 +1,30 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Chip, Icon, VellinLogo, VellinMark, type IconName } from '../shared';
 import { useAuthStore } from '../stores/authStore';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery';
+import { DownloadGlyph } from '../landing/AppLanding';
+import { APP_FACTS, APP_NOT_YET } from '../landing/appFacts';
+import { VellinLockup, VellinMark } from '../landing/VellinMark';
 import { NotFound } from './NotFound';
+import '../landing/vx.css';
+import '../landing/landing.css';
+import '../landing/download.css';
 
 /**
- * Страница загрузки Windows-клиента.
+ * Страница скачивания клиента для Windows.
  *
- * Данные о публикации (версия + ссылка на установщик) берём из того же
+ * Данные о публикации (версия и ссылка на установщик) — из того же
  * `/api/config`, откуда их читает автообновление самого приложения
- * (`update.windows`, env `WINAPP_LATEST_VERSION`/`WINAPP_DOWNLOAD_URL`) —
- * второго источника правды о «текущей версии» заводить нельзя. Пока сборка не
- * опубликована, страница честно показывает состояние «скоро».
+ * (`update.windows`), второго источника правды о «текущей версии» нет. Пока
+ * сборка не опубликована, страница честно говорит «скоро».
+ *
+ * Первый экран — проверка компьютера: страница отмечает по строке, подходит
+ * ли система. Проверка по браузеру неточна, поэтому она только подсказывает:
+ * скачать можно всегда.
  */
 
-/** Примерный размер установщика — для ожиданий по трафику, не критично точный. */
-const INSTALLER_SIZE = '≈ 37 МБ';
+/** Размер установщика — для ожиданий по трафику. Сверять с каждой сборкой. */
+const INSTALLER_SIZE = '≈ 55 МБ';
 
 /**
  * Ссылка для кнопки на сайте.
@@ -40,523 +47,303 @@ function downloadHref(url: string): string {
   }
 }
 
-interface Feature {
-  icon: IconName;
-  title: string;
-  text: string;
+type Verdict = 'ok' | 'warn' | 'info';
+
+interface Check {
+  label: string;
+  verdict: Verdict;
+  note: string;
 }
 
-const FEATURES: Feature[] = [
-  {
-    icon: 'sparkles',
-    title: 'Нативное приложение',
-    text: 'Отрисовка собственным движком, без встроенного браузера и вкладок. Открывается мгновенно и не ест память как ещё один Chrome.',
-  },
-  {
-    icon: 'lock',
-    title: 'Вход по аккаунту',
-    text: 'Сессия хранится на компьютере: один раз вошли — дальше приложение открывается сразу в вашем профиле.',
-  },
-  {
-    icon: 'refresh',
-    title: 'Тихое автообновление',
-    text: 'Клиент сам проверяет новую версию и ставит её в фоне. Ничего скачивать вручную больше не нужно.',
-  },
-  {
-    icon: 'user',
-    title: 'Профиль и аватар',
-    text: 'Личные данные, смена почты и пароля, загрузка аватара — всё то же, что в веб-версии.',
-  },
-];
+interface SystemGuess {
+  windows: boolean | null;
+  x64: boolean | null;
+}
 
-const STEPS: { title: string; text: string }[] = [
-  {
-    title: 'Скачайте установщик',
-    text: 'Один файл Vellin-Setup.exe — внутри уже всё нужное, отдельных зависимостей ставить не надо.',
-  },
-  {
-    title: 'Запустите и нажмите «Установить»',
-    text: 'Установка идёт в вашу папку пользователя и не просит прав администратора. Занимает несколько секунд.',
-  },
-  {
-    title: 'Войдите в аккаунт',
-    text: 'Ярлыки появятся в меню «Пуск» и на рабочем столе. Дальше — тот же аккаунт, что и на сайте.',
-  },
-];
+interface UaDataLike {
+  platform?: string;
+  getHighEntropyValues?: (hints: string[]) => Promise<{ platform?: string; bitness?: string; architecture?: string }>;
+}
 
-const REQUIREMENTS: { label: string; value: string }[] = [
-  { label: 'Система', value: 'Windows 10 или 11, 64-бит' },
-  { label: 'Место на диске', value: '≈ 150 МБ' },
-  { label: 'Права администратора', value: 'Не требуются' },
-  { label: 'Куда ставится', value: '%LOCALAPPDATA%\\Vellin' },
-  { label: 'Удаление', value: 'Через «Программы и компоненты»' },
-];
+/** Что можно понять о системе из браузера. null — понять нельзя. */
+async function guessSystem(): Promise<SystemGuess> {
+  const ua = navigator.userAgent;
+  const data = (navigator as Navigator & { userAgentData?: UaDataLike }).userAgentData;
+  if (data?.getHighEntropyValues) {
+    try {
+      const v = await data.getHighEntropyValues(['platform', 'bitness', 'architecture']);
+      const windows = v.platform ? v.platform === 'Windows' : null;
+      const x64 = v.bitness ? v.bitness === '64' && v.architecture !== 'arm' : null;
+      return { windows, x64 };
+    } catch {
+      // Браузер отказал — остаёмся на строке User-Agent.
+    }
+  }
+  const windows = /Windows/i.test(ua) ? true : /Android|iPhone|iPad|Macintosh|Linux/i.test(ua) ? false : null;
+  const x64 = windows ? (/Win64|x64|WOW64/i.test(ua) ? true : null) : null;
+  return { windows, x64 };
+}
+
+function checksFor(sys: SystemGuess): Check[] {
+  return [
+    sys.windows === true
+      ? { label: 'Windows 10 или 11', verdict: 'ok', note: 'подходит' }
+      : sys.windows === false
+        ? { label: 'Это не Windows', verdict: 'warn', note: 'скачать можно, установить — на компьютере с Windows' }
+        : { label: 'Windows 10 или 11', verdict: 'info', note: 'нужна одна из них' },
+    sys.x64 === true
+      ? { label: '64-битная система', verdict: 'ok', note: 'подходит' }
+      : sys.x64 === false
+        ? { label: '32-битная система', verdict: 'warn', note: 'нужна 64-битная Windows' }
+        : { label: '64-битная система', verdict: 'info', note: 'нужна 64-битная Windows' },
+    { label: 'Права администратора', verdict: 'ok', note: 'не нужны' },
+    { label: 'Место на диске', verdict: 'info', note: '≈ 150 МБ' },
+  ];
+}
+
+/** Шаг проверки: строки отмечаются по очереди, как в апдейтере клиента. */
+const CHECK_STEP_MS = 420;
 
 export function Download() {
   const user = useAuthStore((s) => s.user);
-  const isMobile = useIsMobile();
-  const isNarrow = useMediaQuery('(max-width: 600px)');
-
   const { config, loading } = useAppConfig();
   const release = config?.update.windows ?? null;
-  // Показываем подсказку «откройте на Windows», если зашли с другой ОС —
-  // ссылку при этом не прячем: файл могут скачать заранее.
-  const [isWindows] = useState(() =>
-    typeof navigator !== 'undefined' ? /Windows/i.test(navigator.userAgent) : true,
-  );
 
-  // Страница выключена в админ-панели (или закрыта для этого зрителя) — ведём
-  // себя так, будто маршрута не существует. Пока конфиг не пришёл, не рисуем
-  // ни страницу, ни 404: иначе на секунду мелькнёт неверный экран.
-  if (loading) return <div style={{ minHeight: '100svh', background: 'var(--bg-0)' }} />;
+  const [checks, setChecks] = useState<Check[] | null>(null);
+  const [shown, setShown] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    void guessSystem().then((sys) => {
+      if (alive) setChecks(checksFor(sys));
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!checks) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) {
+      setShown(checks.length);
+      return;
+    }
+    const timers = checks.map((_, i) => window.setTimeout(() => setShown(i + 1), 380 + i * CHECK_STEP_MS));
+    return () => timers.forEach(window.clearTimeout);
+  }, [checks]);
+
+  // Страница выключена в админ-панели (или закрыта для этого зрителя) — как
+  // будто маршрута нет. Пока конфиг не пришёл, не рисуем ни страницу, ни 404.
+  if (loading) return <div className="vx vx-page" />;
   if (!config?.windowsDownloadVisible) return <NotFound />;
 
-  const card: React.CSSProperties = {
-    background: 'var(--bg-2)',
-    border: '1px solid var(--line-2)',
-    borderRadius: 'var(--r-xl)',
-    padding: isNarrow ? 16 : 20,
-  };
+  const done = checks !== null && shown >= checks.length;
+  const warned = checks?.some((c) => c.verdict === 'warn') ?? false;
 
   return (
-    <div
-      style={{
-        minHeight: '100svh',
-        background:
-          'radial-gradient(1200px 600px at 80% -20%, var(--accent-soft), transparent 60%), var(--bg-0)',
-        color: 'var(--text-0)',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
-      <header
-        style={{
-          minHeight: 72,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '12px max(16px, 4vw)',
-          gap: 12,
-          flexWrap: 'wrap',
-        }}
-      >
-        <Link to="/" style={{ textDecoration: 'none' }}>
-          <VellinLogo />
+    <div className="vx vx-page">
+      <header className="vx-top">
+        <Link to="/" aria-label="Vellin — на главную">
+          <VellinLockup size={26} direction="row" />
         </Link>
-        <nav style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <nav className="vx-top__nav" aria-label="Аккаунт">
           {user ? (
-            <Link to="/library">
-              <Button variant="secondary" size="md" iconRight="arrow">
-                В библиотеку
-              </Button>
+            <Link to="/library" className="vx-btn vx-btn--quiet">
+              Мои комнаты
             </Link>
           ) : (
             <>
-              <Link to="/login">
-                <Button variant="ghost" size="md">
-                  Войти
-                </Button>
+              <Link to="/login" className="vx-btn vx-btn--ghost">
+                Войти
               </Link>
-              <Link to="/register">
-                <Button variant="secondary" size="md">
-                  Создать аккаунт
-                </Button>
+              <Link to="/register" className="vx-btn vx-btn--quiet">
+                Создать аккаунт
               </Link>
             </>
           )}
         </nav>
       </header>
 
-      <main
-        style={{
-          flex: 1,
-          width: '100%',
-          maxWidth: 1180,
-          margin: '0 auto',
-          padding: isMobile ? '16px max(16px, 4vw) 56px' : '32px max(16px, 4vw) 80px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: isMobile ? 48 : 72,
-        }}
-      >
-        {/* ── Герой: слева оффер и кнопка, справа макет окна приложения ── */}
-        <section
-          style={{
-            display: 'grid',
-            gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.05fr) minmax(0, 1fr)',
-            gap: isMobile ? 32 : 48,
-            alignItems: 'center',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 22, maxWidth: 600 }}>
-            <Chip tone="accent" icon="sparkles" style={{ alignSelf: 'flex-start' }}>
-              Windows · beta{release ? ` v ${release.latestVersion}` : ''}
-            </Chip>
-            <h1
-              style={{
-                fontSize: 'clamp(34px, 4.6vw, 56px)',
-                lineHeight: 1.06,
-                fontWeight: 600,
-                letterSpacing: '-0.03em',
-                margin: 0,
-              }}
-            >
-              Vellin для
-              <br />
-              <span style={{ color: 'var(--accent-hi)' }}>Windows.</span>
-            </h1>
-            <p
-              style={{
-                fontSize: 18,
-                color: 'var(--text-1)',
-                lineHeight: 1.5,
-                margin: 0,
-                maxWidth: 520,
-              }}
-            >
-              Настольное приложение вместо вкладки в браузере: свой аккаунт, профиль и вход в пару
-              секунд. Ставится без прав администратора и обновляется само.
-            </p>
-
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-              {release ? (
-                <a href={downloadHref(release.url)} download style={{ textDecoration: 'none' }}>
-                  <Button variant="primary" size="lg" icon="download">
-                    Скачать для Windows
-                  </Button>
-                </a>
-              ) : (
-                <Button variant="primary" size="lg" icon="download" disabled>
-                  {loading ? 'Загружаем…' : 'Скоро'}
-                </Button>
-              )}
-              <Link to={user ? '/library' : '/register'} style={{ textDecoration: 'none' }}>
-                <Button variant="glass" size="lg" icon="globe">
-                  Остаться в браузере
-                </Button>
-              </Link>
-            </div>
-
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: '10px 20px',
-                color: 'var(--text-2)',
-                fontSize: 13,
-              }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Icon name="check" size={14} /> {INSTALLER_SIZE}
-              </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Icon name="check" size={14} /> Windows 10/11, 64-бит
-              </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Icon name="check" size={14} /> Без прав администратора
-              </span>
-            </div>
-
-            {!loading && !release && (
-              <p style={{ margin: 0, color: 'var(--text-2)', fontSize: 13, lineHeight: 1.5 }}>
-                Сборка ещё не опубликована. Загляните чуть позже — ссылка появится здесь
-                автоматически.
-              </p>
-            )}
-            {!isWindows && release && (
-              <p style={{ margin: 0, color: 'var(--text-2)', fontSize: 13, lineHeight: 1.5 }}>
-                Похоже, вы не на Windows. Файл всё равно скачается — просто откройте эту страницу
-                на нужном компьютере, когда будете готовы установить.
-              </p>
-            )}
-          </div>
-
-          {/* Макет окна приложения — не скриншот, а стилизованный кадр в фирменной палитре. */}
-          <div
-            style={{
-              borderRadius: 'var(--r-2xl)',
-              overflow: 'hidden',
-              border: '1px solid var(--line-2)',
-              boxShadow: 'var(--shadow-3)',
-              background: 'var(--bg-2)',
-            }}
-          >
-            <div
-              style={{
-                height: 38,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '0 12px',
-                background: 'var(--bg-3)',
-                borderBottom: '1px solid var(--line-2)',
-              }}
-            >
-              <span style={{ display: 'flex', gap: 6 }}>
-                {['var(--line-2)', 'var(--line-2)', 'var(--accent)'].map((c, i) => (
-                  <span
-                    key={i}
-                    style={{ width: 9, height: 9, borderRadius: '50%', background: c }}
-                  />
-                ))}
-              </span>
-              <span style={{ fontSize: 12, color: 'var(--text-2)', letterSpacing: '-0.01em' }}>
-                Vellin — рабочий стол
-              </span>
-            </div>
-            {/* Содержимое кадра намеренно повторяет то, что в клиенте уже есть
-                (профиль и вход), а не комнаты — их в приложении пока нет. */}
-            <div
-              style={{
-                aspectRatio: '16 / 10',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 14,
-                padding: isNarrow ? 16 : 24,
-                background:
-                  'radial-gradient(420px 220px at 50% 0%, var(--accent-soft), transparent 70%), var(--bg-1)',
-              }}
-            >
-              <VellinMark size={56} />
-              <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.02em' }}>
-                  С возвращением
-                </span>
-                <span style={{ fontSize: 13, color: 'var(--text-2)' }}>
-                  Сессия сохранена на этом компьютере
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                <Chip tone="success" icon="check">
-                  Вход выполнен
-                </Chip>
-                <Chip tone="neutral" icon="user">
-                  Профиль
-                </Chip>
-                <Chip tone="neutral" icon="refresh">
-                  Обновлено
-                </Chip>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ── Возможности ── */}
-        <section style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <h2
-            style={{
-              margin: 0,
-              fontSize: 'clamp(24px, 2.6vw, 32px)',
-              fontWeight: 600,
-              letterSpacing: '-0.02em',
-            }}
-          >
-            Что умеет приложение
-          </h2>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: isMobile
-                ? '1fr'
-                : 'repeat(auto-fit, minmax(250px, 1fr))',
-              gap: 16,
-            }}
-          >
-            {FEATURES.map((f) => (
-              <div key={f.title} style={{ ...card, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <span
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 'var(--r-md)',
-                    background: 'var(--accent-soft)',
-                    color: 'var(--accent-hi)',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Icon name={f.icon} size={18} />
-                </span>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em' }}>
-                  {f.title}
-                </h3>
-                <p style={{ margin: 0, color: 'var(--text-1)', fontSize: 14, lineHeight: 1.5 }}>
-                  {f.text}
-                </p>
-              </div>
-            ))}
-          </div>
-          <p style={{ margin: 0, color: 'var(--text-2)', fontSize: 13, lineHeight: 1.5 }}>
-            Комнаты и совместный просмотр пока живут в веб-версии — в приложении они появятся
-            следующими. Аккаунт общий, ничего переносить не придётся.
-          </p>
-        </section>
-
-        {/* ── Установка ── */}
-        <section style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <h2
-            style={{
-              margin: 0,
-              fontSize: 'clamp(24px, 2.6vw, 32px)',
-              fontWeight: 600,
-              letterSpacing: '-0.02em',
-            }}
-          >
-            Установка за три шага
-          </h2>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))',
-              gap: 16,
-            }}
-          >
-            {STEPS.map((s, i) => (
-              <div key={s.title} style={{ ...card, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <span
-                  style={{
-                    fontSize: 28,
-                    fontWeight: 600,
-                    letterSpacing: '-0.03em',
-                    color: 'var(--accent-hi)',
-                    lineHeight: 1,
-                  }}
-                >
-                  {i + 1}
-                </span>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em' }}>
-                  {s.title}
-                </h3>
-                <p style={{ margin: 0, color: 'var(--text-1)', fontSize: 14, lineHeight: 1.5 }}>
-                  {s.text}
-                </p>
-              </div>
-            ))}
-          </div>
-
-          {/* Предупреждение SmartScreen — самая частая причина «не устанавливается». */}
-          <div
-            style={{
-              ...card,
-              display: 'flex',
-              gap: 12,
-              alignItems: 'flex-start',
-              background: 'var(--accent-soft)',
-              border: '1px solid rgba(209,39,27,0.2)',
-            }}
-          >
-            <span style={{ color: 'var(--accent-hi)', flexShrink: 0, marginTop: 2 }}>
-              <Icon name="lock" size={18} />
-            </span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <strong style={{ fontSize: 15, fontWeight: 600 }}>
-                Если Windows покажет синее окно SmartScreen
-              </strong>
-              <p style={{ margin: 0, color: 'var(--text-1)', fontSize: 14, lineHeight: 1.5 }}>
-                Это обычное предупреждение для новых программ без платной подписи издателя.
-                Нажмите «Подробнее» → «Выполнить в любом случае». Подпись мы добавим в одном из
-                ближайших обновлений.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* ── Требования ── */}
-        <section style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <h2
-            style={{
-              margin: 0,
-              fontSize: 'clamp(24px, 2.6vw, 32px)',
-              fontWeight: 600,
-              letterSpacing: '-0.02em',
-            }}
-          >
-            Требования
-          </h2>
-          <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
-            {REQUIREMENTS.map((r, i) => (
-              <div
-                key={r.label}
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 8,
-                  justifyContent: 'space-between',
-                  padding: isNarrow ? '12px 16px' : '14px 20px',
-                  borderTop: i === 0 ? 'none' : '1px solid var(--line-2)',
-                  fontSize: 14,
-                }}
-              >
-                <span style={{ color: 'var(--text-2)' }}>{r.label}</span>
-                <span style={{ color: 'var(--text-0)' }}>{r.value}</span>
-              </div>
-            ))}
-            {release && (
-              <div
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 8,
-                  justifyContent: 'space-between',
-                  padding: isNarrow ? '12px 16px' : '14px 20px',
-                  borderTop: '1px solid var(--line-2)',
-                  fontSize: 14,
-                }}
-              >
-                <span style={{ color: 'var(--text-2)' }}>Текущая версия</span>
-                <span style={{ color: 'var(--text-0)' }}>
-                  {release.latestVersion} · {INSTALLER_SIZE}
-                </span>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* ── Финальный призыв ── */}
-        <section
-          style={{
-            ...card,
-            padding: isMobile ? 24 : 32,
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 20,
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background:
-              'linear-gradient(120deg, var(--accent-soft), transparent 60%), var(--bg-2)',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 520 }}>
-            <h2
-              style={{
-                margin: 0,
-                fontSize: 'clamp(20px, 2.2vw, 26px)',
-                fontWeight: 600,
-                letterSpacing: '-0.02em',
-              }}
-            >
-              Готовы попробовать?
-            </h2>
-            <p style={{ margin: 0, color: 'var(--text-1)', fontSize: 15, lineHeight: 1.5 }}>
-              Скачивание бесплатное, аккаунт — тот же, что на сайте.
+      <main>
+        <section className="vx-dl vx-intro" aria-labelledby="vx-dl-title">
+          <VellinMark size={60} />
+          <div className="vx-dl__heading">
+            <h1 id="vx-dl-title">Vellin для Windows</h1>
+            <p className="vx-num">
+              {release ? `Версия ${release.latestVersion} · ${INSTALLER_SIZE}` : 'Сборка готовится к публикации'}
             </p>
           </div>
-          {release ? (
-            <a href={downloadHref(release.url)} download style={{ textDecoration: 'none' }}>
-              <Button variant="primary" size="lg" icon="download">
+
+          <div className="vx-check" aria-label="Проверка компьютера">
+            <ul className="vx-check__list" aria-live="polite">
+              {(checks ?? checksFor({ windows: null, x64: null })).map((c, i) => (
+                <li key={c.label} data-state={checks && i < shown ? c.verdict : 'wait'}>
+                  <Mark state={checks && i < shown ? c.verdict : 'wait'} />
+                  <span className="vx-check__label">{c.label}</span>
+                  <span className="vx-check__note">{checks && i < shown ? c.note : 'проверяем…'}</span>
+                </li>
+              ))}
+            </ul>
+
+            {release ? (
+              <a
+                href={downloadHref(release.url)}
+                download
+                className="vx-btn vx-btn--gold vx-check__cta"
+                data-ready={done || undefined}
+              >
+                <DownloadGlyph />
                 Скачать Vellin {release.latestVersion}
-              </Button>
-            </a>
-          ) : (
-            <Button variant="primary" size="lg" icon="download" disabled>
-              {loading ? 'Загружаем…' : 'Скоро'}
-            </Button>
-          )}
+              </a>
+            ) : (
+              <button type="button" className="vx-btn vx-btn--gold vx-check__cta" disabled>
+                Скоро
+              </button>
+            )}
+            {!release && (
+              <p className="vx-check__after">
+                Сборка ещё не опубликована — ссылка появится здесь сама, как только выйдет.
+              </p>
+            )}
+            {release && done && warned && (
+              <p className="vx-check__after">
+                Файл всё равно скачается — откройте его на компьютере с 64-битной Windows 10 или 11.
+              </p>
+            )}
+          </div>
         </section>
+
+        <div className="vx-flow">
+          <section className="vx-section vx-split" aria-labelledby="vx-dl-facts-title">
+            <div className="vx-copy">
+              <h2 id="vx-dl-facts-title">Что умеет приложение</h2>
+              <p>
+                Программа рисует интерфейс сама, без встроенного браузера: открывается сразу, держит вход и присылает
+                уведомления, даже когда окно свёрнуто.
+              </p>
+              <p className="vx-dl__note">{APP_NOT_YET}</p>
+            </div>
+            <ul className="vx-facts">
+              {APP_FACTS.map((f) => (
+                <li key={f.title}>
+                  <b>{f.title}</b>
+                  <span>{f.text}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="vx-section" aria-labelledby="vx-dl-steps-title">
+            <h2 id="vx-dl-steps-title" className="vx-dl__h2">
+              Установка за три шага
+            </h2>
+            <ol className="vx-steps">
+              <li>
+                <b>Скачайте установщик</b>
+                <span>Один файл Vellin-Setup.exe — внутри уже всё нужное, отдельных зависимостей ставить не надо.</span>
+              </li>
+              <li>
+                <b>Запустите его и нажмите «Установить»</b>
+                <span>Установка идёт в вашу папку пользователя и не просит прав администратора.</span>
+              </li>
+              <li>
+                <b>Войдите в аккаунт</b>
+                <span>Паролем или QR-кодом с телефона — это тот же аккаунт, что и на сайте.</span>
+              </li>
+            </ol>
+            <aside className="vx-smartscreen" aria-label="Если Windows покажет SmartScreen">
+              <b>Если Windows покажет синее окно SmartScreen</b>
+              <span>
+                Это обычное предупреждение для новых программ без платной подписи издателя. Нажмите «Подробнее» →
+                «Выполнить в любом случае». Подпись появится в одном из ближайших обновлений.
+              </span>
+            </aside>
+          </section>
+
+          <section className="vx-section vx-split" aria-labelledby="vx-dl-req-title">
+            <div className="vx-copy">
+              <h2 id="vx-dl-req-title">Требования</h2>
+              <p>Обновления клиент ставит сам — проверяет новую версию при запуске.</p>
+            </div>
+            <dl className="vx-spec">
+              <div>
+                <dt>Система</dt>
+                <dd>Windows 10 или 11, 64-бит</dd>
+              </div>
+              <div>
+                <dt>Место на диске</dt>
+                <dd className="vx-num">≈ 150 МБ</dd>
+              </div>
+              <div>
+                <dt>Права администратора</dt>
+                <dd>Не требуются</dd>
+              </div>
+              <div>
+                <dt>Куда ставится</dt>
+                <dd>%LOCALAPPDATA%\Vellin</dd>
+              </div>
+              <div>
+                <dt>Удаление</dt>
+                <dd>Через «Программы и компоненты»</dd>
+              </div>
+              {release && (
+                <div>
+                  <dt>Текущая версия</dt>
+                  <dd className="vx-num">
+                    {release.latestVersion} · {INSTALLER_SIZE}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </section>
+
+          <section className="vx-close" aria-labelledby="vx-dl-close-title">
+            <h2 id="vx-dl-close-title">Аккаунт тот же, что на сайте</h2>
+            {release ? (
+              <a href={downloadHref(release.url)} download className="vx-btn vx-btn--gold vx-check__cta" data-ready>
+                <DownloadGlyph />
+                Скачать Vellin {release.latestVersion}
+              </a>
+            ) : (
+              <button type="button" className="vx-btn vx-btn--gold vx-check__cta" disabled>
+                Скоро
+              </button>
+            )}
+          </section>
+        </div>
       </main>
+
+      <footer className="vx-foot">
+        <VellinLockup size={20} direction="row" />
+        <nav aria-label="Навигация по сайту">
+          <Link to="/">Главная</Link>
+          {user ? <Link to="/library">Мои комнаты</Link> : <Link to="/login">Войти</Link>}
+        </nav>
+      </footer>
     </div>
+  );
+}
+
+/** Отметка строки проверки: ждём, подходит, внимание или просто сведение. */
+function Mark({ state }: { state: Verdict | 'wait' }) {
+  return (
+    <span className="vx-check__mark" data-state={state} aria-hidden="true">
+      {state === 'ok' && (
+        <svg width="12" height="12" viewBox="0 0 12 12">
+          <path d="M2.4 6.3l2.3 2.3 4.9-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+      {state === 'warn' && (
+        <svg width="12" height="12" viewBox="0 0 12 12">
+          <path d="M6 2.8v4M6 9.2v.01" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      )}
+      {state === 'info' && (
+        <svg width="12" height="12" viewBox="0 0 12 12">
+          <path d="M6 5.4v3.4M6 3.2v.01" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      )}
+    </span>
   );
 }

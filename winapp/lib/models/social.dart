@@ -107,6 +107,9 @@ class PublicProfile {
   final String? friendshipId;
   final List<FavoriteTitle> favoriteTitles;
 
+  /// Друзья человека. null — список скрыт его настройками приватности.
+  final List<PublicUser>? friends;
+
   const PublicProfile({
     required this.user,
     required this.bio,
@@ -119,6 +122,7 @@ class PublicProfile {
     required this.relationship,
     required this.friendshipId,
     required this.favoriteTitles,
+    this.friends,
   });
 
   factory PublicProfile.fromJson(Map<String, dynamic> j) => PublicProfile(
@@ -134,6 +138,9 @@ class PublicProfile {
         friendshipId: j['friendshipId'] as String?,
         favoriteTitles: (j['favoriteTitles'] as List? ?? [])
             .map((e) => FavoriteTitle.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        friends: (j['friends'] as List?)
+            ?.map((e) => PublicUser.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
 }

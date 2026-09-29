@@ -12,6 +12,7 @@ import type {
   ListSessionsResponse,
   LoginRequest,
   MeResponse,
+  PresenceStatus,
   PrivacyResponse,
   QrLoginPollResponse,
   QrLoginRequestInfo,
@@ -43,7 +44,7 @@ import {
   assertRegistrationEnabled,
   assertUploadsEnabled,
 } from '../admin/platform/gate.js';
-import { createSession, forgetTouch, toDeviceSession, type DbSession } from './sessions.js';
+import { createSession, deviceUserAgent, forgetTouch, toDeviceSession, type DbSession } from './sessions.js';
 import { isKnownCity } from '../geo/cities.js';
 import {
   ALLOWED_AVATAR_MIME,
@@ -120,6 +121,9 @@ const privacyRuleSchema = z.object({
   allow: z.array(z.string().max(64)).max(200),
   deny: z.array(z.string().max(64)).max(200),
 });
+// `calls` — новая категория, поэтому необязательна: клиент, загруженный до её
+// появления, шлёт объект без неё, и он должен сохраняться, а не падать в 400.
+// Отсутствующую категорию дополняет parsePrivacy дефолтом.
 const updatePrivacySchema = z.object({
   privacy: z.object({
     online: privacyRuleSchema,
@@ -127,8 +131,13 @@ const updatePrivacySchema = z.object({
     personalInfo: privacyRuleSchema,
     favorites: privacyRuleSchema,
     messages: privacyRuleSchema,
+    calls: privacyRuleSchema.optional(),
   }),
-}) satisfies z.ZodType<UpdatePrivacyRequest>;
+});
+
+const updateStatusSchema = z.object({
+  status: z.enum(['online', 'dnd', 'offline']),
+});
 
 interface DbUserCore {
   id: string;
@@ -142,8 +151,22 @@ interface DbUserCore {
   birthDate: Date | null;
   city: string | null;
   createdAt: Date;
+  /** Выбранный статус присутствия ('online' | 'dnd' | 'offline'). */
+  presenceStatus?: string | null;
   /** RBAC-роль админки. Непустая → пользователь имеет доступ к /admin. */
   adminRoleId?: string | null;
+}
+
+/**
+ * Значение из БД → статус присутствия. Мусор и пустое → «в сети».
+ *
+ * `away` — прежнее «недавно»: у кого-то оно уже записано в базе, а место в меню
+ * теперь занимает «не беспокоить». Читаем старое значение как новое, чтобы не
+ * ходить миграцией по таблице ради одной строки.
+ */
+function normalizePresenceStatus(value: string | null | undefined): PresenceStatus {
+  if (value === 'dnd' || value === 'away') return 'dnd';
+  return value === 'offline' ? 'offline' : 'online';
 }
 
 function toAuthUser(u: DbUserCore): AuthUser {
@@ -160,6 +183,7 @@ function toAuthUser(u: DbUserCore): AuthUser {
     city: u.city ?? null,
     kind: 'user',
     createdAt: u.createdAt.toISOString(),
+    presenceStatus: normalizePresenceStatus(u.presenceStatus),
     // Доступ к админке даёт любая RBAC-роль; ADMIN_EMAIL остаётся break-glass
     // (работает и до бутстрапа роли на старте / до перезапуска).
     isAdmin: !!u.adminRoleId || isAdminEmail(u.email),
@@ -290,6 +314,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         city: null,
         kind: 'guest',
         createdAt: new Date().toISOString(),
+        presenceStatus: 'online',
         isAdmin: false,
       };
       reply.send({ token, user } satisfies AuthResponse);
@@ -312,6 +337,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         city: null,
         kind: 'guest',
         createdAt: new Date(0).toISOString(),
+        presenceStatus: 'online',
         isAdmin: false,
       };
       reply.send({ user } satisfies MeResponse);
@@ -407,12 +433,33 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const principal = requireUser(req, reply);
     if (!principal) return;
     const body = updatePrivacySchema.parse(req.body);
-    const json = serializePrivacy(body.privacy);
+    // Накладываем присланное на сохранённое: клиент, не знающий о новой
+    // категории, не должен сбрасывать её настройку своим сохранением.
+    const saved = await prisma.user.findUnique({
+      where: { id: principal.userId },
+      select: { privacyJson: true },
+    });
+    const json = serializePrivacy({ ...parsePrivacy(saved?.privacyJson), ...body.privacy });
     await prisma.user.update({ where: { id: principal.userId }, data: { privacyJson: json } });
     // Онлайн-статус мог стать видимым/скрытым для части людей — переразошлём
     // гейтнутый презенс, чтобы изменения применились без перезахода.
     userHub.republishPresence(principal.userId);
     reply.send({ privacy: parsePrivacy(json) } satisfies UpdatePrivacyResponse);
+  });
+
+  // ── Статус присутствия, выбранный руками ───────────────────────────────
+  app.patch('/auth/status', { preHandler: requireAuth }, async (req, reply) => {
+    const principal = requireUser(req, reply);
+    if (!principal) return;
+    const body = updateStatusSchema.parse(req.body);
+    await prisma.user.update({
+      where: { id: principal.userId },
+      data: { presenceStatus: body.status },
+    });
+    // Хаб держит статус в памяти: присутствие рассылается на каждое событие
+    // активности, и ходить за ним в базу каждый раз незачем.
+    userHub.setPresenceStatus(principal.userId, body.status);
+    reply.send({ status: body.status });
   });
 
   // ── Смена email (подтверждение текущим паролем) ────────────────────────
@@ -597,7 +644,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           pollTokenHash: qrHash(pollToken),
           expiresAt,
           ip: req.ip || null,
-          userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
+          // Из заявки потом берётся устройство новой сессии — то есть
+          // компьютера с клиентом, а у него своя метка вместо User-Agent.
+          userAgent: deviceUserAgent(req),
         },
       });
       reply.send({

@@ -12,12 +12,14 @@ import { PrivacySection } from '../components/profile/PrivacySection';
 import { EmailSection } from '../components/profile/EmailSection';
 import { PasswordSection } from '../components/profile/PasswordSection';
 import { DevicesSection } from '../components/profile/DevicesSection';
+import { AudioVideoSection } from '../components/profile/AudioVideoSection';
 
-type TabId = 'profile' | 'cinema' | 'privacy' | 'email' | 'password' | 'devices';
+type TabId = 'profile' | 'cinema' | 'audio' | 'privacy' | 'email' | 'password' | 'devices';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'profile', label: 'Профиль' },
   { id: 'cinema', label: 'Кино' },
+  { id: 'audio', label: 'Звук и видео' },
   { id: 'privacy', label: 'Приватность' },
   { id: 'email', label: 'Email' },
   { id: 'password', label: 'Пароль' },
@@ -30,6 +32,8 @@ function renderTab(tab: TabId, user: AuthUser) {
       return <IdentitySection user={user} />;
     case 'cinema':
       return <FavoritesSection />;
+    case 'audio':
+      return <AudioVideoSection />;
     case 'privacy':
       return <PrivacySection />;
     case 'email':

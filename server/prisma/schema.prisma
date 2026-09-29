@@ -30,6 +30,9 @@ model User {
   createdAt    DateTime  @default(now())
   /// Момент последнего ухода в офлайн (для «был в сети …»). Null — ещё не уходил.
   lastSeenAt   DateTime?
+  /// Выбранный статус присутствия: online | away | offline. Показывается
+  /// собеседникам, только пока есть живое соединение.
+  presenceStatus String @default("online")
   /// JSON настроек приватности (PrivacySettings). Пусто/невалидно → всё видно
   /// всем (текущее поведение). Категории: online, friends, personalInfo, favorites.
   privacyJson  String    @default("{}")
@@ -61,6 +64,7 @@ model User {
   conversationsA         Conversation[]  @relation("ConvUserA")
   conversationsB         Conversation[]  @relation("ConvUserB")
   directMessages         DirectMessage[] @relation("DmSender")
+  dmReactions            DirectMessageReaction[]
   sharedWatchA           SharedWatchStat[] @relation("SharedWatchA")
   sharedWatchB           SharedWatchStat[] @relation("SharedWatchB")
 
@@ -430,6 +434,13 @@ model Conversation {
   /// «Прочитано до» для стороны A / стороны B. Null — ещё не открывала диалог.
   aLastReadAt   DateTime?
   bLastReadAt   DateTime?
+  /// Закреплённое сообщение — общее для обоих участников. Null — ничего не закреплено.
+  /// Без внешнего ключа: при удалении сообщения поле чистится явно, вместе с рассылкой.
+  pinnedMessageId String?
+  /// Сторона A / сторона B выключила уведомления этого диалога. Сама доставка
+  /// не меняется: гаснут только колокольчик, звук и всплывающее окно.
+  aMuted          Boolean  @default(false)
+  bMuted          Boolean  @default(false)
 
   messages DirectMessage[]
 
@@ -450,6 +461,10 @@ model DirectMessage {
   imageUrl       String?
   imageWidth     Int?
   imageHeight    Int?
+  /// Альбом: JSON-массив {url, width, height} до 10 снимков. Первый снимок
+  /// дублируется в imageUrl/imageWidth/imageHeight — по нему работают превью
+  /// в списке диалогов и клиенты, которые альбомов не знают. Null — один снимок.
+  imagesJson     String?
   /// Голосовое сообщение (/api/uploads/dm-voice/...). Null — не голосовое.
   voiceUrl       String?
   /// Длительность голосового в секундах.
@@ -465,6 +480,8 @@ model DirectMessage {
   videoThumbUrl  String?
   /// Длительность видеосообщения, сек.
   videoDurationSec Float?
+  /// Когда получатель посмотрел кружок. Null — ещё не смотрел.
+  videoPlayedAt    DateTime?
   /// Стадия: 'processing' | 'ready' | 'failed'. Null — не видеосообщение.
   videoStatus    String?
   /// Карточка-приглашение в комнату («Watch Party»): id приглашённой комнаты.
@@ -481,11 +498,55 @@ model DirectMessage {
   inviteToken      String?
   /// 'pending' | 'accepted' | 'declined' | 'expired'. Null — не приглашение.
   inviteStatus     String?
+  /// Запись о звонке: id сессии звонка. Null — обычное сообщение.
+  /// Отправителем записи всегда числится звонящий, поэтому направление
+  /// («исходящий»/«входящий») выводится из senderId без отдельного поля.
+  callId           String?
+  /// 'audio' | 'video'. Null — не запись о звонке.
+  callKind         String?
+  /// 'completed' | 'missed' | 'declined' | 'cancelled' | 'failed'.
+  callOutcome      String?
+  /// Длительность разговора в секундах; 0 у несостоявшихся звонков.
+  callDurationSec  Int?
+  /// Ответ на сообщение этого же диалога. Без внешнего ключа: оригинал могут
+  /// удалить, а цитата должна остаться и сказать «сообщение удалено».
+  replyToId        String?
+  /// Пересланное: автор оригинала (id и снимок имени на момент пересылки).
+  /// При пересылке пересланного сохраняется самый первый автор.
+  forwardedFromId   String?
+  forwardedFromName String?
+  /// Когда автор последний раз изменил текст. Null — не менялось.
+  editedAt         DateTime?
+  /// Когда получатель впервые прочитал именно это сообщение. У сообщений,
+  /// прочитанных до появления поля, пусто — «прочитано» выводится по диалогу.
+  readAt           DateTime?
+  /// Кто скрыл сообщение у себя («удалить только у меня»).
+  hiddenFor        String[]     @default([])
+  reactions        DirectMessageReaction[]
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])
   @@index([videoStatus])
   @@index([conversationId, inviteRoomId, inviteStatus])
+  @@index([callId])
+}
+
+/// Реакция на личное сообщение. У человека на одном сообщении — одна реакция:
+/// новая заменяет прежнюю, а не добавляется рядом.
+model DirectMessageReaction {
+  id        String        @id @default(cuid())
+  messageId String
+  message   DirectMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Эмодзи целиком, с модификаторами и склейками.
+  emoji     String
+  createdAt DateTime      @default(now())
+  /// Сдвигается при замене реакции — по нему плашки встают в порядке смены.
+  updatedAt DateTime      @updatedAt
+
+  @@unique([messageId, userId])
+  @@index([messageId])
 }
 
 /// Серверная запись о входе (устройство/браузер). JWT пользователя несёт

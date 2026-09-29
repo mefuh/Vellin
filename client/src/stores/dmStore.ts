@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   DirectMessageDTO,
+  DirectMessageReactionDTO,
   DmConversation,
   DmEligibility,
   Gender,
@@ -83,6 +84,12 @@ interface DmState {
   markVoicePlayed: (messageId: string) => void;
   /** Собеседник прослушал моё голосовое (из WS) — обновить индикатор. */
   applyVoicePlayed: (messageId: string) => void;
+  /** Собеседник посмотрел мой кружок. */
+  applyVideoPlayed: (messageId: string) => void;
+  /** Сообщения удалены (для всех или скрыты мной на другом устройстве). */
+  applyDeleted: (messageIds: string[]) => void;
+  /** Реакции на сообщение сменились — хранится актуальный список. */
+  applyReactions: (messageId: string, reactions: DirectMessageReactionDTO[]) => void;
   /** Кто-то прочитал (своё эхо или собеседник). */
   applyRead: (
     payload: { conversationId: string; byUserId: string; readAt: string; unreadTotal?: number },
@@ -115,6 +122,8 @@ function bumpConversation(
     // при создании (processing), маркер не должен ждать готового файла.
     hasVideo: !!message.videoStatus,
     hasRoomInvite: !!message.inviteRoomId,
+    hasCall: !!message.callId,
+    ...(message.callOutcome ? { callOutcome: message.callOutcome } : {}),
   };
   if (idx === -1) {
     return [
@@ -126,6 +135,7 @@ function bumpConversation(
         peerLastReadAt: null,
         online: false,
         lastMessageAt: message.createdAt,
+        muted: false,
       },
       ...list,
     ];
@@ -363,6 +373,53 @@ export const useDmStore = create<DmState>((set, get) => ({
           changed = true;
           const msgs = t.messages.slice();
           msgs[idx] = { ...msgs[idx], voicePlayed: true };
+          threads[pid] = { ...t, messages: msgs };
+        }
+      }
+      return changed ? { threads } : s;
+    }),
+
+  applyReactions: (messageId, reactions) =>
+    set((s) => {
+      const threads = { ...s.threads };
+      let changed = false;
+      for (const [pid, t] of Object.entries(threads)) {
+        const idx = t.messages.findIndex((m) => m.id === messageId);
+        if (idx >= 0) {
+          changed = true;
+          const msgs = t.messages.slice();
+          msgs[idx] = { ...msgs[idx], reactions };
+          threads[pid] = { ...t, messages: msgs };
+        }
+      }
+      return changed ? { threads } : s;
+    }),
+
+  applyDeleted: (messageIds) =>
+    set((s) => {
+      const gone = new Set(messageIds);
+      const threads = { ...s.threads };
+      let changed = false;
+      for (const [pid, t] of Object.entries(threads)) {
+        const messages = t.messages.filter((m) => !gone.has(m.id));
+        if (messages.length !== t.messages.length) {
+          changed = true;
+          threads[pid] = { ...t, messages };
+        }
+      }
+      return changed ? { threads } : s;
+    }),
+
+  applyVideoPlayed: (messageId) =>
+    set((s) => {
+      const threads = { ...s.threads };
+      let changed = false;
+      for (const [pid, t] of Object.entries(threads)) {
+        const idx = t.messages.findIndex((m) => m.id === messageId);
+        if (idx >= 0 && !t.messages[idx].videoPlayed) {
+          changed = true;
+          const msgs = t.messages.slice();
+          msgs[idx] = { ...msgs[idx], videoPlayed: true };
           threads[pid] = { ...t, messages: msgs };
         }
       }

@@ -1,7 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
   ConversationThreadResponse,
+  ListCallHistoryResponse,
   ListConversationsResponse,
+  ListDmMediaResponse,
+  SetDmMutedRequest,
+  SetDmMutedResponse,
   RoomInviteInfoResponse,
   RoomInviteRespondRequest,
   RoomInviteRespondResponse,
@@ -11,7 +15,15 @@ import type {
 import type { Principal } from '../auth/jwt.js';
 import { requireAuth } from '../auth/middleware.js';
 import { assertUploadsEnabled, assertDirectMessagesEnabled } from '../admin/platform/gate.js';
-import { getRoomInviteInfo, getThreadByPublicId, listConversations, respondRoomInvite } from './service.js';
+import {
+  getRoomInviteInfo,
+  getThreadByPublicId,
+  listCallHistory,
+  listConversationMedia,
+  listConversations,
+  respondRoomInvite,
+  setConversationMuted,
+} from './service.js';
 import { broadcastRoomInviteUpdate } from './realtime.js';
 import { ALLOWED_DM_IMAGE_MIME, MAX_DM_IMAGE_BYTES, processAndSaveDmImage } from './image.js';
 import { ALLOWED_DM_VOICE_MIME, MAX_DM_VOICE_BYTES, saveDmVoice } from './voice.js';
@@ -44,6 +56,13 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
     reply.send((await listConversations(p.userId)) satisfies ListConversationsResponse);
   });
 
+  // История звонков — сквозная по всем диалогам (раздел «Звонки» в клиенте).
+  app.get<{ Querystring: { before?: string } }>('/dm/calls', async (req, reply) => {
+    const p = requireUser(req, reply);
+    if (!p) return;
+    reply.send((await listCallHistory(p.userId, req.query.before)) satisfies ListCallHistoryResponse);
+  });
+
   app.get<{ Params: { publicId: string }; Querystring: { before?: string } }>(
     '/dm/with/:publicId',
     async (req, reply) => {
@@ -51,6 +70,37 @@ export async function dmRoutes(app: FastifyInstance): Promise<void> {
       if (!p) return;
       const thread = await getThreadByPublicId(p.userId, req.params.publicId, req.query.before);
       reply.send(thread satisfies ConversationThreadResponse);
+    },
+  );
+
+  // Витрина вложений диалога — для боковой панели собеседника.
+  app.get<{ Params: { publicId: string }; Querystring: { before?: string } }>(
+    '/dm/with/:publicId/media',
+    async (req, reply) => {
+      const p = requireUser(req, reply);
+      if (!p) return;
+      const page = await listConversationMedia(p.userId, req.params.publicId, req.query.before);
+      reply.send(page satisfies ListDmMediaResponse);
+    },
+  );
+
+  // Уведомления одного диалога. Доставку сообщений не трогает: молчат только
+  // колокольчик, звук и всплывающее окно.
+  app.post<{ Params: { publicId: string }; Body: SetDmMutedRequest }>(
+    '/dm/with/:publicId/mute',
+    async (req, reply) => {
+      const p = requireUser(req, reply);
+      if (!p) return;
+      if (typeof req.body?.muted !== 'boolean') {
+        deny(reply, 400, 'BadRequest', 'Некорректное значение');
+        return;
+      }
+      const muted = await setConversationMuted(p.userId, req.params.publicId, req.body.muted);
+      if (muted === null) {
+        deny(reply, 404, 'NotFound', 'Пользователь не найден');
+        return;
+      }
+      reply.send({ muted } satisfies SetDmMutedResponse);
     },
   );
 

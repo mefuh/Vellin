@@ -1,0 +1,623 @@
+/* Раскладка лэндинга и его демонстраций. Язык — в vx.css. */
+
+/* ── Демонстрация синхрона ────────────────────────────────────────── */
+
+.vx-sync {
+  --who: 108px;
+  --gap: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  padding: 30px 30px 26px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(19, 17, 16, 0.92), rgba(13, 12, 11, 0.92));
+  border: 1px solid var(--vx-line07);
+  box-shadow: 0 40px 90px -50px rgba(0, 0, 0, 0.9);
+}
+
+.vx-sync__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.vx-sync__clock {
+  font-size: clamp(38px, 4.6vw, 56px);
+  font-weight: 200;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  color: var(--vx-ink94);
+}
+
+.vx-sync__drift {
+  font-size: 13px;
+  color: var(--vx-online);
+  transition: color 0.5s var(--vx-ease);
+}
+
+.vx-sync__drift[data-phase="lag"] {
+  color: var(--vx-gold);
+}
+
+.vx-sync__lanes {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.vx-sync__lane {
+  display: grid;
+  grid-template-columns: var(--who) 1fr;
+  gap: var(--gap);
+  align-items: center;
+}
+
+.vx-sync__who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--vx-ink88);
+  transition: color 0.5s var(--vx-ease);
+}
+
+.vx-sync__avatar,
+.vx-room__ava {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--vx-ink88);
+  border: 1px solid var(--vx-line10);
+}
+
+.vx-sync__track {
+  position: relative;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.vx-sync__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(226, 201, 155, 0.05), rgba(226, 201, 155, 0.5));
+}
+
+.vx-sync__head-dot {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--vx-gold);
+  box-shadow:
+    0 0 0 3px rgba(226, 201, 155, 0.16),
+    0 2px 14px rgba(214, 174, 110, 0.6);
+}
+
+.vx-sync__lane[data-late] .vx-sync__head-dot {
+  background: var(--vx-paper);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+}
+
+.vx-sync__lane[data-late] .vx-sync__who {
+  color: var(--vx-gold);
+}
+
+/* Общая позиция — одна вертикаль через все дорожки. */
+.vx-sync__now {
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  left: calc(var(--who) + var(--gap) + (100% - var(--who) - var(--gap)) / 2);
+  width: 1px;
+  background: linear-gradient(180deg, transparent, rgba(226, 201, 155, 0.35), transparent);
+  pointer-events: none;
+}
+
+.vx-sync__status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--vx-ink72);
+  min-height: 20px;
+}
+
+.vx-sync__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vx-online);
+  transition: background-color 0.5s var(--vx-ease);
+}
+
+.vx-sync__dot[data-phase="lag"],
+.vx-sync__dot[data-phase="soft"] {
+  background: var(--vx-gold);
+}
+
+@media (max-width: 560px) {
+  .vx-sync {
+    --who: 84px;
+    --gap: 12px;
+    padding: 22px 18px 20px;
+  }
+}
+
+/* ── Комната в миниатюре ──────────────────────────────────────────── */
+
+.vx-room {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(220px, 1fr);
+  gap: 14px;
+  padding: 14px;
+  border-radius: 24px;
+  background: var(--vx-panel);
+  border: 1px solid var(--vx-line07);
+  box-shadow: 0 50px 110px -60px rgba(0, 0, 0, 1);
+}
+
+.vx-room__stage {
+  position: relative;
+  min-height: 260px;
+  max-width: 100%;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #140e0b;
+}
+
+.vx-room__frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.vx-room__reactions {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.vx-room__reaction {
+  position: absolute;
+  bottom: 54px;
+  font-size: 22px;
+  opacity: 0;
+  animation: vx-float 6.5s var(--vx-ease) infinite;
+}
+
+.vx-room__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 26px 16px 14px;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.72), transparent);
+}
+
+.vx-room__play {
+  flex: none;
+  color: var(--vx-ink94);
+}
+
+.vx-room__time {
+  font-size: 11.5px;
+  color: var(--vx-ink72);
+}
+
+.vx-room__scrub {
+  flex: 1;
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+
+.vx-room__scrub > span {
+  display: block;
+  height: 100%;
+  background: var(--vx-gold);
+}
+
+.vx-room__side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.vx-room__voices {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--vx-surface);
+}
+
+.vx-room__voice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.vx-room__voice .vx-room__ava {
+  width: 36px;
+  height: 36px;
+  font-size: 13px;
+}
+
+.vx-room__voice[data-speaking] .vx-room__ava {
+  box-shadow: 0 0 0 2px rgba(232, 207, 158, 0.55);
+  animation: vx-pulse-ring 1.9s ease-in-out infinite;
+}
+
+.vx-room__voice[data-muted] .vx-room__ava {
+  opacity: 0.55;
+}
+
+.vx-room__vname {
+  font-size: 11px;
+  color: var(--vx-ink62);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vx-room__chat,
+.vx-room__queue {
+  list-style: none;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--vx-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--vx-ink72);
+}
+
+.vx-room__chat b {
+  font-weight: 600;
+  color: var(--vx-ink88);
+  margin-right: 7px;
+}
+
+.vx-room__queue li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vx-room__queue li > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vx-room__queue li > span:last-child {
+  color: var(--vx-ink55);
+}
+
+.vx-room__queue li[data-now] {
+  color: var(--vx-gold);
+}
+
+.vx-room__queue li[data-now] > span:last-child {
+  color: rgba(226, 201, 155, 0.75);
+}
+
+@media (max-width: 860px) {
+  .vx-room {
+    grid-template-columns: 1fr;
+  }
+
+  .vx-room__stage {
+    min-height: 0;
+    aspect-ratio: 16 / 9;
+  }
+}
+
+/* Без движения реакции не взлетают — три из них стоят над кадром, иначе
+   обещание «реакции поверх кадра» на экране не видно. */
+@media (prefers-reduced-motion: reduce) {
+  .vx-room__reaction:nth-child(-n + 3) {
+    opacity: 1;
+    animation: none !important;
+  }
+
+  .vx-room__reaction:nth-child(1) { transform: translateY(-18px); }
+  .vx-room__reaction:nth-child(2) { transform: translateY(-58px); }
+  .vx-room__reaction:nth-child(3) { transform: translateY(-34px); }
+}
+
+/* ── Страница ─────────────────────────────────────────────────────── */
+
+.vx-page {
+  position: relative;
+  min-height: 100svh;
+  overflow-x: clip;
+  background: var(--vx-bg0);
+}
+
+/* Тёплое пятно света сверху — фон окна входа приложения, растянутый на страницу. */
+.vx-page::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1100px;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 520px at 50% 18%, rgba(255, 246, 232, 0.08), transparent 70%),
+    radial-gradient(130% 900px at 50% 0%, #241d18 0%, #14100d 45%, var(--vx-bg0) 100%);
+}
+
+.vx-page > * {
+  position: relative;
+}
+
+.vx-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 22px var(--vx-gutter);
+}
+
+.vx-top__nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vx-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 30px;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: clamp(32px, 7vh, 88px) var(--vx-gutter) 0;
+}
+
+.vx-hero__title {
+  font-size: clamp(38px, 5vw, 64px);
+  font-weight: 300;
+  line-height: 1.04;
+  letter-spacing: -0.025em;
+  color: var(--vx-ink94);
+}
+
+.vx-hero__title em {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--vx-gold);
+}
+
+.vx-hero__lead {
+  max-width: 34em;
+  font-size: clamp(16px, 1.4vw, 18px);
+  line-height: 1.6;
+  color: var(--vx-ink72);
+}
+
+.vx-hero__form {
+  width: 100%;
+  max-width: 660px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  margin-top: 6px;
+}
+
+.vx-flow {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(96px, 14vw, 180px);
+  padding-top: clamp(88px, 12vw, 150px);
+}
+
+.vx-section {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 var(--vx-gutter);
+}
+
+.vx-split {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: clamp(32px, 6vw, 88px);
+  align-items: center;
+}
+
+.vx-split--flip {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+}
+
+.vx-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.vx-copy h2,
+.vx-sources h2 {
+  font-size: clamp(30px, 3.4vw, 44px);
+  font-weight: 300;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--vx-ink94);
+}
+
+.vx-copy p {
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--vx-ink72);
+  max-width: 34em;
+}
+
+.vx-facts {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--vx-line07);
+}
+
+.vx-facts li {
+  display: grid;
+  grid-template-columns: 8.5em 1fr;
+  gap: 16px;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--vx-line07);
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--vx-ink72);
+}
+
+.vx-facts b {
+  font-weight: 500;
+  color: var(--vx-ink94);
+}
+
+.vx-sources {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+}
+
+/* Названия источников набраны как сама мысль — крупно, строкой текста. */
+.vx-sources__list {
+  max-width: 1000px;
+  font-size: clamp(24px, 3.2vw, 42px);
+  font-weight: 200;
+  line-height: 1.38;
+  letter-spacing: -0.01em;
+  color: var(--vx-ink42);
+}
+
+.vx-sources__list b {
+  font-weight: 400;
+  color: var(--vx-ink94);
+}
+
+.vx-sources__note {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--vx-ink55);
+  max-width: 40em;
+}
+
+.vx-close > form {
+  max-width: 660px;
+}
+
+.vx-close {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 26px;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 var(--vx-gutter);
+}
+
+.vx-close h2 {
+  max-width: 15em;
+  font-size: clamp(32px, 4vw, 54px);
+  font-weight: 300;
+  line-height: 1.06;
+  letter-spacing: -0.025em;
+  color: var(--vx-ink94);
+}
+
+.vx-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: clamp(88px, 12vw, 140px);
+  padding: 26px var(--vx-gutter) 34px;
+  border-top: 1px solid var(--vx-line05);
+  font-size: 13px;
+  color: var(--vx-ink55);
+}
+
+.vx-foot nav {
+  display: flex;
+  gap: 22px;
+}
+
+.vx-foot a {
+  transition: color 0.4s var(--vx-ease);
+}
+
+.vx-foot a:hover {
+  color: var(--vx-ink94);
+}
+
+@media (max-width: 900px) {
+  .vx-split,
+  .vx-split--flip {
+    grid-template-columns: 1fr;
+  }
+
+  /* В одну колонку сначала заголовок, потом пример — иначе макет комнаты
+     встречает читателя раньше, чем тот узнал, что это. */
+  .vx-split--flip > .vx-copy {
+    order: -1;
+  }
+}
+
+@media (max-width: 560px) {
+  .vx-top {
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  .vx-top__nav {
+    gap: 2px;
+  }
+
+  .vx-top__nav .vx-btn {
+    --h: 38px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .vx-hero {
+    gap: 24px;
+  }
+
+  .vx-facts li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

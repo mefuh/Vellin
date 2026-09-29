@@ -1,14 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
-  C2S,
   CallMember,
   CallSignalPayload,
   IceCandidatePayload,
   RtcConfig,
 } from '@vellin/shared';
-import { callSignalBus } from '../ws/callSignalBus';
-import { callSpeakingBus } from '../ws/callSpeakingBus';
-import { useRoomStore } from '../stores/roomStore';
 import { useCallSettingsStore } from '../stores/callSettingsStore';
 import type { WSConnectionState } from '../ws/WSClient';
 import { setupAudioPipeline, type AudioPipeline } from './audioPipeline';
@@ -30,13 +26,60 @@ import { isIOS } from '../utils/platform';
 export type CallState = 'idle' | 'connecting' | 'in';
 export type PermissionError = 'denied' | 'no-mic' | null;
 
+/**
+ * Как хук общается с сервером. Комната шлёт свои `C2S`, личные звонки — свои
+ * сообщения пользовательского канала; механика согласования одна и та же,
+ * поэтому она знает только эти пять действий.
+ */
+export interface CallTransport {
+  join(wantVideo: boolean): void;
+  leave(): void;
+  signal(toUserId: string, payload: CallSignalPayload): void;
+  media(audio: boolean, video: boolean): void;
+  speaking(speaking: boolean): void;
+}
+
+/** Шина входящих сигналов — своя у комнаты и у каждого личного звонка. */
+export interface CallSignalBus {
+  on(listener: (fromUserId: string, payload: CallSignalPayload) => void): () => void;
+}
+
+/** Шина индикаторов речи. */
+export interface CallSpeakingBus {
+  on(listener: (userId: string, speaking: boolean) => void): () => void;
+}
+
 export interface UseCallOpts {
   myUserId: string | null;
   myUserKind: 'user' | 'guest' | null;
   rtcConfig: RtcConfig | null;
   callMembers: CallMember[];
   wsState: WSConnectionState;
-  send: (msg: C2S) => boolean;
+  transport: CallTransport;
+  signalBus: CallSignalBus;
+  speakingBus: CallSpeakingBus;
+  /** Своё состояние микрофона/камеры — куда его класть, решает вызывающий. */
+  onLocalMedia: (media: { audio: boolean; video: boolean }) => void;
+}
+
+/**
+ * Ключ потока собеседника в `remoteStreams`: камера лежит под самим `userId`,
+ * демонстрация экрана — под `userId:screen`. Демонстрация не заменяет камеру,
+ * поэтому у одного человека потоков может быть два.
+ */
+export const SCREEN_KEY_SUFFIX = ':screen';
+export const screenKey = (userId: string): string => `${userId}${SCREEN_KEY_SUFFIX}`;
+/** Кому принадлежит поток — из ключа любого вида. */
+export const ownerOfStreamKey = (key: string): string => key.split(':')[0] ?? key;
+
+/**
+ * Приметы дорожки демонстрации, присланные её ведущим: идентификатор линии в
+ * согласовании и идентификатор потока. Двух примет нужно две, потому что на
+ * Windows первая доезжает не всегда.
+ */
+export interface ScreenTrackHint {
+  mid?: string;
+  streamId?: string;
 }
 
 export interface UseCallApi {
@@ -44,6 +87,8 @@ export interface UseCallApi {
   permissionError: PermissionError;
   myStream: MediaStream | null;
   remoteStreams: Map<string, MediaStream>;
+  /** Сообщить, какая дорожка собеседника — демонстрация экрана (null — её нет). */
+  setScreenHint: (userId: string, hint: ScreenTrackHint | null) => void;
   speaking: Set<string>;
   /** Latest enumerateDevices snapshot — populated once the mic permission is granted. */
   availableDevices: { mics: MediaDeviceInfo[]; cameras: MediaDeviceInfo[] };
@@ -55,6 +100,13 @@ export interface UseCallApi {
   switchMic: (deviceId: string) => Promise<void>;
   /** Switch the active camera without renegotiating SDP (`sender.replaceTrack`). */
   switchCamera: (deviceId: string) => Promise<void>;
+}
+
+/** Входящий поток и приметы, по которым его можно опознать. */
+interface InboundStream {
+  mid: string | null;
+  streamId: string;
+  stream: MediaStream;
 }
 
 interface PeerRecord {
@@ -85,20 +137,24 @@ const VIDEO_CONSTRAINTS_BASE: MediaTrackConstraints = {
   frameRate: { ideal: 24 },
 };
 const AUDIO_CONSTRAINTS_BASE: MediaTrackConstraints = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: true,
   channelCount: 1,
   sampleRate: 48000,
 };
 
 function audioConstraints(deviceId: string | null, mode: 'ideal' | 'exact' = 'ideal'): MediaTrackConstraints {
+  // Обработка звука берётся из настроек: её выключение видно только при
+  // захвате, поменять её у уже работающей дорожки нельзя.
+  const { noiseSuppression, echoCancellation, autoGainControl } = useCallSettingsStore.getState();
+  const base: MediaTrackConstraints = {
+    ...AUDIO_CONSTRAINTS_BASE,
+    echoCancellation,
+    noiseSuppression,
+    autoGainControl,
+  };
   // `ideal` on initial join → graceful fallback if the previously chosen device
   // is unplugged. `exact` on explicit switch → guarantee we get the device the
   // user just picked (otherwise the browser ignores the hint).
-  return deviceId
-    ? { ...AUDIO_CONSTRAINTS_BASE, deviceId: { [mode]: deviceId } as ConstrainDOMString }
-    : AUDIO_CONSTRAINTS_BASE;
+  return deviceId ? { ...base, deviceId: { [mode]: deviceId } as ConstrainDOMString } : base;
 }
 
 function videoConstraints(deviceId: string | null, mode: 'ideal' | 'exact' = 'ideal'): MediaTrackConstraints {
@@ -110,12 +166,27 @@ const SPEAKING_THRESHOLD = 0.04;
 const SPEAKING_LINGER_MS = 350;
 
 export function useCall(opts: UseCallOpts): UseCallApi {
-  const { myUserId, myUserKind, rtcConfig, callMembers, wsState, send } = opts;
+  const {
+    myUserId,
+    myUserKind,
+    rtcConfig,
+    callMembers,
+    wsState,
+    transport,
+    signalBus,
+    speakingBus,
+    onLocalMedia,
+  } = opts;
 
   const [state, setState] = useState<CallState>('idle');
   const [permissionError, setPermissionError] = useState<PermissionError>(null);
   const [myStream, setMyStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
+  // Все входящие потоки с их приметами и присланные подсказки о демонстрации.
+  // Хранятся врозь, потому что дорожка и подсказка приходят разными путями и в
+  // любом порядке: раскладка пересобирается из них при каждом изменении.
+  const inboundRef = useRef<Map<string, InboundStream[]>>(new Map());
+  const screenHintsRef = useRef<Map<string, ScreenTrackHint>>(new Map());
   const [speaking, setSpeaking] = useState<Set<string>>(new Set());
   const [availableDevices, setAvailableDevices] = useState<{
     mics: MediaDeviceInfo[];
@@ -145,14 +216,16 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   const prevSelfSpeakingRef = useRef<boolean>(false);
   const stateRef = useRef<CallState>('idle');
   stateRef.current = state;
+  // Signals that arrived while we were still joining — replayed on entry.
+  const pendingSignalsRef = useRef<{ fromUserId: string; payload: CallSignalPayload }[]>([]);
 
   // ── Signaling envelope helpers ──────────────────────────────────────────
 
   const sendSignal = useCallback(
     (toUserId: string, payload: CallSignalPayload): void => {
-      send({ t: 'call_signal', toUserId, payload, clientTs: Date.now() });
+      transport.signal(toUserId, payload);
     },
-    [send],
+    [transport],
   );
 
   const broadcastMyMedia = useCallback((): void => {
@@ -161,9 +234,9 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     const stream = localStreamRef.current;
     const audio = micOnRef.current;
     const video = !!stream?.getVideoTracks()[0]?.enabled;
-    useRoomStore.getState().setMyMedia({ audio, video });
-    send({ t: 'call_media', audio, video, clientTs: Date.now() });
-  }, [send]);
+    onLocalMedia({ audio, video });
+    transport.media(audio, video);
+  }, [transport, onLocalMedia]);
 
   // ── Speaker detection ───────────────────────────────────────────────────
 
@@ -259,7 +332,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       // speaking (analyser is post-mute, but cheap guard).
       if (selfActive !== prevSelfSpeakingRef.current) {
         prevSelfSpeakingRef.current = selfActive;
-        send({ t: 'call_speaking', speaking: selfActive, clientTs: Date.now() });
+        transport.speaking(selfActive);
       }
 
       rafRef.current = window.requestAnimationFrame(tick);
@@ -270,12 +343,12 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       if (rafRef.current != null) window.cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [state, myUserId, send]);
+  }, [state, myUserId, transport]);
 
   // Remote speaker indicators come over WS via `callSpeakingBus`. Merge them
   // into the same `speaking` set the local analyser writes to.
   useEffect(() => {
-    return callSpeakingBus.on((peerUserId, speaking) => {
+    return speakingBus.on((peerUserId, speaking) => {
       if (peerUserId === myUserId) return; // self managed by local analyser
       setSpeaking((prev) => {
         const has = prev.has(peerUserId);
@@ -287,6 +360,42 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       });
     });
   }, [myUserId]);
+
+  // ── Раскладка входящих потоков ──────────────────────────────────────────
+
+  /**
+   * Пересобрать `remoteStreams` из накопленных потоков и подсказок.
+   *
+   * Дорожка и подсказка о ней приходят разными путями — по соединению и по
+   * сигнальному каналу — и в любом порядке. Поэтому раскладка не решается «на
+   * месте» в момент прихода дорожки, а каждый раз выводится заново из обоих
+   * источников: тогда поздняя подсказка сама переставит поток в демонстрацию.
+   */
+  const rebuildRemoteStreams = useCallback((): void => {
+    const next = new Map<string, MediaStream>();
+    for (const [userId, entries] of inboundRef.current) {
+      const hint = screenHintsRef.current.get(userId);
+      for (const e of entries) {
+        const isScreen =
+          !!hint &&
+          ((!!hint.mid && e.mid === hint.mid) || (!!hint.streamId && e.streamId === hint.streamId));
+        next.set(isScreen ? screenKey(userId) : userId, e.stream);
+      }
+    }
+    setRemoteStreams((prev) => {
+      if (prev.size === next.size && [...next].every(([k, v]) => prev.get(k) === v)) return prev;
+      return next;
+    });
+  }, []);
+
+  const setScreenHint = useCallback(
+    (userId: string, hint: ScreenTrackHint | null): void => {
+      if (hint && (hint.mid || hint.streamId)) screenHintsRef.current.set(userId, hint);
+      else screenHintsRef.current.delete(userId);
+      rebuildRemoteStreams();
+    },
+    [rebuildRemoteStreams],
+  );
 
   // ── Peer connection lifecycle ───────────────────────────────────────────
 
@@ -353,12 +462,15 @@ export function useCall(opts: UseCallOpts): UseCallApi {
             .map((t) => t.kind)
             .join(',')}`,
         );
-        setRemoteStreams((prev) => {
-          if (prev.get(peerUserId) === stream) return prev;
-          const next = new Map(prev);
-          next.set(peerUserId, stream);
-          return next;
-        });
+        // Потоков от одного человека может быть два — камера и демонстрация.
+        // Копим их все, а кто из них кто — решает раскладка по подсказкам.
+        const entries = inboundRef.current.get(peerUserId) ?? [];
+        const mid = ev.transceiver?.mid ?? null;
+        const known = entries.find((e) => e.stream === stream);
+        if (known) known.mid = known.mid ?? mid;
+        else entries.push({ mid, streamId: stream.id, stream });
+        inboundRef.current.set(peerUserId, entries);
+        rebuildRemoteStreams();
         // NB: do NOT attach a Web Audio analyser to a remote PeerConnection
         // stream — Chrome silently mutes the <audio> playback for that stream
         // once a MediaStreamAudioSourceNode owns it. Active-speaker indicator
@@ -415,12 +527,10 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       }
       pcsRef.current.delete(peerUserId);
       detachAnalyser(peerUserId);
-      setRemoteStreams((prev) => {
-        if (!prev.has(peerUserId)) return prev;
-        const next = new Map(prev);
-        next.delete(peerUserId);
-        return next;
-      });
+      // Уходят оба потока — и камера, и демонстрация.
+      inboundRef.current.delete(peerUserId);
+      screenHintsRef.current.delete(peerUserId);
+      rebuildRemoteStreams();
       // Clear any lingering speaking indicator — handles hard-disconnects
       // where the peer left while their last `call_speaking: true` was the
       // most recent broadcast.
@@ -431,7 +541,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         return next;
       });
     },
-    [detachAnalyser],
+    [detachAnalyser, rebuildRemoteStreams],
   );
 
   const closeAllPeers = useCallback((): void => {
@@ -440,9 +550,8 @@ export function useCall(opts: UseCallOpts): UseCallApi {
 
   // ── Incoming signal handling ────────────────────────────────────────────
 
-  useEffect(() => {
-    const off = callSignalBus.on(async (fromUserId, payload) => {
-      if (stateRef.current !== 'in') return;
+  const handleSignal = useCallback(
+    async (fromUserId: string, payload: CallSignalPayload): Promise<void> => {
       let rec = pcsRef.current.get(fromUserId);
       if (!rec) {
         // We received signaling before we noticed the peer joined — create
@@ -488,9 +597,27 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       } catch (err) {
         console.warn('[call] signal handling failed', err);
       }
+    },
+    [createPeer, sendSignal],
+  );
+
+  useEffect(() => {
+    const off = signalBus.on(async (fromUserId, payload) => {
+      // Entering a call takes a moment — mic permission, the noise pipeline,
+      // the camera. A peer that got ready first signals into that gap, and
+      // dropping its offer here deadlocks negotiation: the impolite side waits
+      // for an answer that never comes, so neither audio nor video ever flows.
+      // Hold early signals and replay them once we are in.
+      if (stateRef.current !== 'in') {
+        if (pendingSignalsRef.current.length < 64) {
+          pendingSignalsRef.current.push({ fromUserId, payload });
+        }
+        return;
+      }
+      await handleSignal(fromUserId, payload);
     });
     return off;
-  }, [createPeer, sendSignal]);
+  }, [handleSignal]);
 
   // ── Snapshot watcher: diff callMembers vs open PCs ──────────────────────
 
@@ -529,9 +656,9 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       // Old PCs are stale — start fresh and re-join.
       closeAllPeers();
       const wantVideo = !!localStreamRef.current?.getVideoTracks()[0]?.enabled;
-      send({ t: 'call_join', wantVideo, clientTs: Date.now() });
+      transport.join(wantVideo);
     }
-  }, [wsState, send, closeAllPeers]);
+  }, [wsState, transport, closeAllPeers]);
 
   // ── Outbound video sync (camera ⊕ mirror pipeline) ─────────────────────
   // Single source of truth for what video track every PC + outbound stream
@@ -668,6 +795,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         try {
           pipeline = await setupAudioPipeline(ctx, stream);
           pipelineRef.current = pipeline;
+          pipeline.setDenoiseEnabled(useCallSettingsStore.getState().noiseSuppression);
           // Outbound starts with processed audio only. `syncOutboundVideo`
           // adds the video track (flipped or raw depending on mirror setting)
           // before we announce ourselves to peers.
@@ -693,16 +821,32 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       // ourselves; the snapshot watcher uses outbound's tracks to build PCs.
       await syncOutboundVideo();
 
-      useRoomStore.getState().setMyMedia({ audio: false, video: withVideo });
-      send({ t: 'call_join', wantVideo: withVideo, clientTs: Date.now() });
+      onLocalMedia({ audio: false, video: withVideo });
+      transport.join(withVideo);
       setState('in');
+      // React applies the state on the next render, but the queued signals
+      // must be handled now — the peer is already waiting for our answer.
+      stateRef.current = 'in';
+      const queued = pendingSignalsRef.current;
+      pendingSignalsRef.current = [];
+      for (const s of queued) await handleSignal(s.fromUserId, s.payload);
     },
-    [myUserId, myUserKind, send, attachAnalyser, ensureAudioCtx, syncOutboundVideo],
+    [
+      myUserId,
+      myUserKind,
+      transport,
+      onLocalMedia,
+      attachAnalyser,
+      ensureAudioCtx,
+      syncOutboundVideo,
+      handleSignal,
+    ],
   );
 
   const leave = useCallback<UseCallApi['leave']>(() => {
     if (stateRef.current === 'idle') return;
-    send({ t: 'call_leave', clientTs: Date.now() });
+    transport.leave();
+    pendingSignalsRef.current = [];
     closeAllPeers();
     pipelineRef.current?.teardown();
     pipelineRef.current = null;
@@ -719,11 +863,13 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     prevSelfSpeakingRef.current = false;
     for (const key of [...analysersRef.current.keys()]) detachAnalyser(key);
     setMyStream(null);
+    inboundRef.current.clear();
+    screenHintsRef.current.clear();
     setRemoteStreams(new Map());
     setSpeaking(new Set());
-    useRoomStore.getState().setMyMedia({ audio: false, video: false });
+    onLocalMedia({ audio: false, video: false });
     setState('idle');
-  }, [send, closeAllPeers, detachAnalyser]);
+  }, [transport, onLocalMedia, closeAllPeers, detachAnalyser]);
 
   const toggleMic = useCallback<UseCallApi['toggleMic']>(() => {
     const next = !micOnRef.current;
@@ -782,7 +928,15 @@ export function useCall(opts: UseCallOpts): UseCallApi {
 
   // ── Device hot-swap ────────────────────────────────────────────────────
 
-  const switchMic = useCallback<UseCallApi['switchMic']>(async (deviceId) => {
+  /**
+   * Перезахватить микрофон и подменить дорожку, не пересогласовывая соединение.
+   * Одним путём идут и смена устройства, и смена обработки звука: и то, и
+   * другое задаётся только при захвате.
+   */
+  const recaptureMic = useCallback(async (
+    deviceId: string | null,
+    mode: 'ideal' | 'exact',
+  ): Promise<void> => {
     if (stateRef.current !== 'in') return;
     const local = localStreamRef.current;
     if (!local) return;
@@ -791,10 +945,10 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       // `exact` so the browser actually gives us the device the user picked,
       // not the original mic with a non-binding `ideal` hint.
       newStream = await navigator.mediaDevices.getUserMedia({
-        audio: audioConstraints(deviceId, 'exact'),
+        audio: audioConstraints(deviceId, mode),
       });
     } catch (err) {
-      console.warn('[call] switchMic getUserMedia failed', err);
+      console.warn('[call] recaptureMic getUserMedia failed', err);
       return;
     }
     const newTrack = newStream.getAudioTracks()[0];
@@ -831,9 +985,35 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     }
     local.addTrack(newTrack);
     setMyStream(new MediaStream(local.getTracks()));
-    useCallSettingsStore.getState().setPreferredMicId(deviceId);
-    console.log('[call] switched mic to', deviceId);
+    console.log('[call] mic recaptured', deviceId ?? 'default');
   }, []);
+
+  const switchMic = useCallback<UseCallApi['switchMic']>(async (deviceId) => {
+    useCallSettingsStore.getState().setPreferredMicId(deviceId);
+    await recaptureMic(deviceId, 'exact');
+  }, [recaptureMic]);
+
+  // Обработка звука задаётся при захвате, поэтому её переключение — это
+  // перезахват микрофона. Своё шумоподавление живёт поверх браузерного и
+  // снимается отдельно, иначе тумблер не менял бы ничего на слух.
+  const noiseSuppression = useCallSettingsStore((s) => s.noiseSuppression);
+  const echoCancellation = useCallSettingsStore((s) => s.echoCancellation);
+  const autoGainControl = useCallSettingsStore((s) => s.autoGainControl);
+  const processingReady = useRef(false);
+  useEffect(() => {
+    if (state !== 'in') {
+      processingReady.current = false;
+      return;
+    }
+    pipelineRef.current?.setDenoiseEnabled(noiseSuppression);
+    // Первый заход — это вход в звонок: микрофон только что взят с этими же
+    // настройками, второй раз его брать незачем.
+    if (!processingReady.current) {
+      processingReady.current = true;
+      return;
+    }
+    void recaptureMic(useCallSettingsStore.getState().preferredMicId, 'ideal');
+  }, [state, noiseSuppression, echoCancellation, autoGainControl, recaptureMic]);
 
   const switchCamera = useCallback<UseCallApi['switchCamera']>(async (deviceId) => {
     if (stateRef.current !== 'in') return;
@@ -945,6 +1125,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     permissionError,
     myStream,
     remoteStreams,
+    setScreenHint,
     speaking,
     availableDevices,
     join,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   AnnouncementDTO,
   FeatureFlagDTO,
+  LandingMode,
   PlatformSettingsDTO,
   PlatformWindows,
   UpsertAnnouncementRequest,
@@ -178,6 +179,8 @@ function SettingsTab() {
 
           <GroupCaption>Общение</GroupCaption>
           <ToggleRow label="Личные сообщения" hint="Переписка в личных диалогах" checked={T.directMessages} onChange={(v) => setT('directMessages', v)} />
+          <ToggleRow label="Звонки в личных сообщениях" hint="Звонки один на один на сайте и в клиенте для Windows" checked={T.dmCalls} onChange={(v) => setT('dmCalls', v)} />
+          <ToggleRow label="Демонстрация экрана" hint="В звонках личных сообщений; вести её умеет только клиент для Windows" checked={T.dmScreenShare} onChange={(v) => setT('dmScreenShare', v)} />
           <ToggleRow label="Друзья" hint="Отправка и приём заявок в друзья" checked={T.friends} onChange={(v) => setT('friends', v)} />
           <ToggleRow label="Приглашения в комнаты" hint="Ссылки-приглашения и зов друзей в комнату" checked={T.invites} onChange={(v) => setT('invites', v)} />
 
@@ -300,6 +303,24 @@ function WindowsSettings({ value, onChange }: { value: PlatformWindows; onChange
           </div>
         </div>
       )}
+
+      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8, borderBottom: '1px solid var(--line-1)' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-3)' }}>Главная страница</span>
+          <div style={{ display: 'flex' }}>
+            <Select
+              value={value.landing}
+              onChange={(v) => onChange({ ...value, landing: v as LandingMode })}
+              options={[['watch', 'Обычная — совместный просмотр'], ['watchApp', 'С приложением — скачивание, затем просмотр']]}
+            />
+          </div>
+        </label>
+        <div style={{ fontSize: 12, color: value.landing === 'watchApp' && !value.downloadPage ? 'var(--warn)' : 'var(--text-3)', lineHeight: 1.5 }}>
+          {value.landing === 'watchApp' && !value.downloadPage
+            ? 'Страница скачивания выключена — пока её не включить, главная показывает обычный вариант: рекламировать приложение без скачивания нельзя.'
+            : 'Вариант с приложением видит только тот, кому доступна страница скачивания; остальным открывается обычная главная.'}
+        </div>
+      </div>
 
       <ToggleRow
         label="Добавление устройства по QR"

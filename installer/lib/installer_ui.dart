@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'fixed_window.dart';
 import 'installer_mark.dart';
 
 /// Размер окна установщика и его фон (из макета).
@@ -270,7 +271,7 @@ class _VellinInstallerUiState extends State<VellinInstallerUi> with TickerProvid
 
   /// Шапка: знак и слово VELLIN. За неё же таскается окно.
   Widget _brand() {
-    return DragToMoveArea(
+    return WindowDragArea(
       child: Padding(
         padding: const EdgeInsets.only(top: 46),
         child: Column(

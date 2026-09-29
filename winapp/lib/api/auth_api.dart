@@ -64,6 +64,12 @@ class AuthApi {
     return AuthResult.fromJson(j as Map<String, dynamic>);
   }
 
+  /// Сменить выбранный статус присутствия ('online' | 'dnd' | 'offline').
+  Future<String> setPresenceStatus(String status) async {
+    final j = await _c.patch('/auth/status', {'status': status}) as Map<String, dynamic>;
+    return j['status'] as String? ?? status;
+  }
+
   Future<AuthResult> changeEmail(String email, String currentPassword) async {
     final j = await _c.post('/auth/email', {'email': email, 'currentPassword': currentPassword});
     return AuthResult.fromJson(j as Map<String, dynamic>);

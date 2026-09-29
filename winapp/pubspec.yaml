@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.3.0+3
+version: 0.4.0+4
 
 environment:
   sdk: ^3.12.2
@@ -63,10 +63,22 @@ dependencies:
   camera_windows: ^0.2.3
   visibility_detector: ^0.4.0+2
   window_manager: ^0.5.2
+  # Рабочая область экрана — чтобы поставить окно уведомления в угол над
+  # панелью задач (идёт с window_manager, но используется напрямую).
+  screen_retriever: ^0.2.0
   # QR-код для входа с телефона.
   qr_flutter: ^4.1.0
   # Открытие сайта во внешнем браузере (регистрация).
   url_launcher: ^6.3.1
+  # Звонки один на один в личных сообщениях. Пакет несёт готовый libwebrtc.dll,
+  # без загрузок и nuget на сборке — по тем же соображениям, что и media_kit.
+  flutter_webrtc: ^1.5.2
+  # Картинки и файлы из буфера обмена Windows — стандартный буфер Flutter
+  # умеет только текст, а фото в сообщение вставляют по Ctrl+V.
+  pasteboard: ^0.5.0
+  # Перекодирование картинки из буфера: Windows отдаёт BMP, а сервер
+  # принимает JPEG, PNG и WebP.
+  image: ^4.9.2
 
 dev_dependencies:
   flutter_test:
@@ -105,6 +117,28 @@ flutter:
   # Это тот же файл, из которого flutter_launcher_icons генерит .ico.
   assets:
     - assets/vellin_icon.png
+    # Смайлики реакций в рисовке Apple (emoji-datasource-apple, 64 px) — только
+    # те, что есть в каталоге. Набор пересобирается из каталога скриптом.
+    - assets/emoji/apple/
+
+  # Manrope — гарнитура экрана звонка (спецификация дизайна звонков). Лежит в
+  # репозитории, а не тянется из сети: клиент должен рисоваться одинаково и без
+  # интернета. Начертания 200–700 — все, что использует макет.
+  fonts:
+    - family: Manrope
+      fonts:
+        - asset: assets/fonts/Manrope-ExtraLight.ttf
+          weight: 200
+        - asset: assets/fonts/Manrope-Light.ttf
+          weight: 300
+        - asset: assets/fonts/Manrope-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Manrope-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Manrope-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Manrope-Bold.ttf
+          weight: 700
 
   # To add assets to your application, add an assets section, like this:
   # assets:

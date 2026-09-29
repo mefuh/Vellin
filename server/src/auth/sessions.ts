@@ -17,9 +17,38 @@ export interface DbSession {
   lastSeenAt: Date;
 }
 
+/** Названия платформ нативных клиентов для списка устройств. */
+const APP_PLATFORM_NAMES: Record<string, string> = {
+  windows: 'Windows',
+  macos: 'macOS',
+  ios: 'iOS',
+  android: 'Android',
+};
+
+/**
+ * Строка устройства для записи в сессию.
+ *
+ * Нативные клиенты шлют User-Agent своей HTTP-библиотеки (`Dart/3.12
+ * (dart:io)`), по которому не понять ни что это за программа, ни на чём она
+ * работает, — в списке устройств выходил «Браузер на Неизвестно». Зато они
+ * присылают `X-App-Platform` и `X-App-Version`: из них собирается метка
+ * `Vellin/<версия> (<платформа>)`, которую узнаёт {@link parseUserAgent}.
+ * Исходная строка сохраняется следом — для разбора инцидентов.
+ */
+export function deviceUserAgent(req: FastifyRequest): string | null {
+  const ua = req.headers['user-agent'] ?? null;
+  const platform = req.headers['x-app-platform'];
+  const version = req.headers['x-app-version'];
+  if (typeof platform === 'string' && APP_PLATFORM_NAMES[platform]) {
+    const v = typeof version === 'string' && /^\d+(\.\d+){0,3}$/.test(version) ? version : '?';
+    return `Vellin/${v} (${platform})${ua ? ` ${ua}` : ''}`;
+  }
+  return ua;
+}
+
 /** Создаёт сессию для пользователя по данным HTTP-запроса (UA + IP). */
 export async function createSession(userId: string, req: FastifyRequest): Promise<DbSession> {
-  const userAgent = req.headers['user-agent'] ?? null;
+  const userAgent = deviceUserAgent(req);
   // trustProxy включён в app.ts → req.ip учитывает X-Forwarded-For.
   const ip = req.ip || null;
   return prisma.session.create({
@@ -52,6 +81,8 @@ export function forgetTouch(sessionId: string): void {
 }
 
 interface ParsedUa {
+  /** Нативный клиент Vellin, а не браузер. */
+  app: boolean;
   deviceLabel: string;
   browser: string;
   os: string;
@@ -59,7 +90,21 @@ interface ParsedUa {
 
 /** Грубый разбор User-Agent в человекочитаемые браузер/ОС без внешних зависимостей. */
 export function parseUserAgent(ua: string | null | undefined): ParsedUa {
-  if (!ua) return { deviceLabel: 'Неизвестное устройство', browser: 'Неизвестно', os: 'Неизвестно' };
+  if (!ua) return { deviceLabel: 'Неизвестное устройство', browser: 'Неизвестно', os: 'Неизвестно', app: false };
+
+  // Нативный клиент — метка из deviceUserAgent.
+  const app = /^Vellin\/([\d.?]+) \((\w+)\)/.exec(ua);
+  if (app) {
+    const os = APP_PLATFORM_NAMES[app[2]!] ?? 'Неизвестно';
+    const version = app[1] === '?' ? '' : ` ${app[1]}`;
+    return { deviceLabel: `Vellin для ${os}`, browser: `Приложение Vellin${version}`, os, app: true };
+  }
+  // Сессии, открытые клиентом до появления метки: у них голый User-Agent
+  // Dart. Других программ на Dart у Vellin пока нет, кроме клиента для
+  // Windows, — значит, это он.
+  if (/\(dart:io\)/i.test(ua)) {
+    return { deviceLabel: 'Vellin для Windows', browser: 'Приложение Vellin', os: 'Windows', app: true };
+  }
 
   const os = (() => {
     if (/windows nt/i.test(ua)) return 'Windows';
@@ -82,7 +127,7 @@ export function parseUserAgent(ua: string | null | undefined): ParsedUa {
     return 'Браузер';
   })();
 
-  return { deviceLabel: `${browser} на ${os}`, browser, os };
+  return { deviceLabel: `${browser} на ${os}`, browser, os, app: false };
 }
 
 /** Преобразует строку БД в DTO для клиента, помечая текущую сессию. */
@@ -93,6 +138,7 @@ export function toDeviceSession(s: DbSession, currentSid: string | undefined): D
     deviceLabel: parsed.deviceLabel,
     browser: parsed.browser,
     os: parsed.os,
+    app: parsed.app,
     ip: s.ip,
     createdAt: s.createdAt.toISOString(),
     lastSeenAt: s.lastSeenAt.toISOString(),

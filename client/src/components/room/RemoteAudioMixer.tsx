@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { useCallContext } from '../../hooks/CallContext';
+import { useCallContextOptional } from '../../hooks/CallContext';
+import { ownerOfStreamKey } from '../../hooks/useCall';
 import { useCallSettingsStore } from '../../stores/callSettingsStore';
 
 /**
@@ -8,20 +9,38 @@ import { useCallSettingsStore } from '../../stores/callSettingsStore';
  * overlay, or neither). Mount once at the Room.tsx level. Per-peer playback
  * volume comes from `callSettingsStore` and is applied live to each element.
  */
-export function RemoteAudioMixer() {
-  const { remoteStreams } = useCallContext();
+export function RemoteAudioMixer({ streams }: { streams?: Map<string, MediaStream> } = {}) {
+  // Комната берёт потоки из своего контекста; звонок в личных сообщениях живёт
+  // выше роутера и передаёт их напрямую.
+  const ctx = useCallContextOptional();
+  const remoteStreams = streams ?? ctx?.remoteStreams ?? new Map<string, MediaStream>();
   return (
     <div aria-hidden style={{ display: 'none' }}>
-      {[...remoteStreams.entries()].map(([userId, stream]) => (
-        <RemoteAudio key={userId} userId={userId} stream={stream} />
+      {/* Ключ может быть и «userId», и «userId:screen» — звук демонстрации
+          играется наравне с голосом, а громкость берётся по владельцу. */}
+      {[...remoteStreams.entries()].map(([key, stream]) => (
+        <RemoteAudio key={key} userId={ownerOfStreamKey(key)} stream={stream} />
       ))}
     </div>
   );
 }
 
+/** Умеет ли браузер выводить звук в выбранное устройство (не все умеют). */
+export const canPickSpeaker = (): boolean =>
+  typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+
 function RemoteAudio({ userId, stream }: { userId: string; stream: MediaStream }) {
   const ref = useRef<HTMLAudioElement | null>(null);
   const volume = useCallSettingsStore((s) => s.peerVolumes[userId] ?? 1);
+  const speakerId = useCallSettingsStore((s) => s.preferredSpeakerId);
+
+  // Выбранный динамик. Поддержки может не быть — тогда звук идёт в системный,
+  // и настройка просто не действует.
+  useEffect(() => {
+    const el = ref.current as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
+    if (!el?.setSinkId) return;
+    void el.setSinkId(speakerId ?? '').catch(() => undefined);
+  }, [speakerId, stream]);
 
   useEffect(() => {
     const el = ref.current;

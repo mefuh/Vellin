@@ -18,7 +18,18 @@ import { ensureRoomRuntime } from '../rooms/RoomRuntime.js';
 import { prisma } from '../db/prisma.js';
 import { userHub, type UserConnection } from '../realtime/UserHub.js';
 import { getFriendPresenceSnapshot, getNotificationsSnapshot } from '../friends/service.js';
-import { handleDmRead, handleDmSend, handleDmTyping, handleDmVoicePlayed } from '../dm/realtime.js';
+import {
+  handleDmRead,
+  handleDmSend,
+  handleDmTyping,
+  handleDmVideoPlayed,
+  handleDmEdit,
+  handleDmDelete,
+  handleDmPin,
+  handleDmForward,
+  handleDmReact,
+  handleDmVoicePlayed,
+} from '../dm/realtime.js';
 import { unreadTotal as dmUnreadTotal } from '../dm/service.js';
 import { MAX_DM_BODY } from '../dm/service.js';
 import { TokenBucket } from './rateLimit.js';
@@ -46,10 +57,26 @@ import { roomMutex } from '../utils/async-mutex.js';
 import { getOrCreateMembership } from '../rooms/membership.js';
 import { getEffectivePermissions } from '../rooms/permissions.js';
 import { getRtcConfig } from '../env.js';
+import { dispatchDmCall, isDmCallMessage, isDmCallSignalMessage } from './userCallDispatch.js';
+import { dmCallHub, toSnapshot } from '../calls/DmCallHub.js';
 
 // 32 KB — leaves comfortable headroom for SDP offers with bundled codecs
 // (typical 8–12 KB; some Chromium builds clear 16 KB).
 const MAX_MESSAGE_BYTES = 32 * 1024;
+
+/**
+ * Потолок кадра пользовательского канала — там ходит SDP.
+ *
+ * Держим вдвое выше потолка на само SDP (48 КБ в `userCallDispatch`), чтобы
+ * обвязка JSON никогда не выталкивала законный офер за границу: превышение
+ * рвёт соединение, а рвать его посреди звонка нельзя.
+ */
+const MAX_USER_MESSAGE_BYTES = 96 * 1024;
+
+/** Непустой список строк из сообщения клиента — id сообщений для пачечных действий. */
+function isStringList(v: unknown): v is string[] {
+  return Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string');
+}
 
 export async function registerWebSocket(app: FastifyInstance): Promise<void> {
   // ── Пользовательский realtime-канал (личные уведомления + presence) ─────
@@ -98,15 +125,32 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       if (socket.readyState === socket.OPEN) conn.send({ t: 'ping', serverTs: Date.now() });
     }, 30000);
 
+    // Корзины на соединение: сигналинг звонка бурстовый, управление — нет.
+    const signalBucket = new TokenBucket(120, 60);
+    const controlBucket = new TokenBucket(20, 10);
+
     // Слушатели навешиваем СИНХРОННО, до любого await — иначе сообщение,
     // присланное сразу после open (watch_presence), теряется (ws роняет события
     // без слушателя). Входящие: подписка на присутствие + keep-alive (pong).
     socket.on('message', (raw) => {
       incWsEvent();
+      // Потолок и корзины появились вместе со звонками: до них канал принимал
+      // только короткие команды, а теперь через него идёт SDP чужого клиента.
+      const rawStr = raw.toString();
+      if (rawStr.length > MAX_USER_MESSAGE_BYTES) return;
       let msg: unknown;
       try {
-        msg = JSON.parse(raw.toString());
+        msg = JSON.parse(rawStr);
       } catch {
+        return;
+      }
+      const kind = (msg as { t?: unknown }).t;
+      if (isDmCallMessage(kind)) {
+        // Трикл-ICE идёт пачками по 20–40 сообщений за пару секунд, поэтому
+        // сигналингу отдельная щедрая корзина, а управлению — строгая.
+        const ok = isDmCallSignalMessage(kind) ? signalBucket.consume() : controlBucket.consume();
+        if (!ok) return;
+        dispatchDmCall(principal.userId, conn.id, msg as Record<string, unknown>);
         return;
       }
       const m = msg as {
@@ -121,13 +165,18 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         imageUrl?: string;
         imageWidth?: number;
         imageHeight?: number;
+        images?: unknown;
         voiceUrl?: string;
         voiceDurationSec?: number;
         voicePeaks?: number[];
         videoUploadId?: string;
         videoDurationSec?: number;
         videoMirrored?: boolean;
-        messageId?: string;
+        messageId?: string | null;
+        messageIds?: unknown;
+        forAll?: boolean;
+        emoji?: string | null;
+        replyToId?: string;
         conversationId?: string | null;
         visible?: boolean;
         active?: boolean;
@@ -147,14 +196,24 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         typeof m.nonce === 'string' &&
         m.body.length <= MAX_DM_BODY
       ) {
-        const image =
-          typeof m.imageUrl === 'string'
-            ? {
-                url: m.imageUrl,
-                width: typeof m.imageWidth === 'number' ? m.imageWidth : 0,
-                height: typeof m.imageHeight === 'number' ? m.imageHeight : 0,
-              }
-            : undefined;
+        // Альбом приходит списком, одиночный снимок — старыми полями.
+        const images = Array.isArray(m.images)
+          ? m.images
+              .filter((i): i is { url: string; width?: unknown; height?: unknown } => !!i && typeof i.url === 'string')
+              .map((i) => ({
+                url: i.url,
+                width: typeof i.width === 'number' ? i.width : 0,
+                height: typeof i.height === 'number' ? i.height : 0,
+              }))
+          : typeof m.imageUrl === 'string'
+            ? [
+                {
+                  url: m.imageUrl,
+                  width: typeof m.imageWidth === 'number' ? m.imageWidth : 0,
+                  height: typeof m.imageHeight === 'number' ? m.imageHeight : 0,
+                },
+              ]
+            : [];
         const voice =
           typeof m.voiceUrl === 'string'
             ? {
@@ -171,7 +230,16 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
                 mirrored: m.videoMirrored === true,
               }
             : undefined;
-        void handleDmSend(principal.userId, m.toUserId, m.body, m.nonce, image, voice, video);
+        void handleDmSend(
+          principal.userId,
+          m.toUserId,
+          m.body,
+          m.nonce,
+          images,
+          voice,
+          video,
+          typeof m.replyToId === 'string' ? m.replyToId : undefined,
+        );
       } else if (m.t === 'dm_typing' && typeof m.toUserId === 'string' && typeof m.typing === 'boolean') {
         handleDmTyping(
           principal.userId,
@@ -183,6 +251,18 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         void handleDmRead(principal.userId, m.peerId);
       } else if (m.t === 'dm_voice_played' && typeof m.messageId === 'string') {
         void handleDmVoicePlayed(principal.userId, m.messageId);
+      } else if (m.t === 'dm_video_played' && typeof m.messageId === 'string') {
+        void handleDmVideoPlayed(principal.userId, m.messageId);
+      } else if (m.t === 'dm_edit' && typeof m.messageId === 'string' && typeof m.body === 'string') {
+        void handleDmEdit(principal.userId, m.messageId, m.body);
+      } else if (m.t === 'dm_delete' && isStringList(m.messageIds)) {
+        void handleDmDelete(principal.userId, m.messageIds, m.forAll === true);
+      } else if (m.t === 'dm_pin' && typeof m.peerId === 'string' && (typeof m.messageId === 'string' || m.messageId === null)) {
+        void handleDmPin(principal.userId, m.peerId, m.messageId);
+      } else if (m.t === 'dm_forward' && typeof m.toUserId === 'string' && isStringList(m.messageIds)) {
+        void handleDmForward(principal.userId, m.toUserId, m.messageIds);
+      } else if (m.t === 'dm_react' && typeof m.messageId === 'string' && (typeof m.emoji === 'string' || m.emoji === null)) {
+        void handleDmReact(principal.userId, m.messageId, m.emoji);
       } else if (m.t === 'presence_focus') {
         // Какой диалог открыт + видима ли вкладка — для подавления push о ЛС.
         const convId = typeof m.conversationId === 'string' ? m.conversationId : null;
@@ -209,10 +289,16 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
       ]);
       conn.send({
         t: 'hello',
+        connId: conn.id,
         notifications: snapshot.notifications,
         unreadCount: snapshot.unreadCount,
         presence,
         dmUnreadTotal: dmUnread,
+        // Идущий разговор — чтобы вернуться в него после перезагрузки страницы.
+        activeCall: (() => {
+          const s = dmCallHub.activeCallOf(principal.userId);
+          return s ? toSnapshot(s) : null;
+        })(),
         serverTs: Date.now(),
       });
     } catch (err) {
@@ -275,6 +361,17 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         socket.close(4403, 'blocked');
         return;
       }
+    }
+
+    // Звонок в ЛС и комната несовместимы. Проверка именно здесь закрывает
+    // окно между выдачей тикета и подключением: за это время можно было успеть
+    // начать звонок, и REST-гейт бы его не увидел.
+    if (
+      ticketPayload.principal.kind === 'user' &&
+      dmCallHub.isBusy(ticketPayload.principal.userId)
+    ) {
+      socket.close(4423, 'call in progress');
+      return;
     }
 
     const runtime = await ensureRoomRuntime(room);

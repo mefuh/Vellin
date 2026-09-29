@@ -18,6 +18,8 @@ const DEFAULT_TOGGLES: PlatformToggles = {
   calls: true,
   playlists: true,
   directMessages: true,
+  dmCalls: true,
+  dmScreenShare: true,
   friends: true,
   invites: true,
   uploads: true,
@@ -32,7 +34,14 @@ const DEFAULT_LIMITS: PlatformLimits = {
   dmVoiceMaxMb: 25,
   dmVideoMaxMb: 128,
 };
-const DEFAULT_WINDOWS: PlatformWindows = { downloadPage: true, qrLogin: true, audience: 'everyone', usernames: [] };
+const DEFAULT_WINDOWS: PlatformWindows = {
+  downloadPage: true,
+  qrLogin: true,
+  audience: 'everyone',
+  usernames: [],
+  // Главная без приложения — пока его не включат в админ-панели.
+  landing: 'watch',
+};
 
 // Настройки хранятся тремя JSON-строками (ключи-секции) и кэшируются в памяти.
 let cache: PlatformSettingsDTO | null = null;

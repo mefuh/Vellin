@@ -4,6 +4,8 @@ import type {
   CallSnapshot,
   ChatMessage,
   DirectMessageDTO,
+  DirectMessageReactionDTO,
+  DmCallSnapshot,
   FriendPresence,
   ParticipantInfo,
   PlaylistItem,
@@ -414,21 +416,44 @@ export type UserS2C =
   | UserS2CFriendsChanged
   | UserS2CDmMessage
   | UserS2CDmMessageUpdated
+  | UserS2CDmMessageDeleted
+  | UserS2CDmPinned
+  | UserS2CDmReaction
   | UserS2CDmRead
   | UserS2CDmTyping
   | UserS2CDmVoicePlayed
+  | UserS2CDmVideoPlayed
   | UserS2CDmError
+  | UserS2CDmCallRing
+  | UserS2CDmCallState
+  | UserS2CDmCallSignal
+  | UserS2CDmCallMedia
+  | UserS2CDmCallSpeaking
+  | UserS2CDmCallError
   | UserS2CRuntime
   | UserS2CPing;
 
 /** Снапшот при подключении: непрочитанные уведомления + presence друзей. */
 export interface UserS2CHello {
   t: 'hello';
+  /**
+   * Идентификатор ЭТОГО соединения. У пользователя их может быть несколько
+   * (вкладки, устройства), и звонок обслуживает ровно одно: остальные
+   * сравнивают свой connId с `callerConnId`/`calleeConnId` в состоянии звонка
+   * и понимают, что разговор идёт не у них.
+   */
+  connId: string;
   notifications: AppNotification[];
   unreadCount: number;
   presence: FriendPresence[];
   /** Суммарно непрочитанных личных сообщений — для бейджа в навбаре. */
   dmUnreadTotal: number;
+  /**
+   * Звонок, который уже идёт с участием этого пользователя (перезагрузили
+   * страницу посреди разговора). Клиент по нему решает, восстанавливать ли
+   * звонок через `dmcall_rejoin`.
+   */
+  activeCall: DmCallSnapshot | null;
   serverTs: number;
 }
 export interface UserS2CNotification {
@@ -502,6 +527,33 @@ export interface UserS2CDmMessageUpdated {
 }
 
 /**
+ * Сообщения удалены. `forAll` — у обоих участников (строки больше нет);
+ * иначе — только у получателя этого события, скрыты им самим на другой вкладке.
+ */
+export interface UserS2CDmMessageDeleted {
+  t: 'dm_message_deleted';
+  conversationId: string;
+  messageIds: string[];
+  forAll: boolean;
+}
+
+/** Реакции на сообщение изменились — полный актуальный список, а не разница. */
+export interface UserS2CDmReaction {
+  t: 'dm_reaction';
+  conversationId: string;
+  messageId: string;
+  reactions: DirectMessageReactionDTO[];
+}
+
+/** В диалоге сменилось закреплённое сообщение. `message: null` — открепили. */
+export interface UserS2CDmPinned {
+  t: 'dm_pinned';
+  conversationId: string;
+  message: DirectMessageDTO | null;
+  byUserId: string;
+}
+
+/**
  * Переписку прочитали. Шлётся: (1) самому прочитавшему на остальные его
  * соединения — сбросить непрочитанные и бейдж (`unreadTotal` задан); (2)
  * собеседнику — обновить «галочки» на его сообщениях (`unreadTotal` опущен).
@@ -530,6 +582,16 @@ export interface UserS2CDmVoicePlayed {
   t: 'dm_voice_played';
   conversationId: string;
   messageId: string;
+  /** Момент первого прослушивания (ISO). */
+  playedAt?: string;
+}
+/** Собеседник посмотрел мой кружок — обновить индикатор «просмотрено». */
+export interface UserS2CDmVideoPlayed {
+  t: 'dm_video_played';
+  conversationId: string;
+  messageId: string;
+  /** Момент первого просмотра (ISO). */
+  playedAt?: string;
 }
 /** Ошибка отправки ЛС (нет прав/заблокирован/слишком длинно). */
 export interface UserS2CDmError {
@@ -553,6 +615,95 @@ export interface UserS2CPing {
   serverTs: number;
 }
 
+// ── Звонок 1:1 в личных сообщениях (S2C) ─────────────────────────────────
+//
+// Состояние звонка целиком принадлежит серверу. Клиент никогда не выводит его
+// сам: любое изменение приходит как `dmcall_state` — одно авторитетное
+// сообщение всем соединениям обеих сторон.
+
+/**
+ * Входящий звонок. Уходит НА ВСЕ соединения получателя, чтобы звонило на всех
+ * его устройствах; ответ с одного из них погасит остальные (см. connId).
+ */
+export interface UserS2CDmCallRing {
+  t: 'dmcall_ring';
+  call: DmCallSnapshot;
+  /** Кто звонит — карточка для экрана входящего звонка. */
+  from: PublicUser;
+  /** ICE-серверы с эфемерными TURN-кредами, выпущенные под этот звонок. */
+  rtc: RtcConfig;
+}
+/**
+ * Единственное авторитетное сообщение о состоянии звонка: шлётся обеим
+ * сторонам на все их соединения при каждом переходе (ответили, включили
+ * камеру, повесили трубку).
+ */
+export interface UserS2CDmCallState {
+  t: 'dmcall_state';
+  call: DmCallSnapshot;
+  /** Собеседник глазами получателя сообщения. */
+  peer: PublicUser;
+  /** Только соединению, которое ведёт звонок, и только пока он не завершён. */
+  rtc?: RtcConfig;
+  /** Эхо nonce из `dmcall_invite` — звонящий сопоставляет свой оптимистичный UI. */
+  nonce?: string;
+}
+/** Прозрачный релей SDP/ICE от собеседника. */
+export interface UserS2CDmCallSignal {
+  t: 'dmcall_signal';
+  callId: string;
+  fromUserId: string;
+  payload: CallSignalPayload;
+}
+/** Собеседник включил/выключил микрофон, камеру или демонстрацию экрана. */
+export interface UserS2CDmCallMedia {
+  t: 'dmcall_media';
+  callId: string;
+  fromUserId: string;
+  audio: boolean;
+  video: boolean;
+  screen: boolean;
+  /** Приметы дорожки демонстрации — см. `UserC2SDmCallMedia`. */
+  screenMid?: string;
+  screenStreamId?: string;
+}
+/** Собеседник говорит (или замолчал) — индикатор речи. Не персистится. */
+export interface UserS2CDmCallSpeaking {
+  t: 'dmcall_speaking';
+  callId: string;
+  fromUserId: string;
+  speaking: boolean;
+}
+/** Звонок невозможен либо оборвался по причине, о которой надо сказать. */
+export interface UserS2CDmCallError {
+  t: 'dmcall_error';
+  /** nonce неудавшегося приглашения — чтобы клиент снял свой «звоним…». */
+  nonce?: string;
+  callId?: string;
+  code:
+    /** Получатель смотрит в комнате — звонок ему не доставляется. */
+    | 'busy_in_room'
+    /** Получатель уже разговаривает. */
+    | 'busy_in_call'
+    /** Звонящий сам находится в комнате. */
+    | 'caller_in_room'
+    /** Получателя нет в сети. */
+    | 'offline'
+    | 'privacy'
+    | 'blocked'
+    | 'self'
+    | 'not_found'
+    | 'guest_forbidden'
+    /** Звонки в ЛС выключены администратором. */
+    | 'disabled'
+    /** Демонстрация экрана выключена администратором — сам звонок идёт. */
+    | 'screen_disabled'
+    | 'rate_limited'
+    /** Сервер не знает такого звонка (перезапуск, истёкшая сессия). */
+    | 'no_session';
+  message: string;
+}
+
 export type UserC2S =
   | UserC2SPong
   | UserC2SWatchPresence
@@ -560,11 +711,27 @@ export type UserC2S =
   | UserC2SWatchLibrary
   | UserC2SUnwatchLibrary
   | UserC2SDmSend
+  | UserC2SDmEdit
+  | UserC2SDmDelete
+  | UserC2SDmPin
+  | UserC2SDmForward
+  | UserC2SDmReact
   | UserC2SDmTyping
   | UserC2SDmRead
   | UserC2SDmVoicePlayed
+  | UserC2SDmVideoPlayed
   | UserC2SPresenceFocus
-  | UserC2SActivity;
+  | UserC2SActivity
+  | UserC2SDmCallInvite
+  | UserC2SDmCallAccept
+  | UserC2SDmCallDecline
+  | UserC2SDmCallCancel
+  | UserC2SDmCallHangup
+  | UserC2SDmCallSignal
+  | UserC2SDmCallMedia
+  | UserC2SDmCallSpeaking
+  | UserC2SDmCallConnected
+  | UserC2SDmCallRejoin;
 
 export interface UserC2SPong {
   t: 'pong';
@@ -598,6 +765,12 @@ export interface UserC2SDmSend {
   imageUrl?: string;
   imageWidth?: number;
   imageHeight?: number;
+  /**
+   * Альбом: заранее загруженные снимки (каждый через POST /dm/image), не больше
+   * `DM_MAX_IMAGES`. Если задан, поля `imageUrl`/`imageWidth`/`imageHeight`
+   * не нужны — сервер возьмёт первый снимок сам.
+   */
+  images?: { url: string; width: number; height: number }[];
   /** URL заранее загруженного голосового (через POST /dm/voice), либо отсутствует. */
   voiceUrl?: string;
   voiceDurationSec?: number;
@@ -617,12 +790,61 @@ export interface UserC2SDmSend {
    * и сервер зеркалит его сам (совместимый fallback без смены камеры).
    */
   videoMirrored?: boolean;
+  /** Ответ на сообщение этого же диалога. Чужой id сервер молча отбрасывает. */
+  replyToId?: string;
   /** Клиентский идентификатор для сопоставления эха (оптимистичная отправка). */
   nonce: string;
+}
+/**
+ * Изменить текст своего сообщения. Голосовые, кружки, приглашения, звонки и
+ * пересланное не редактируются. Ответ — `dm_message_updated` обоим.
+ */
+export interface UserC2SDmEdit {
+  t: 'dm_edit';
+  messageId: string;
+  body: string;
+}
+/**
+ * Удалить сообщения одного диалога. `forAll` — у обоих (любое сообщение
+ * переписки, не только своё), иначе — скрыть только у себя.
+ */
+export interface UserC2SDmDelete {
+  t: 'dm_delete';
+  messageIds: string[];
+  forAll: boolean;
+}
+/** Закрепить сообщение в диалоге с `peerId`; `messageId: null` — открепить. */
+export interface UserC2SDmPin {
+  t: 'dm_pin';
+  peerId: string;
+  messageId: string | null;
+}
+/**
+ * Переслать сообщения пользователю `toUserId` (в том числе в тот же диалог).
+ * Порядок сохраняется по времени оригиналов. Звонки и приглашения не пересылаются.
+ */
+export interface UserC2SDmForward {
+  t: 'dm_forward';
+  toUserId: string;
+  messageIds: string[];
+}
+/**
+ * Поставить реакцию на сообщение (заменяет прежнюю реакцию этого человека)
+ * или снять её (`emoji: null`). Записи о звонках реакций не принимают.
+ */
+export interface UserC2SDmReact {
+  t: 'dm_react';
+  messageId: string;
+  emoji: string | null;
 }
 /** Отметить голосовое сообщение прослушанным (получателем). */
 export interface UserC2SDmVoicePlayed {
   t: 'dm_voice_played';
+  messageId: string;
+}
+/** Отметить видео-кружок просмотренным (получателем). */
+export interface UserC2SDmVideoPlayed {
+  t: 'dm_video_played';
   messageId: string;
 }
 /** Сигнал «печатаю/перестал» собеседнику `toUserId`. */
@@ -657,6 +879,92 @@ export interface UserC2SPresenceFocus {
 export interface UserC2SActivity {
   t: 'activity';
   active: boolean;
+}
+
+// ── Звонок 1:1 в личных сообщениях (C2S) ─────────────────────────────────
+//
+// Клиент только заявляет о намерении; решение и состояние — за сервером.
+// Адресат сигналинга выводится из сессии звонка, поэтому в сообщениях после
+// приглашения достаточно callId.
+
+/** Позвонить пользователю. Микрофон у звонящего включён всегда. */
+export interface UserC2SDmCallInvite {
+  t: 'dmcall_invite';
+  toUserId: string;
+  /** Начать с камерой. */
+  video: boolean;
+  /** Клиентский идентификатор попытки — вернётся в state либо в error. */
+  nonce: string;
+}
+/** Принять входящий звонок на ЭТОМ соединении. */
+export interface UserC2SDmCallAccept {
+  t: 'dmcall_accept';
+  callId: string;
+  /** Ответить сразу с камерой. */
+  video: boolean;
+}
+/** Отклонить входящий звонок. */
+export interface UserC2SDmCallDecline {
+  t: 'dmcall_decline';
+  callId: string;
+}
+/** Звонящий передумал, пока идёт дозвон. */
+export interface UserC2SDmCallCancel {
+  t: 'dmcall_cancel';
+  callId: string;
+}
+/** Завершить состоявшийся разговор (любой стороной). */
+export interface UserC2SDmCallHangup {
+  t: 'dmcall_hangup';
+  callId: string;
+}
+/** SDP/ICE собеседнику — сервер пересылает не разбирая. */
+export interface UserC2SDmCallSignal {
+  t: 'dmcall_signal';
+  callId: string;
+  payload: CallSignalPayload;
+}
+/**
+ * Я включил/выключил микрофон, камеру или демонстрацию экрана.
+ *
+ * Демонстрация приходит второй видео-дорожкой в том же соединении, и приёмнику
+ * надо отличить её от камеры. Для этого ведущий сообщает приметы своей дорожки:
+ * `screenMid` — идентификатор линии в согласовании (совпадает у обеих сторон),
+ * `screenStreamId` — идентификатор потока захвата. Двух примет нужно две,
+ * потому что на Windows первая доезжает не всегда.
+ */
+export interface UserC2SDmCallMedia {
+  t: 'dmcall_media';
+  callId: string;
+  audio: boolean;
+  video: boolean;
+  screen: boolean;
+  screenMid?: string;
+  screenStreamId?: string;
+}
+/** Начал/перестал говорить — только на переходах. */
+export interface UserC2SDmCallSpeaking {
+  t: 'dmcall_speaking';
+  callId: string;
+  speaking: boolean;
+}
+/**
+ * Соединение установлено (PeerConnection перешёл в connected). Снимает на
+ * сервере таймаут дозвона: без этого сигнала сервер не отличает состоявшийся
+ * разговор от звонка, который так и не соединился.
+ */
+export interface UserC2SDmCallConnected {
+  t: 'dmcall_connected';
+  callId: string;
+}
+/**
+ * Вернуться в звонок после перезагрузки страницы или обрыва сокета. Медиа идёт
+ * напрямую между клиентами и переживает обрыв сигнального канала, поэтому
+ * короткий разрыв связи для разговора незаметен.
+ */
+export interface UserC2SDmCallRejoin {
+  t: 'dmcall_rejoin';
+  callId: string;
 }
 
 // ── Type guards ────────────────────────────────────────────────────────

@@ -7,25 +7,55 @@ import 'api/auth_api.dart';
 import 'api/friends_api.dart';
 import 'api/catalog_api.dart';
 import 'api/dm_api.dart';
+import 'api/notifications_api.dart';
 import 'app_config.dart';
 import 'realtime/user_socket.dart';
 import 'router.dart';
 import 'state/auth_controller.dart';
 import 'state/friends_controller.dart';
 import 'state/dm_controller.dart';
+import 'state/call_controller.dart';
+import 'state/notifications_controller.dart';
 import 'state/presence_controller.dart';
+import 'state/app_settings.dart';
+import 'state/circle_playback_controller.dart';
+import 'state/playback_controller.dart';
+import 'state/recent_reactions.dart';
+import 'state/shell_controller.dart';
 import 'state/update_controller.dart';
 import 'storage/session_store.dart';
+import 'webrtc/call_settings.dart';
+import 'theme/vellin_design.dart';
 import 'theme/vellin_theme.dart';
+import 'runtime/fixed_window.dart';
 import 'runtime/auth_window.dart';
+import 'runtime/toast_host.dart';
+import 'runtime/toast_window.dart';
 import 'runtime/updater_splash.dart';
+import 'runtime/window_placement.dart';
+import 'screens/settings/settings_layer.dart';
+import 'widgets/call_overlay.dart';
+import 'widgets/notifications_bell.dart';
+import 'widgets/shell/escape_scope.dart';
+// Заголовок окна и его высота: экран звонка отступает на неё сверху.
 import 'widgets/window_title_bar.dart';
 
 /// Размеры основного окна приложения.
 const _appSize = Size(1180, 760);
 const _appMinSize = Size(940, 640);
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
+  // Этот же exe обслуживает окна уведомлений: у Flutter на Windows одно окно
+  // на процесс, поэтому тост живёт отдельным процессом (см. toast_host.dart).
+  // Ветка ранняя: приложению целиком в этом режиме подниматься незачем.
+  if (args.length >= 2 && args.first == '--toast') {
+    final port = int.tryParse(args[1]);
+    if (port != null) {
+      await runToastApp(port);
+      return;
+    }
+  }
+
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
   MediaKit.ensureInitialized();
@@ -35,9 +65,35 @@ Future<void> main() async {
   final friendsApi = FriendsApi(client);
   final catalogApi = CatalogApi(client);
   final dmApi = DmApi(client);
+  final notificationsApi = NotificationsApi(client);
   final socket = UserSocket(dmApi.realtimeTicket);
   final auth = AuthController(client, authApi, SessionStore());
   final update = UpdateController(client);
+
+  // Камера, обработка звука и громкости собеседников. Читаются заранее: они
+  // нужны с первого же звонка, а он может прийти сразу после запуска.
+  final callSettings = CallSettings();
+  callSettings.load();
+
+  // Уведомления и оформление — настройки этого компьютера, а не аккаунта.
+  final appSettings = AppSettings();
+  appSettings.load();
+  // Недавние реакции — к первому же меню сообщения они уже должны быть на месте.
+  RecentReactions.instance.load();
+
+  // Всплывающие уведомления в фирменном стиле — отдельным окном-процессом.
+  // Поднимается лениво, при первом уведомлении.
+  final toasts = ToastHost();
+  final notifications = NotificationsController(notificationsApi, friendsApi, socket);
+  notifications.onIncoming = toasts.show;
+  // «Не беспокоить» — статус присутствия, а не настройка: доставка не меняется,
+  // молчит только показ. Уведомления при этом продолжают копиться в списке.
+  bool dnd() => auth.user?.presenceStatus == 'dnd';
+
+  // Тостер спрашивает настройки в момент показа, а не запоминает их: человек
+  // мог передумать между двумя уведомлениями.
+  toasts.enabled = () => appSettings.toasts && !dnd();
+  toasts.preview = () => appSettings.toastPreview;
 
   // Старт: сценарий обновления и восстановление сессии идут параллельно.
   update.run();
@@ -58,6 +114,9 @@ Future<void> main() async {
       await windowManager.setResizable(false);
       await windowManager.setMaximizable(false);
       await windowManager.setMinimizable(false);
+      // Окно апдейтера и входа держит свой размер до самого перехода в
+      // приложение — чем бы разворот ни был вызван.
+      FixedWindowGuard.instance.enable();
       // Окно здесь НЕ показываем: до runApp у Flutter нет ни одного кадра, и
       // пустое окно на мгновение мелькает белым. Показ — после первого кадра.
     },
@@ -72,11 +131,39 @@ Future<void> main() async {
         Provider<AuthApi>.value(value: authApi),
         Provider<FriendsApi>.value(value: friendsApi),
         Provider<CatalogApi>.value(value: catalogApi),
+        Provider<DmApi>.value(value: dmApi),
         ChangeNotifierProvider<AuthController>.value(value: auth),
         ChangeNotifierProvider<FriendsController>(create: (_) => FriendsController(friendsApi)),
-        ChangeNotifierProvider<DmController>(create: (_) => DmController(dmApi, socket)),
+        ChangeNotifierProvider<DmController>(
+          create: (_) {
+            final dm = DmController(dmApi, socket);
+            dm.soundEnabled = () => appSettings.messageSound && !dnd();
+            return dm;
+          },
+        ),
         ChangeNotifierProvider<PresenceController>(create: (_) => PresenceController(socket)),
+        ChangeNotifierProvider<NotificationsController>.value(value: notifications),
+        ChangeNotifierProvider<CallSettings>.value(value: callSettings),
+        ChangeNotifierProvider<AppSettings>.value(value: appSettings),
+        // Тостер нужен звонкам: при неактивном окне входящий приходит им.
+        ChangeNotifierProvider<CallController>(
+          create: (_) {
+            final calls = CallController(socket, toasts, callSettings);
+            calls.ringtoneEnabled = () => appSettings.ringtone;
+            calls.doNotDisturb = dnd;
+            return calls;
+          },
+        ),
+        Provider<ToastHost>.value(value: toasts),
         ChangeNotifierProvider<UpdateController>.value(value: update),
+        // Состояние оболочки: раздел рейла, правая область, фрейм настроек.
+        ChangeNotifierProvider<ShellController>(create: (_) => ShellController()),
+        // Один плеер голосовых на приложение: запись продолжает играть, когда
+        // ушли из переписки.
+        ChangeNotifierProvider<PlaybackController>(create: (_) => PlaybackController()),
+        // Кружок, включённый со звуком, живёт вне ленты: прокрутка не должна
+        // обрывать то, что смотрят.
+        ChangeNotifierProvider<CirclePlaybackController>(create: (_) => CirclePlaybackController()),
       ],
       child: const VellinApp(),
     ),
@@ -112,24 +199,38 @@ class _VellinAppState extends State<VellinApp> {
     // Окно приложения — БЕЗ нативного заголовка (свой титлбар), но ресайзное,
     // с тенью и системным скруглением. Возвращаем рамку после безрамочного
     // апдейтера (setAsFrameless) через titleBarStyle.hidden.
+    // Размер меняет только окно приложения — с него страж и снимается.
+    FixedWindowGuard.instance.disable();
     await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: false);
     await windowManager.setResizable(true);
     await windowManager.setMaximizable(true);
     await windowManager.setMinimizable(true);
     await windowManager.setHasShadow(true);
     await windowManager.setMinimumSize(_appMinSize);
-    await windowManager.setSize(_appSize);
     await windowManager.setTitle('Vellin');
-    await windowManager.center();
+    // Где и каким окно было в прошлый раз: положение, размер, разворот или
+    // полный экран. Ничего не запомнено (первый запуск) или прежний монитор
+    // отключён — открываемся по умолчанию, посередине экрана.
+    if (!await WindowPlacement.instance.restore()) {
+      await windowManager.setSize(_appSize);
+      await windowManager.center();
+    }
+    WindowPlacement.instance.start();
   }
 
   /// Окно входа — того же семейства, что апдейтер: маленькое, без ресайза.
   /// Сюда же возвращаемся после выхода из аккаунта, поэтому снимаем всё, что
   /// включало окно приложения (разворот, изменение размера).
   Future<void> _enterAuthWindow() async {
+    // Окно входа намеренно маленькое и фиксированное: запоминать его размер
+    // нельзя, иначе после выхода из аккаунта он подменил бы окно приложения.
+    WindowPlacement.instance.stop();
+    if (await windowManager.isFullScreen()) await windowManager.setFullScreen(false);
     if (await windowManager.isMaximized()) await windowManager.unmaximize();
     await windowManager.setResizable(false);
     await windowManager.setMaximizable(false);
+    // Вернулись из окна приложения — снова держим размер.
+    FixedWindowGuard.instance.enable();
     // Снимаем минимум окна приложения: он больше окна входа и не дал бы
     // ужаться. Ставим до смены размера, иначе окно дёрнется дважды.
     await windowManager.setMinimumSize(const Size(200, 200));
@@ -146,11 +247,33 @@ class _VellinAppState extends State<VellinApp> {
         ? _Phase.updater
         : (auth.ready && !auth.authenticated ? _Phase.auth : _Phase.app);
 
+    // Звонки поднимаем, как только известен пользователь, а не на смене фазы:
+    // на переходе окна профиль мог быть ещё не загружен, и тогда звонки не
+    // включались бы вовсе. Метод идемпотентен.
+    final me = auth.user;
+    if (target == _Phase.app && me != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.read<CallController>().start(me.id);
+      });
+    }
+
     if (target != _phase) {
       _phase = target;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (target == _Phase.auth) _enterAuthWindow();
         if (target == _Phase.app) _enterAppWindow();
+        // Уведомления живут всю сессию, а не пока открыт HomeShell: заход в
+        // профиль или настройки выходит за пределы оболочки, и привязка к её
+        // жизненному циклу рвала бы подписку и обнуляла список.
+        final notifications = context.read<NotificationsController>();
+        final calls = context.read<CallController>();
+        if (target == _Phase.app) notifications.start();
+        if (target == _Phase.auth) {
+          notifications.stop();
+          calls.stop();
+          // Вышли из аккаунта — окно уведомлений больше не нужно.
+          context.read<ToastHost>().stop();
+        }
       });
     }
 
@@ -169,11 +292,54 @@ class _VellinAppState extends State<VellinApp> {
         debugShowCheckedModeBanner: false,
         theme: buildVellinTheme(),
         routerConfig: _router,
-        // Свой заголовок окна поверх всех экранов (нативный скрыт).
-        builder: (context, child) => Column(children: [
-          const WindowTitleBar(),
-          Expanded(child: child ?? const SizedBox.shrink()),
-        ]),
+        // Порядок слоёв важен. Снизу — содержимое раздела, над ним экраны
+        // звонка (разговор переживает переходы по разделам), затем свой
+        // заголовок окна: он должен оставаться нажимаемым и во время звонка,
+        // иначе окно не свернуть и не закрыть. Сверху всего — панель
+        // уведомлений: она выпадает из колокольчика в заголовке.
+        // Один Material на всё приложение и общий стиль текста. Экраны
+        // собраны на своих виджетах, но Material-предок всё равно нужен: без
+        // него у текста нет стиля по умолчанию (жёлтое подчёркивание отладки),
+        // а полям ввода негде рисовать выделение и меню.
+        builder: (context, child) => MediaQuery.withClampedTextScaling(
+          // Размер текста из настроек оформления. Ставится здесь, над всем
+          // содержимым, чтобы одинаково касался и панелей, и наложений.
+          minScaleFactor: context.watch<AppSettings>().textScale,
+          maxScaleFactor: context.watch<AppSettings>().textScale,
+          child: Material(
+          type: MaterialType.transparency,
+          child: DefaultTextStyle(
+            style: VellinType.body,
+            // Esc — над всеми слоями сразу: и над разделом, и над фрейм
+            // настроек, и над наложениями навигатора.
+            child: EscapeScope(
+            child: Stack(children: [
+          Column(children: [
+            // Место под заголовок: сам он нарисован выше по стопке.
+            const SizedBox(height: kWindowTitleBarHeight),
+            // Свёрнутый звонок — полоса под заголовком, над содержимым раздела.
+            const CallBarSlot(),
+            Expanded(child: child ?? const SizedBox.shrink()),
+          ]),
+          // Настройки — фрейм НИЖЕ заголовка окна: кнопки свернуть, развернуть
+          // и закрыть остаются доступными, пока настройки открыты.
+          const Positioned(
+            top: kWindowTitleBarHeight,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SettingsLayer(),
+          ),
+          // Positioned.fill обязателен: вложенный Stack без него схлопнулся бы
+          // по содержимому и рисовал экраны не на месте.
+          const Positioned.fill(child: CallLayer()),
+          const Positioned(top: 0, left: 0, right: 0, child: WindowTitleBar()),
+          const NotificationsPanelOverlay(),
+            ]),
+            ),
+          ),
+          ),
+        ),
       );
     }
 
