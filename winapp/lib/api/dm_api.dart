@@ -1,3 +1,4 @@
+import '../models/call_history.dart';
 import '../models/dm.dart';
 import 'api_client.dart';
 
@@ -23,11 +24,42 @@ class DmApi {
     );
   }
 
+  /// История звонков по всем диалогам (before — ISO для подгрузки старых).
+  Future<({List<CallHistoryEntry> calls, bool hasMore})> callHistory({String? before}) async {
+    final q = before != null ? '?before=${Uri.encodeQueryComponent(before)}' : '';
+    final j = await _c.get('/dm/calls$q') as Map<String, dynamic>;
+    return (
+      calls: (j['calls'] as List? ?? [])
+          .map((e) => CallHistoryEntry.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      hasMore: j['hasMore'] as bool? ?? false,
+    );
+  }
+
   /// Тред переписки с пользователем по publicId (before — ISO для пагинации).
   Future<ConversationThread> thread(String publicId, {String? before}) async {
     final q = before != null ? '?before=${Uri.encodeQueryComponent(before)}' : '';
     final j = await _c.get('/dm/with/$publicId$q') as Map<String, dynamic>;
     return ConversationThread.fromJson(j);
+  }
+
+  /// Витрина вложений диалога: снимки от новых к старым (before — ISO для
+  /// подгрузки более старых).
+  Future<({List<DmMediaItem> items, bool hasMore})> media(String publicId, {String? before}) async {
+    final q = before != null ? '?before=${Uri.encodeQueryComponent(before)}' : '';
+    final j = await _c.get('/dm/with/$publicId/media$q') as Map<String, dynamic>;
+    return (
+      items: (j['items'] as List? ?? [])
+          .map((e) => DmMediaItem.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      hasMore: j['hasMore'] as bool? ?? false,
+    );
+  }
+
+  /// Включить или выключить уведомления диалога. Возвращает новое состояние.
+  Future<bool> setMuted(String publicId, bool muted) async {
+    final j = await _c.post('/dm/with/$publicId/mute', {'muted': muted}) as Map<String, dynamic>;
+    return j['muted'] as bool? ?? muted;
   }
 
   /// Загрузить изображение для ЛС (multipart). Возвращает url + размеры для

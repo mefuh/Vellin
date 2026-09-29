@@ -4,6 +4,7 @@ import type {
   CallSnapshot,
   ChatMessage,
   DirectMessageDTO,
+  DirectMessageReactionDTO,
   DmCallSnapshot,
   FriendPresence,
   ParticipantInfo,
@@ -415,9 +416,13 @@ export type UserS2C =
   | UserS2CFriendsChanged
   | UserS2CDmMessage
   | UserS2CDmMessageUpdated
+  | UserS2CDmMessageDeleted
+  | UserS2CDmPinned
+  | UserS2CDmReaction
   | UserS2CDmRead
   | UserS2CDmTyping
   | UserS2CDmVoicePlayed
+  | UserS2CDmVideoPlayed
   | UserS2CDmError
   | UserS2CDmCallRing
   | UserS2CDmCallState
@@ -522,6 +527,33 @@ export interface UserS2CDmMessageUpdated {
 }
 
 /**
+ * Сообщения удалены. `forAll` — у обоих участников (строки больше нет);
+ * иначе — только у получателя этого события, скрыты им самим на другой вкладке.
+ */
+export interface UserS2CDmMessageDeleted {
+  t: 'dm_message_deleted';
+  conversationId: string;
+  messageIds: string[];
+  forAll: boolean;
+}
+
+/** Реакции на сообщение изменились — полный актуальный список, а не разница. */
+export interface UserS2CDmReaction {
+  t: 'dm_reaction';
+  conversationId: string;
+  messageId: string;
+  reactions: DirectMessageReactionDTO[];
+}
+
+/** В диалоге сменилось закреплённое сообщение. `message: null` — открепили. */
+export interface UserS2CDmPinned {
+  t: 'dm_pinned';
+  conversationId: string;
+  message: DirectMessageDTO | null;
+  byUserId: string;
+}
+
+/**
  * Переписку прочитали. Шлётся: (1) самому прочитавшему на остальные его
  * соединения — сбросить непрочитанные и бейдж (`unreadTotal` задан); (2)
  * собеседнику — обновить «галочки» на его сообщениях (`unreadTotal` опущен).
@@ -550,6 +582,16 @@ export interface UserS2CDmVoicePlayed {
   t: 'dm_voice_played';
   conversationId: string;
   messageId: string;
+  /** Момент первого прослушивания (ISO). */
+  playedAt?: string;
+}
+/** Собеседник посмотрел мой кружок — обновить индикатор «просмотрено». */
+export interface UserS2CDmVideoPlayed {
+  t: 'dm_video_played';
+  conversationId: string;
+  messageId: string;
+  /** Момент первого просмотра (ISO). */
+  playedAt?: string;
 }
 /** Ошибка отправки ЛС (нет прав/заблокирован/слишком длинно). */
 export interface UserS2CDmError {
@@ -669,9 +711,15 @@ export type UserC2S =
   | UserC2SWatchLibrary
   | UserC2SUnwatchLibrary
   | UserC2SDmSend
+  | UserC2SDmEdit
+  | UserC2SDmDelete
+  | UserC2SDmPin
+  | UserC2SDmForward
+  | UserC2SDmReact
   | UserC2SDmTyping
   | UserC2SDmRead
   | UserC2SDmVoicePlayed
+  | UserC2SDmVideoPlayed
   | UserC2SPresenceFocus
   | UserC2SActivity
   | UserC2SDmCallInvite
@@ -717,6 +765,12 @@ export interface UserC2SDmSend {
   imageUrl?: string;
   imageWidth?: number;
   imageHeight?: number;
+  /**
+   * Альбом: заранее загруженные снимки (каждый через POST /dm/image), не больше
+   * `DM_MAX_IMAGES`. Если задан, поля `imageUrl`/`imageWidth`/`imageHeight`
+   * не нужны — сервер возьмёт первый снимок сам.
+   */
+  images?: { url: string; width: number; height: number }[];
   /** URL заранее загруженного голосового (через POST /dm/voice), либо отсутствует. */
   voiceUrl?: string;
   voiceDurationSec?: number;
@@ -736,12 +790,61 @@ export interface UserC2SDmSend {
    * и сервер зеркалит его сам (совместимый fallback без смены камеры).
    */
   videoMirrored?: boolean;
+  /** Ответ на сообщение этого же диалога. Чужой id сервер молча отбрасывает. */
+  replyToId?: string;
   /** Клиентский идентификатор для сопоставления эха (оптимистичная отправка). */
   nonce: string;
+}
+/**
+ * Изменить текст своего сообщения. Голосовые, кружки, приглашения, звонки и
+ * пересланное не редактируются. Ответ — `dm_message_updated` обоим.
+ */
+export interface UserC2SDmEdit {
+  t: 'dm_edit';
+  messageId: string;
+  body: string;
+}
+/**
+ * Удалить сообщения одного диалога. `forAll` — у обоих (любое сообщение
+ * переписки, не только своё), иначе — скрыть только у себя.
+ */
+export interface UserC2SDmDelete {
+  t: 'dm_delete';
+  messageIds: string[];
+  forAll: boolean;
+}
+/** Закрепить сообщение в диалоге с `peerId`; `messageId: null` — открепить. */
+export interface UserC2SDmPin {
+  t: 'dm_pin';
+  peerId: string;
+  messageId: string | null;
+}
+/**
+ * Переслать сообщения пользователю `toUserId` (в том числе в тот же диалог).
+ * Порядок сохраняется по времени оригиналов. Звонки и приглашения не пересылаются.
+ */
+export interface UserC2SDmForward {
+  t: 'dm_forward';
+  toUserId: string;
+  messageIds: string[];
+}
+/**
+ * Поставить реакцию на сообщение (заменяет прежнюю реакцию этого человека)
+ * или снять её (`emoji: null`). Записи о звонках реакций не принимают.
+ */
+export interface UserC2SDmReact {
+  t: 'dm_react';
+  messageId: string;
+  emoji: string | null;
 }
 /** Отметить голосовое сообщение прослушанным (получателем). */
 export interface UserC2SDmVoicePlayed {
   t: 'dm_voice_played';
+  messageId: string;
+}
+/** Отметить видео-кружок просмотренным (получателем). */
+export interface UserC2SDmVideoPlayed {
+  t: 'dm_video_played';
   messageId: string;
 }
 /** Сигнал «печатаю/перестал» собеседнику `toUserId`. */

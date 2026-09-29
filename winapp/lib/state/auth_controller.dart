@@ -78,6 +78,23 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Сменить свой статус присутствия. Показываем выбор сразу, не дожидаясь
+  /// ответа: сервер лишь подтверждает, а откат при ошибке вернёт прежний.
+  Future<void> setPresenceStatus(String status) async {
+    final before = _user;
+    if (before == null || before.presenceStatus == status) return;
+    _user = before.withPresenceStatus(status);
+    notifyListeners();
+    try {
+      await _auth.setPresenceStatus(status);
+      final token = _token;
+      if (token != null && _user != null) await _store.save(token, _user!);
+    } catch (_) {
+      _user = before;
+      notifyListeners();
+    }
+  }
+
   Future<void> logout() async {
     _token = null;
     _user = null;

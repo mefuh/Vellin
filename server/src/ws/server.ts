@@ -18,7 +18,18 @@ import { ensureRoomRuntime } from '../rooms/RoomRuntime.js';
 import { prisma } from '../db/prisma.js';
 import { userHub, type UserConnection } from '../realtime/UserHub.js';
 import { getFriendPresenceSnapshot, getNotificationsSnapshot } from '../friends/service.js';
-import { handleDmRead, handleDmSend, handleDmTyping, handleDmVoicePlayed } from '../dm/realtime.js';
+import {
+  handleDmRead,
+  handleDmSend,
+  handleDmTyping,
+  handleDmVideoPlayed,
+  handleDmEdit,
+  handleDmDelete,
+  handleDmPin,
+  handleDmForward,
+  handleDmReact,
+  handleDmVoicePlayed,
+} from '../dm/realtime.js';
 import { unreadTotal as dmUnreadTotal } from '../dm/service.js';
 import { MAX_DM_BODY } from '../dm/service.js';
 import { TokenBucket } from './rateLimit.js';
@@ -53,8 +64,19 @@ import { dmCallHub, toSnapshot } from '../calls/DmCallHub.js';
 // (typical 8–12 KB; some Chromium builds clear 16 KB).
 const MAX_MESSAGE_BYTES = 32 * 1024;
 
-/** Тот же потолок для пользовательского канала — там теперь тоже ходит SDP. */
-const MAX_USER_MESSAGE_BYTES = 64 * 1024;
+/**
+ * Потолок кадра пользовательского канала — там ходит SDP.
+ *
+ * Держим вдвое выше потолка на само SDP (48 КБ в `userCallDispatch`), чтобы
+ * обвязка JSON никогда не выталкивала законный офер за границу: превышение
+ * рвёт соединение, а рвать его посреди звонка нельзя.
+ */
+const MAX_USER_MESSAGE_BYTES = 96 * 1024;
+
+/** Непустой список строк из сообщения клиента — id сообщений для пачечных действий. */
+function isStringList(v: unknown): v is string[] {
+  return Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string');
+}
 
 export async function registerWebSocket(app: FastifyInstance): Promise<void> {
   // ── Пользовательский realtime-канал (личные уведомления + presence) ─────
@@ -143,13 +165,18 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         imageUrl?: string;
         imageWidth?: number;
         imageHeight?: number;
+        images?: unknown;
         voiceUrl?: string;
         voiceDurationSec?: number;
         voicePeaks?: number[];
         videoUploadId?: string;
         videoDurationSec?: number;
         videoMirrored?: boolean;
-        messageId?: string;
+        messageId?: string | null;
+        messageIds?: unknown;
+        forAll?: boolean;
+        emoji?: string | null;
+        replyToId?: string;
         conversationId?: string | null;
         visible?: boolean;
         active?: boolean;
@@ -169,14 +196,24 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         typeof m.nonce === 'string' &&
         m.body.length <= MAX_DM_BODY
       ) {
-        const image =
-          typeof m.imageUrl === 'string'
-            ? {
-                url: m.imageUrl,
-                width: typeof m.imageWidth === 'number' ? m.imageWidth : 0,
-                height: typeof m.imageHeight === 'number' ? m.imageHeight : 0,
-              }
-            : undefined;
+        // Альбом приходит списком, одиночный снимок — старыми полями.
+        const images = Array.isArray(m.images)
+          ? m.images
+              .filter((i): i is { url: string; width?: unknown; height?: unknown } => !!i && typeof i.url === 'string')
+              .map((i) => ({
+                url: i.url,
+                width: typeof i.width === 'number' ? i.width : 0,
+                height: typeof i.height === 'number' ? i.height : 0,
+              }))
+          : typeof m.imageUrl === 'string'
+            ? [
+                {
+                  url: m.imageUrl,
+                  width: typeof m.imageWidth === 'number' ? m.imageWidth : 0,
+                  height: typeof m.imageHeight === 'number' ? m.imageHeight : 0,
+                },
+              ]
+            : [];
         const voice =
           typeof m.voiceUrl === 'string'
             ? {
@@ -193,7 +230,16 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
                 mirrored: m.videoMirrored === true,
               }
             : undefined;
-        void handleDmSend(principal.userId, m.toUserId, m.body, m.nonce, image, voice, video);
+        void handleDmSend(
+          principal.userId,
+          m.toUserId,
+          m.body,
+          m.nonce,
+          images,
+          voice,
+          video,
+          typeof m.replyToId === 'string' ? m.replyToId : undefined,
+        );
       } else if (m.t === 'dm_typing' && typeof m.toUserId === 'string' && typeof m.typing === 'boolean') {
         handleDmTyping(
           principal.userId,
@@ -205,6 +251,18 @@ export async function registerWebSocket(app: FastifyInstance): Promise<void> {
         void handleDmRead(principal.userId, m.peerId);
       } else if (m.t === 'dm_voice_played' && typeof m.messageId === 'string') {
         void handleDmVoicePlayed(principal.userId, m.messageId);
+      } else if (m.t === 'dm_video_played' && typeof m.messageId === 'string') {
+        void handleDmVideoPlayed(principal.userId, m.messageId);
+      } else if (m.t === 'dm_edit' && typeof m.messageId === 'string' && typeof m.body === 'string') {
+        void handleDmEdit(principal.userId, m.messageId, m.body);
+      } else if (m.t === 'dm_delete' && isStringList(m.messageIds)) {
+        void handleDmDelete(principal.userId, m.messageIds, m.forAll === true);
+      } else if (m.t === 'dm_pin' && typeof m.peerId === 'string' && (typeof m.messageId === 'string' || m.messageId === null)) {
+        void handleDmPin(principal.userId, m.peerId, m.messageId);
+      } else if (m.t === 'dm_forward' && typeof m.toUserId === 'string' && isStringList(m.messageIds)) {
+        void handleDmForward(principal.userId, m.toUserId, m.messageIds);
+      } else if (m.t === 'dm_react' && typeof m.messageId === 'string' && (typeof m.emoji === 'string' || m.emoji === null)) {
+        void handleDmReact(principal.userId, m.messageId, m.emoji);
       } else if (m.t === 'presence_focus') {
         // Какой диалог открыт + видима ли вкладка — для подавления push о ЛС.
         const convId = typeof m.conversationId === 'string' ? m.conversationId : null;

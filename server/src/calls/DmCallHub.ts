@@ -83,6 +83,13 @@ class DmCallHub {
   private readonly timers = new Map<string, Timers>();
   /** `откуда:кому` → времена последних приглашений (антифлуд). */
   private readonly invites = new Map<string, number[]>();
+  /**
+   * Пары, для которых звонок уже готовится. Приглашение проходит несколько
+   * обращений к базе, прежде чем сессия появится, и без этой брони два
+   * приглашения подряд успевали проскочить проверку занятости и создать два
+   * звонка на одну пару.
+   */
+  private readonly reserved = new Map<string, { callerId: string; calleeId: string }>();
 
   /** Вызывается на каждом переходе состояния — рассылает клиентам. */
   private onChanged: ((s: DmCallSession) => void) | null = null;
@@ -108,9 +115,42 @@ class DmCallHub {
     return id ? this.sessions.get(id) ?? null : null;
   }
 
-  /** Занят ли пользователь звонком — единственная проверка для гейтов комнат. */
+  /**
+   * Занят ли пользователь звонком — единственная проверка для гейтов комнат.
+   * Готовящийся звонок считается таким же занятием: пока идут проверки, второе
+   * приглашение принимать нельзя.
+   */
   isBusy(userId: string): boolean {
-    return this.byUser.has(userId);
+    if (this.byUser.has(userId)) return true;
+    for (const r of this.reserved.values()) {
+      if (r.callerId === userId || r.calleeId === userId) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Занять пару под будущий звонок. Синхронно и до любых обращений к базе —
+   * в этом весь смысл: между проверкой и созданием сессии не должно быть точек,
+   * где успевает вклиниться второе приглашение.
+   *
+   * Возвращает false, если пара уже занята или готовится.
+   */
+  reserve(callerId: string, calleeId: string): boolean {
+    if (this.isBusy(callerId) || this.isBusy(calleeId)) return false;
+    const key = pairKey(callerId, calleeId);
+    if (this.byPair.has(key) || this.reserved.has(key)) return false;
+    this.reserved.set(key, { callerId, calleeId });
+    return true;
+  }
+
+  /** Снять бронь: проверки не прошли или звонок уже создан. */
+  release(callerId: string, calleeId: string): void {
+    this.reserved.delete(pairKey(callerId, calleeId));
+  }
+
+  /** Участник ли пользователь этого звонка. */
+  isParticipant(s: DmCallSession, userId: string): boolean {
+    return s.callerId === userId || s.calleeId === userId;
   }
 
   /** Сессия пары, если между этими двумя уже что-то происходит. */
@@ -134,8 +174,20 @@ class DmCallHub {
     const key = `${fromUserId}:${toUserId}`;
     const now = Date.now();
     const fresh = (this.invites.get(key) ?? []).filter((t) => now - t < INVITE_WINDOW_MS);
-    this.invites.set(key, fresh);
+    if (fresh.length === 0) this.invites.delete(key);
+    else this.invites.set(key, fresh);
     return fresh.length >= INVITE_LIMIT;
+  }
+
+  /**
+   * Вымести пары, которые давно не звонили. Иначе карта антифлуда чистится
+   * только при повторном звонке той же пары и растёт всю жизнь процесса.
+   */
+  private sweepInvites(): void {
+    const now = Date.now();
+    for (const [key, times] of this.invites) {
+      if (times.every((t) => now - t >= INVITE_WINDOW_MS)) this.invites.delete(key);
+    }
   }
 
   private noteInvite(fromUserId: string, toUserId: string): void {
@@ -175,7 +227,10 @@ class DmCallHub {
     this.byUser.set(s.callerId, s.callId);
     this.byUser.set(s.calleeId, s.callId);
     this.byPair.set(pairKey(s.callerId, s.calleeId), s.callId);
+    // Бронь больше не нужна: пару держит сам звонок.
+    this.release(s.callerId, s.calleeId);
     this.noteInvite(p.callerId, p.calleeId);
+    this.sweepInvites();
     this.setTimer(s.callId, 'ring', DM_CALL_RING_MS, () => this.end(s.callId, 'missed'));
     this.setTimer(s.callId, 'max', MAX_CALL_MS, () => this.end(s.callId, 'hangup'));
     logger.info({ callId: s.callId, callerId: s.callerId, calleeId: s.calleeId }, 'dmcall:create');
@@ -192,28 +247,39 @@ class DmCallHub {
     s.media[s.calleeId] = { audio: true, video, screen: false };
     this.clearTimer(callId, 'ring');
     this.setTimer(callId, 'connect', CONNECT_MS, () => {
-      // Обе стороны обязаны подтвердить установленное соединение.
+      // Достаточно подтверждения от ОДНОЙ стороны: канал у разговора общий, и
+      // если он поднялся у одного, разговор идёт. Требовать оба подтверждения
+      // нельзя — клиенты сообщают о соединении по разным событиям, и молчание
+      // одного из них помечало состоявшийся разговор как несостоявшийся.
       const cur = this.sessions.get(callId);
-      if (cur && cur.connected.size < 2) this.end(callId, 'failed');
+      if (cur && cur.connected.size === 0) this.end(callId, 'failed');
     });
     logger.info({ callId }, 'dmcall:accept');
     this.onChanged?.(s);
     return s;
   }
 
-  /** Сторона сообщила, что соединение установлено. */
+  /**
+   * Сторона сообщила, что соединение установлено.
+   *
+   * Проверка участника здесь, а не только в обработчике: чужое подтверждение
+   * снимало сторож «соединение не установилось», и несостоявшийся звонок висел
+   * активным до предохранителя в шесть часов.
+   */
   markConnected(callId: string, userId: string): DmCallSession | null {
     const s = this.sessions.get(callId);
     if (!s || s.phase !== 'active') return null;
+    if (!this.isParticipant(s, userId)) return null;
     s.connected.add(userId);
-    if (s.connected.size >= 2) this.clearTimer(callId, 'connect');
+    this.clearTimer(callId, 'connect');
     return s;
   }
 
-  /** Состояние микрофона/камеры стороны. */
+  /** Состояние микрофона/камеры стороны. Чужого в состав звонка не пускаем. */
   setMedia(callId: string, userId: string, media: DmCallMediaState): DmCallSession | null {
     const s = this.sessions.get(callId);
     if (!s || s.phase === 'ended') return null;
+    if (!this.isParticipant(s, userId)) return null;
     s.media[userId] = media;
     return s;
   }
@@ -224,8 +290,10 @@ class DmCallHub {
    */
   rejoin(callId: string, userId: string, connId: string): DmCallSession | null {
     const s = this.sessions.get(callId);
-    if (!s || s.phase === 'ended') return null;
-    if (s.callerId !== userId && s.calleeId !== userId) return null;
+    // Только в разговор: во время дозвона возвращаться некуда, а занятое так
+    // соединение отвечающего заводило льготный таймер на ещё не принятый звонок.
+    if (!s || s.phase !== 'active') return null;
+    if (!this.isParticipant(s, userId)) return null;
     if (s.callerId === userId) s.callerConnId = connId;
     else s.calleeConnId = connId;
     this.clearTimer(callId, 'grace');

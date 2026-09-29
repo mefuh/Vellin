@@ -1,0 +1,618 @@
+/*
+ * Визуальный язык клиента для Windows на сайте.
+ *
+ * Значения — из winapp/lib/theme/vellin_design.dart. Всё замкнуто на .vx:
+ * пока на этот язык переходят только лэндинг и вход, остальной сайт живёт на
+ * своих токенах и не должен ничего отсюда унаследовать.
+ */
+
+/* Manrope раздаём сами, вариативным файлом: с Google Fonts первый показ
+   успевал пройти на системном шрифте, а из некоторых сетей он и не грузится. */
+@import '@fontsource-variable/manrope';
+
+.vx {
+  /* Фон — ступени от самой глубокой к приподнятой. */
+  --vx-bg0: #060505;
+  --vx-bg1: #0a0807;
+  --vx-panel: #0d0c0b;
+  --vx-surface: #131110;
+  --vx-raised: #1a1716;
+  --vx-bed: #211c18;
+
+  /* Только для макетов окон клиента (vellin_design.dart): хром окна, пузыри,
+     «не в сети» и красный сброса звонка. На самой странице не используются. */
+  --vx-chrome: #0a0908;
+  --vx-bubble: #161413;
+  --vx-bubble-own: #221d18;
+  --vx-offline: #5a514c;
+  --vx-destructive: rgba(186, 66, 58, 0.92);
+
+  /* Золото — единственный акцент. */
+  --vx-gold: #e2c99b;
+  --vx-glow: #d6ae6e;
+  --vx-gold-wash: rgba(226, 201, 155, 0.1);
+  --vx-gold-line: rgba(226, 201, 155, 0.2);
+  --vx-gold-strong: rgba(226, 201, 155, 0.5);
+  --vx-on-gold: #14100b;
+
+  /* Бумага окна входа и сплэша. */
+  --vx-paper: #f7f6f4;
+
+  --vx-online: #93b08a;
+  --vx-warn: #e8a08c;
+
+  /* Текст — белый с прозрачностью. Ниже 55 % — только подписи. */
+  --vx-ink94: rgba(255, 255, 255, 0.94);
+  --vx-ink88: rgba(255, 255, 255, 0.88);
+  --vx-ink72: rgba(255, 255, 255, 0.72);
+  --vx-ink62: rgba(255, 255, 255, 0.62);
+  --vx-ink55: rgba(255, 255, 255, 0.55);
+  --vx-ink42: rgba(255, 255, 255, 0.42);
+  --vx-ink28: rgba(255, 255, 255, 0.28);
+
+  --vx-line05: rgba(255, 255, 255, 0.05);
+  --vx-line07: rgba(255, 255, 255, 0.07);
+  --vx-line10: rgba(255, 255, 255, 0.1);
+  --vx-line14: rgba(255, 255, 255, 0.14);
+  --vx-fill045: rgba(255, 255, 255, 0.045);
+  --vx-fill11: rgba(255, 255, 255, 0.11);
+
+  --vx-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --vx-exit: cubic-bezier(0.4, 0, 0.7, 1);
+
+  --vx-gutter: max(20px, 4vw);
+
+  font-family: 'Manrope Variable', 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--vx-ink88);
+  background: var(--vx-bg1);
+  caret-color: var(--vx-gold);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'ss01' 0;
+}
+
+.vx ::selection {
+  background: rgba(226, 201, 155, 0.32);
+  color: #fff;
+}
+
+/* Кольцо фокуса с клавиатуры — отдельно от наведения, всегда видно. */
+.vx :focus-visible {
+  outline: 1px solid var(--vx-gold-strong);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgba(226, 201, 155, 0.14);
+}
+
+/* Сброс ссылок с нулевой специфичностью: иначе он перебивал цвет кнопок,
+   собранных на <a>, — текст на золоте выходил светлым. */
+.vx :where(a) {
+  color: inherit;
+  text-decoration: none;
+}
+
+.vx h1,
+.vx h2,
+.vx h3 {
+  text-wrap: balance;
+  margin: 0;
+}
+
+.vx p {
+  text-wrap: pretty;
+  margin: 0;
+}
+
+.vx .vx-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Полоса прокрутки страницы — в тоне фона, а не системная серая. */
+html:has(.vx-page) {
+  background: #0a0807;
+  scrollbar-color: rgba(255, 255, 255, 0.14) #0a0807;
+}
+
+/* ── Кнопки ─────────────────────────────────────────────────────────── */
+
+.vx-btn {
+  --h: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  height: var(--h);
+  padding: 0 20px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.4s var(--vx-ease),
+    border-color 0.4s var(--vx-ease),
+    color 0.4s var(--vx-ease),
+    box-shadow 0.4s var(--vx-ease),
+    transform 0.4s var(--vx-ease);
+}
+
+.vx-btn:disabled {
+  cursor: default;
+}
+
+.vx-btn:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+/* Золото — действие продукта: смотреть, создавать. Отсвет, а не тень. */
+.vx-btn--gold {
+  background: var(--vx-gold);
+  color: var(--vx-on-gold);
+  box-shadow: 0 10px 26px -14px rgba(214, 174, 110, 0.9);
+}
+
+.vx-btn--gold:not(:disabled):hover {
+  background: #ecd6ac;
+  box-shadow: 0 14px 34px -14px rgba(214, 174, 110, 1);
+  transform: translateY(-1px);
+}
+
+.vx-btn--gold:disabled {
+  background: rgba(226, 201, 155, 0.22);
+  color: rgba(20, 16, 11, 0.55);
+  box-shadow: none;
+}
+
+/* Бумага — как кнопка окна входа приложения. */
+.vx-btn--paper {
+  background: var(--vx-paper);
+  color: #0b0908;
+}
+
+.vx-btn--paper:not(:disabled):hover {
+  background: #fff;
+}
+
+.vx-btn--paper:disabled {
+  /* Выключенная — тихая, но читаемая: не грязная плашка, а ещё не нажатая кнопка. */
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: var(--vx-ink55);
+}
+
+.vx-btn--quiet {
+  background: var(--vx-fill045);
+  border-color: var(--vx-line07);
+  color: var(--vx-ink88);
+}
+
+.vx-btn--quiet:not(:disabled):hover {
+  background: var(--vx-fill11);
+  border-color: var(--vx-line10);
+  color: #fff;
+}
+
+.vx-btn--ghost {
+  background: transparent;
+  color: var(--vx-ink72);
+  padding: 0 14px;
+}
+
+.vx-btn--ghost:hover {
+  color: #fff;
+}
+
+.vx .vx-link {
+  color: var(--vx-gold);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.4s var(--vx-ease);
+}
+
+.vx .vx-link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* ── Поля формы: как в окне входа приложения ───────────────────────── */
+
+.vx-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vx-field__label {
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--vx-ink55);
+}
+
+.vx-field__input {
+  height: 46px;
+  padding: 0 15px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--vx-ink94);
+  font: inherit;
+  font-size: 14.5px;
+  width: 100%;
+  transition:
+    border-color 0.4s var(--vx-ease),
+    background-color 0.4s var(--vx-ease);
+}
+
+.vx-field__input::placeholder {
+  /* 4.5:1 на тёмном поле: не прячем подсказку в серость. */
+  color: rgba(255, 255, 255, 0.46);
+}
+
+.vx-field__input:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.vx-field__input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.vx-field__input:focus-visible {
+  box-shadow: none;
+}
+
+/* Автозаполнение браузера не должно заливать поле светло-жёлтым. */
+.vx-field__input:-webkit-autofill {
+  -webkit-text-fill-color: var(--vx-ink94);
+  -webkit-box-shadow: 0 0 0 40px #171412 inset;
+  caret-color: var(--vx-gold);
+}
+
+.vx-notice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vx-warn);
+  background: rgba(232, 160, 140, 0.08);
+  border: 1px solid rgba(232, 160, 140, 0.2);
+}
+
+/* ── Движение ─────────────────────────────────────────────────────── */
+
+@keyframes vx-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(6px);
+  }
+}
+
+@keyframes vx-bloom {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+
+@keyframes vx-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes vx-breathe {
+  50% {
+    opacity: 0.72;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes vx-float {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.7);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(-10px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-86px) scale(1);
+  }
+}
+
+@keyframes vx-pulse-ring {
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(232, 207, 158, 0.9),
+      0 0 22px rgba(214, 174, 110, 0.55);
+  }
+}
+
+/* Появление первого экрана — лесенкой, из видимого по умолчанию состояния:
+   если анимации нет (печать, фоновая вкладка), контент всё равно на месте. */
+.vx-intro > * {
+  animation: vx-rise 1.1s var(--vx-ease) both;
+}
+
+.vx-intro > *:nth-child(2) { animation-delay: 0.08s; }
+.vx-intro > *:nth-child(3) { animation-delay: 0.16s; }
+.vx-intro > *:nth-child(4) { animation-delay: 0.26s; }
+.vx-intro > *:nth-child(5) { animation-delay: 0.36s; }
+.vx-intro > *:nth-child(6) { animation-delay: 0.46s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vx *,
+  .vx *::before,
+  .vx *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Поле ссылки ──────────────────────────────────────────────────── */
+
+.vx-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.vx-linkfield {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.vx-linkfield__box {
+  --pad: 8px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 66px;
+  padding: var(--pad) var(--pad) var(--pad) 22px;
+  border-radius: 999px;
+  /* Стекло здесь не украшение: поле стоит на свету фона и должно
+     читаться поверх него, как адресная строка поверх кадра. */
+  background: rgba(19, 17, 16, 0.72);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 24px 60px -30px rgba(0, 0, 0, 0.9);
+  transition:
+    border-color 0.5s var(--vx-ease),
+    box-shadow 0.5s var(--vx-ease),
+    background-color 0.5s var(--vx-ease);
+}
+
+.vx-linkfield__box:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.vx-linkfield__box:focus-within {
+  border-color: rgba(226, 201, 155, 0.42);
+  background: rgba(21, 19, 17, 0.86);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 0 0 5px rgba(226, 201, 155, 0.07),
+    0 28px 70px -30px rgba(214, 174, 110, 0.35);
+}
+
+.vx-linkfield--md .vx-linkfield__box {
+  height: 58px;
+  padding-left: 18px;
+}
+
+.vx-linkfield__glyph {
+  flex: none;
+  color: var(--vx-ink42);
+  transition: color 0.4s var(--vx-ease);
+}
+
+.vx-linkfield__box[data-ready] .vx-linkfield__glyph,
+.vx-linkfield__box:focus-within .vx-linkfield__glyph {
+  color: var(--vx-gold);
+}
+
+.vx-linkfield__input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--vx-ink94);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.vx-linkfield__input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.vx-linkfield__input:focus,
+.vx-linkfield__input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Узнанный источник проступает внутри поля, перед кнопкой. */
+.vx-linkfield__source {
+  flex: none;
+  max-width: 0;
+  overflow: hidden;
+  padding: 5px 0;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  color: var(--vx-gold);
+  background: var(--vx-gold-wash);
+  border: 1px solid transparent;
+  opacity: 0;
+  transition:
+    max-width 0.6s var(--vx-ease),
+    padding 0.6s var(--vx-ease),
+    opacity 0.4s var(--vx-ease),
+    border-color 0.4s var(--vx-ease);
+}
+
+.vx-linkfield__source[data-on] {
+  max-width: 160px;
+  padding: 5px 11px;
+  opacity: 1;
+  border-color: var(--vx-gold-line);
+}
+
+.vx-linkfield__go {
+  --h: 50px;
+  flex: none;
+  padding: 0 24px;
+  font-size: 14px;
+}
+
+.vx-linkfield--md .vx-linkfield__go {
+  --h: 42px;
+}
+
+.vx-linkfield__hint {
+  padding: 0 22px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--vx-ink72);
+  animation: vx-rise 0.5s var(--vx-ease) both;
+}
+
+.vx-linkfield__hint[data-tone='warn'] {
+  color: var(--vx-warn);
+}
+
+@media (max-width: 560px) {
+  .vx-linkfield__box,
+  .vx-linkfield--md .vx-linkfield__box {
+    flex-wrap: wrap;
+    height: auto;
+    gap: 10px;
+    padding: 10px 10px 10px 18px;
+    border-radius: 22px;
+  }
+
+  .vx-linkfield__input {
+    height: 44px;
+  }
+
+  .vx-linkfield__go,
+  .vx-linkfield--md .vx-linkfield__go {
+    --h: 48px;
+    flex: 1 0 100%;
+  }
+
+  .vx-linkfield__hint {
+    padding: 0 6px;
+  }
+}
+
+/* ── Лента источников ─────────────────────────────────────────────── */
+
+.vx-marquee {
+  width: 100%;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+}
+
+.vx-marquee__track {
+  display: flex;
+  width: max-content;
+  animation: vx-marquee 42s linear infinite;
+}
+
+.vx-marquee:hover .vx-marquee__track {
+  animation-play-state: paused;
+}
+
+.vx-marquee__run {
+  display: flex;
+  align-items: center;
+}
+
+.vx-marquee__item {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--vx-ink55);
+  white-space: nowrap;
+  transition:
+    color 0.5s var(--vx-ease),
+    text-shadow 0.5s var(--vx-ease);
+}
+
+.vx-marquee__item::after {
+  content: '';
+  width: 3px;
+  height: 3px;
+  margin: 0 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.vx-marquee__item[data-on] {
+  color: var(--vx-gold);
+  text-shadow: 0 0 18px rgba(214, 174, 110, 0.55);
+}
+
+.vx-marquee__item--more {
+  color: var(--vx-ink42);
+  font-weight: 400;
+}
+
+/* Без движения лента не может замереть обрезанной: она становится
+   обычным рядом по центру, с переносом, и узнанный источник виден целиком. */
+@media (prefers-reduced-motion: reduce) {
+  .vx-marquee {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .vx-marquee__track {
+    width: auto;
+    animation: none !important;
+  }
+
+  /* В ряду с переносом точки-разделители повисали бы на концах строк —
+     промежуток держит просто отступ. */
+  .vx-marquee__run {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 26px;
+    width: 100%;
+  }
+
+  .vx-marquee__item::after {
+    display: none;
+  }
+
+  .vx-marquee__run + .vx-marquee__run {
+    display: none;
+  }
+}

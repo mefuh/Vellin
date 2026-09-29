@@ -57,7 +57,7 @@ const PROFILE_SELECT = {
 
 /** Презенс «как будто офлайн» — для скрытого настройками онлайна. */
 function hiddenPresence(userId: string): FriendPresence {
-  return { userId, online: false, currentRoom: null, lastSeenAt: null };
+  return { userId, online: false, status: 'offline', currentRoom: null, lastSeenAt: null };
 }
 
 /** Принятые друзья пользователя как публичные карточки (для секции «Друзья»). */

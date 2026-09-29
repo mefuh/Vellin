@@ -1,4 +1,4 @@
-import type { FriendPresence, PrivacyRule, RoomRef, UserS2C } from '@vellin/shared';
+import type { FriendPresence, PresenceStatus, PrivacyRule, RoomRef, UserS2C } from '@vellin/shared';
 import { DEFAULT_PRIVACY_RULE } from '@vellin/shared';
 import { logger } from '../utils/logger.js';
 import { canSee } from '../privacy/privacy.js';
@@ -18,6 +18,8 @@ export interface UserConnection {
 type FriendResolver = (userId: string) => Promise<string[]>;
 /** Персистит «был в сети» в БД при уходе пользователя в офлайн. */
 type LastSeenWriter = (userId: string, at: Date) => void;
+/** Возвращает выбранный руками статус присутствия. */
+type PresenceStatusResolver = (userId: string) => Promise<PresenceStatus>;
 /** Возвращает правило приватности категории «online» для пользователя. */
 type OnlinePrivacyResolver = (userId: string) => Promise<PrivacyRule>;
 
@@ -53,6 +55,9 @@ class UserHub {
   private friendResolver: FriendResolver | null = null;
   private lastSeenWriter: LastSeenWriter | null = null;
   private onlinePrivacyResolver: OnlinePrivacyResolver | null = null;
+  private presenceStatusResolver: PresenceStatusResolver | null = null;
+  /** userId → выбранный им статус. Пусто — ещё не читали из базы. */
+  private readonly presenceStatus = new Map<string, PresenceStatus>();
   /**
    * Хук на смену играющего видео комнаты — живая синхронизация карточек-
    * приглашений в ЛС (DI разрывает цикл импортов realtime↔dm). В отличие от
@@ -74,6 +79,31 @@ class UserHub {
   setOnlinePrivacyResolver(fn: OnlinePrivacyResolver): void {
     this.onlinePrivacyResolver = fn;
   }
+  setPresenceStatusResolver(fn: PresenceStatusResolver): void {
+    this.presenceStatusResolver = fn;
+  }
+
+  /** Сменить выбранный статус и сразу разослать его тем, кто видит присутствие. */
+  setPresenceStatus(userId: string, status: PresenceStatus): void {
+    this.presenceStatus.set(userId, status);
+    void this.broadcastPresence(userId);
+  }
+
+  /**
+   * Подтянуть статус из базы, если он ещё не в памяти. Вызывается при первом
+   * подключении: дальше значение живёт в кэше и обновляется через
+   * [setPresenceStatus].
+   */
+  private async ensurePresenceStatus(userId: string): Promise<void> {
+    if (this.presenceStatus.has(userId) || !this.presenceStatusResolver) return;
+    try {
+      const status = await this.presenceStatusResolver(userId);
+      this.presenceStatus.set(userId, status);
+      if (status !== 'online') void this.broadcastPresence(userId);
+    } catch (err) {
+      logger.error({ err, userId }, 'presence: status resolver failed');
+    }
+  }
   setRoomVideoChangedHook(fn: (p: { roomId: string; slug: string; videoPoster: string | null; videoTitle: string | null }) => void): void {
     this.roomVideoChanged = fn;
   }
@@ -92,6 +122,7 @@ class UserHub {
     this.connsById.set(conn.id, conn);
     // Только что подключился — считаем активным, пока клиент не пришлёт иначе.
     this.activeByConn.set(conn, true);
+    void this.ensurePresenceStatus(conn.userId);
     if (!wasOnline) {
       this.lastSeen.delete(conn.userId); // снова онлайн
       void this.broadcastPresence(conn.userId);
@@ -194,12 +225,20 @@ class UserHub {
   }
 
   presenceOf(userId: string): FriendPresence {
-    const online = this.isOnline(userId);
-    const seen = online ? null : this.lastSeen.get(userId);
+    const connected = this.isOnline(userId);
+    // Выбранный статус показывается только при живом соединении: «в сети» без
+    // связи — неправда, а «не беспокоить» без связи неотличимо от «не в сети».
+    const chosen = this.presenceStatus.get(userId) ?? 'online';
+    const status: PresenceStatus = connected ? chosen : 'offline';
+    // «Не беспокоить» — человек на связи и не прячется: тишина у него, а не
+    // невидимость для других. Скрывает присутствие только «не в сети».
+    const online = status === 'online' || status === 'dnd';
+    const seen = connected ? null : this.lastSeen.get(userId);
     return {
       userId,
       online,
-      currentRoom: this.roomOf(userId),
+      status,
+      currentRoom: online ? this.roomOf(userId) : null,
       lastSeenAt: seen ? new Date(seen).toISOString() : null,
     };
   }
@@ -376,7 +415,7 @@ class UserHub {
   ): FriendPresence {
     const visible = canSee(rule, { isSelf: viewerId === ownerId, isFriend, viewerId });
     if (visible) return raw;
-    return { userId: ownerId, online: false, currentRoom: null, lastSeenAt: null };
+    return { userId: ownerId, online: false, status: 'offline', currentRoom: null, lastSeenAt: null };
   }
 
   /** Отдать одному подписчику текущий презенс цели с учётом приватности. */

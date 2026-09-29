@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Button } from '../shared';
 import { AuthShell, ErrorBanner, Field } from './AuthShell';
 import { useAuthStore } from '../stores/authStore';
 
@@ -34,18 +33,18 @@ export function Guest() {
       footer={
         <>
           Хотите сохранять историю?{' '}
-          <Link to="/register" style={{ color: 'var(--accent-hi)' }}>
+          <Link to="/register" className="vx-link">
             Создайте аккаунт
           </Link>
         </>
       }
     >
-      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <form onSubmit={submit} className="vx-auth__form">
         <Field label="Ник" value={username} onChange={setUsername} placeholder="Гость" />
         <ErrorBanner message={error} />
-        <Button type="submit" variant="primary" size="lg" full disabled={loading || username.trim().length < 2}>
+        <button type="submit" className="vx-btn vx-btn--paper vx-auth__submit" disabled={loading || username.trim().length < 2}>
           {loading ? 'Подключаемся…' : 'Войти как гость'}
-        </Button>
+        </button>
       </form>
     </AuthShell>
   );

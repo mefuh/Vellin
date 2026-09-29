@@ -1,198 +1,196 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Chip, MountainPoster, VellinLogo } from '../shared';
-import { Icon } from '../shared/Icon';
 import { useAuthStore } from '../stores/authStore';
-import { useIsMobile, useMediaQuery } from '../hooks/useMediaQuery';
 import { useAppConfig } from '../hooks/useAppConfig';
+import { AppFactsSection, AppHero } from '../landing/AppLanding';
+import { LinkField, SourceMarquee } from '../landing/LinkField';
+import { RoomDemo } from '../landing/RoomDemo';
+import { SyncDemo } from '../landing/SyncDemo';
+import { VellinLockup } from '../landing/VellinMark';
+import type { VideoSource } from '../landing/sources';
+import '../landing/vx.css';
+import '../landing/landing.css';
 
+/**
+ * Главная на визуальном языке клиента для Windows. Два варианта — какой
+ * показать, решает админ-панель (раздел Windows → «Главная страница»), а
+ * сервер отдаёт итог в `landingMode`:
+ *
+ * - `watch` — только совместный просмотр: первый экран — поле ссылки;
+ * - `watchApp` — сначала клиент для Windows, за ним тот же просмотр.
+ *
+ * Часть про просмотр одна на оба варианта (WatchFlow), чтобы они не
+ * расходились в словах и фактах.
+ */
 export function Landing() {
   const user = useAuthStore((s) => s.user);
-  const { config } = useAppConfig();
-  const isMobile = useIsMobile();
-  // On phones — collapse the demo-poster chips so they never wrap: the LIVE
-  // chip drops to a bare count and the title chip is hidden.
-  const compactPoster = useMediaQuery('(max-width: 420px)');
+  const { config, loading } = useAppConfig();
+  const [source, setSource] = useState<VideoSource | null>(null);
+  const withApp = config?.landingMode === 'watchApp';
 
   return (
-    <div
-      style={{
-        minHeight: '100svh',
-        background:
-          'radial-gradient(1200px 600px at 80% -20%, var(--accent-soft), transparent 60%), var(--bg-0)',
-        color: 'var(--text-0)',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
-      <header
-        style={{
-          minHeight: 72,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '12px max(16px, 4vw)',
-          gap: 12,
-          flexWrap: 'wrap',
-        }}
-      >
-        <VellinLogo />
-        <nav style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {/* Страницу скачивания можно выключить в админ-панели — тогда ссылки
-              на неё не должно быть нигде, включая шапку лендинга. */}
-          {config?.windowsDownloadVisible && (
-            <Link to="/download">
-              <Button variant="ghost" size="md" icon="download">
-                {isMobile ? 'Windows' : 'Для Windows'}
-              </Button>
-            </Link>
-          )}
+    <div className="vx vx-page">
+      <header className="vx-top">
+        <Link to="/" aria-label="Vellin — на главную">
+          <VellinLockup size={26} direction="row" />
+        </Link>
+        <nav className="vx-top__nav" aria-label="Аккаунт">
           {user ? (
-            <Link to="/library">
-              <Button variant="primary" size="md" iconRight="arrow">
-                Открыть библиотеку
-              </Button>
+            <Link to="/library" className="vx-btn vx-btn--quiet">
+              Мои комнаты
             </Link>
           ) : (
             <>
-              <Link to="/guest">
-                <Button variant="ghost" size="md">
-                  Гостем
-                </Button>
+              <Link to="/login" className="vx-btn vx-btn--ghost">
+                Войти
               </Link>
-              <Link to="/login">
-                <Button variant="secondary" size="md">
-                  Войти
-                </Button>
-              </Link>
-              <Link to="/register">
-                <Button variant="primary" size="md" iconRight="arrow">
-                  Создать аккаунт
-                </Button>
+              <Link to="/register" className="vx-btn vx-btn--quiet">
+                Создать аккаунт
               </Link>
             </>
           )}
         </nav>
       </header>
 
-      <main
-        style={{
-          flex: 1,
-          padding: isMobile ? '24px max(16px, 4vw) 48px' : '40px max(16px, 4vw) 80px',
-          display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.05fr) minmax(0, 1fr)',
-          gap: isMobile ? 28 : 48,
-          alignItems: 'center',
-        }}
-      >
-        <section style={{ maxWidth: 600, display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <Chip tone="accent" icon="sparkles" style={{ alignSelf: 'flex-start' }}>
-            beta v {__APP_VERSION__} · создан для просмотра Универа
-          </Chip>
-          <h1
-            style={{
-              fontSize: 'clamp(40px, 5vw, 64px)',
-              lineHeight: 1.05,
-              fontWeight: 600,
-              letterSpacing: '-0.03em',
-              margin: 0,
-            }}
-          >
-            Кино, которое смотрят
-            <br />
-            <span style={{ color: 'var(--accent-hi)' }}>вместе.</span>
-          </h1>
-          <p
-            style={{
-              fontSize: 18,
-              color: 'var(--text-1)',
-              lineHeight: 1.5,
-              margin: 0,
-              maxWidth: 520,
-            }}
-          >
-            Vellin синхронизирует видео по любой ссылке между всеми участниками комнаты с
-            точностью до кадра. Гостевой вход, чат, реакции — без установок.
-          </p>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <Link to={user ? '/library' : '/register'}>
-              <Button variant="primary" size="lg" icon="plus">
-                {user ? 'Перейти к комнатам' : 'Создать комнату'}
-              </Button>
-            </Link>
-            <Link to="/guest">
-              <Button variant="glass" size="lg" icon="users">
-                Войти гостем
-              </Button>
-            </Link>
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 20px', marginTop: 12, color: 'var(--text-2)', fontSize: 13 }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Icon name="check" size={14} /> Heartbeat sync 5с
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Icon name="check" size={14} /> Reconnect
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Icon name="check" size={14} /> Реакции и чат
-            </span>
-          </div>
-        </section>
+      {/* Пока не пришёл конфиг, первый экран не рисуем: иначе на мгновение
+          мелькнул бы не тот вариант главной. Фон и шапка уже на месте. */}
+      {!loading && (
+        <main>
+          {withApp ? (
+            <>
+              <AppHero />
+              <div className="vx-flow">
+                <AppFactsSection />
+                <section id="watch" className="vx-watchhead" aria-labelledby="vx-watch-title">
+                  <h2 id="vx-watch-title">А смотреть вместе можно прямо в браузере</h2>
+                  <p className="vx-hero__lead">
+                    Вставьте ссылку — и все, кто в комнате, увидят один и тот же кадр в одну и ту же секунду.
+                  </p>
+                  <div className="vx-hero__form">
+                    <LinkField onSourceChange={setSource} />
+                    <SourceMarquee active={source} />
+                  </div>
+                </section>
+                <WatchFlow />
+              </div>
+            </>
+          ) : (
+            <>
+              <section className="vx-hero vx-intro" aria-labelledby="vx-hero-title">
+                <VellinLockup size={72} />
+                <h1 id="vx-hero-title" className="vx-hero__title">
+                  Одно видео. Один кадр.
+                  <br />
+                  <em>Вместе.</em>
+                </h1>
+                <p className="vx-hero__lead">
+                  Вставьте ссылку — и все, кто в комнате, увидят один и тот же кадр в одну и ту же секунду. С
+                  голосом, чатом и реакциями поверх.
+                </p>
+                <div className="vx-hero__form">
+                  <LinkField onSourceChange={setSource} />
+                  <SourceMarquee active={source} />
+                </div>
+              </section>
+              <div className="vx-flow">
+                <WatchFlow />
+              </div>
+            </>
+          )}
+        </main>
+      )}
 
-        <section
-          style={{
-            borderRadius: 'var(--r-2xl)',
-            overflow: 'hidden',
-            boxShadow: 'var(--shadow-3)',
-            border: '1px solid var(--line-2)',
-            aspectRatio: '16 / 10',
-            background: 'var(--bg-2)',
-            position: 'relative',
-          }}
-        >
-          <MountainPoster seed={0} />
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'flex-end',
-              alignContent: 'flex-end',
-              padding: 24,
-              background: 'linear-gradient(to top, rgba(0,0,0,0.65), transparent 55%)',
-              gap: 8,
-              flexWrap: 'wrap',
-            }}
-          >
-            <Chip tone="live" hideDot={compactPoster}>
-              {compactPoster ? (
-                <>
-                  LIVE
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                      background: '#fff',
-                      boxShadow: '0 0 6px #fff',
-                    }}
-                  />
-                  4
-                </>
-              ) : (
-                'LIVE · 4 участника'
-              )}
-            </Chip>
-            {!compactPoster && (
-              <Chip tone="neutral" icon="film">
-                Big Buck Bunny
-              </Chip>
-            )}
-            <Chip tone="success" icon="check">
-              в синхроне
-            </Chip>
-          </div>
-        </section>
-      </main>
+      <footer className="vx-foot">
+        <VellinLockup size={20} direction="row" />
+        <nav aria-label="Навигация по сайту">
+          {withApp && <Link to="/download">Для Windows</Link>}
+          {user ? (
+            <Link to="/library">Мои комнаты</Link>
+          ) : (
+            <>
+              <Link to="/login">Войти</Link>
+              <Link to="/register">Создать аккаунт</Link>
+            </>
+          )}
+        </nav>
+      </footer>
     </div>
+  );
+}
+
+/** Совместный просмотр: синхрон, комната, источники и финальный призыв. */
+function WatchFlow() {
+  return (
+    <>
+      <section className="vx-section vx-split" aria-labelledby="vx-sync-title">
+        <div className="vx-copy">
+          <h2 id="vx-sync-title">Кадр в кадр, а не «примерно вместе»</h2>
+          <p>
+            Позицию воспроизведения держит сервер — одну на всю комнату. Пауза, перемотка и смена видео доходят
+            до всех разом, а кто отстал, тот незаметно догоняет.
+          </p>
+          <ul className="vx-facts">
+            <li>
+              <b>Меньше 0,4 с</b>
+              <span>расхождения между участниками — дальше плеер его просто не допускает.</span>
+            </li>
+            <li>
+              <b>До 2 секунд</b>
+              <span>отставания выравниваются скоростью воспроизведения, без рывка картинки.</span>
+            </li>
+            <li>
+              <b>Обрыв связи</b>
+              <span>не страшен: после переподключения вы сразу на той же секунде, что и все.</span>
+            </li>
+          </ul>
+        </div>
+        <div>
+          <SyncDemo />
+        </div>
+      </section>
+
+      <section className="vx-section vx-split vx-split--flip" aria-labelledby="vx-room-title">
+        <div>
+          <RoomDemo />
+        </div>
+        <div className="vx-copy">
+          <h2 id="vx-room-title">Комната, в которой хочется остаться</h2>
+          <ul className="vx-facts">
+            <li>
+              <b>Голос</b>
+              <span>разговаривайте прямо во время просмотра.</span>
+            </li>
+            <li>
+              <b>Чат</b>
+              <span>для тех, кто пишет, а не говорит.</span>
+            </li>
+            <li>
+              <b>Реакции</b>
+              <span>взлетают поверх кадра у всех одновременно.</span>
+            </li>
+            <li>
+              <b>Плейлист</b>
+              <span>следующая серия уже стоит в очереди.</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section className="vx-section vx-sources" aria-labelledby="vx-sources-title">
+        <h2 id="vx-sources-title">Где бы ни лежало видео</h2>
+        <p className="vx-sources__list">
+          <b>YouTube</b>, <b>RuTube</b>, <b>VK Видео</b>, <b>Vimeo</b>, прямые <b>MP4</b> и <b>WebM</b>, потоки{' '}
+          <b>HLS</b> и <b>DASH</b>, <b>торренты</b> и magnet-ссылки — и ещё около тысячи сайтов.
+        </p>
+        <p className="vx-sources__note">
+          Плеер один для всех источников: видео открывается у всех одинаково, без чужих встроенных плееров.
+        </p>
+      </section>
+
+      <section className="vx-close" aria-labelledby="vx-close-title">
+        <h2 id="vx-close-title">Вставьте ссылку — остальное Vellin сделает сам</h2>
+        <LinkField size="md" />
+      </section>
+    </>
   );
 }

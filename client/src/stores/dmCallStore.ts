@@ -112,6 +112,9 @@ export const useDmCallStore = create<DmCallState>((set, get) => ({
   onPeerMedia: (userId, media) => {
     const { call } = get();
     if (!call) return;
+    // Только участники: в звонке один на один состояние от кого-то ещё взяться
+    // не может, а записанное вслепую попадало в состав звонка.
+    if (userId !== call.callerId && userId !== call.calleeId) return;
     set({ call: { ...call, media: { ...call.media, [userId]: media } } });
   },
 

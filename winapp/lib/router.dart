@@ -1,21 +1,19 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 import 'app_config.dart';
+import 'screens/app_shell.dart';
 import 'state/auth_controller.dart';
-import 'theme/vellin_theme.dart';
-import 'screens/profile_screen.dart';
-import 'screens/self_profile_screen.dart';
-import 'screens/friends_screen.dart';
-import 'screens/messages_screen.dart';
-import 'screens/public_profile_screen.dart';
-import 'screens/home_shell.dart';
+import 'theme/vellin_design.dart';
 
 /// Ключ корневого навигатора — для показа глобальных диалогов (обновление).
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 
-/// Роутер с guard'ом авторизации. Пока сессия восстанавливается — сплэш; при
-/// 426 — экран принудительного обновления; авторизованная часть живёт в
-/// оболочке HomeShell (боковая навигация Друзья/Профиль).
+/// Роутер с guard'ом авторизации.
+///
+/// Маршрутов у авторизованной части больше нет: раздел, открытый диалог и
+/// профиль — это состояние оболочки (`ShellController`), а не адрес. Так рейл
+/// может менять левую панель, не трогая правую область, чего вложенными
+/// маршрутами не выразить.
 GoRouter buildRouter(AuthController auth) {
   return GoRouter(
     navigatorKey: rootNavigatorKey,
@@ -24,19 +22,7 @@ GoRouter buildRouter(AuthController auth) {
     routes: [
       GoRoute(path: '/splash', builder: (_, _) => const _SplashScreen()),
       GoRoute(path: '/upgrade', builder: (_, _) => _UpgradeScreen(minVersion: auth.upgradeMinVersion ?? '')),
-      GoRoute(
-        path: '/u/:publicId',
-        builder: (_, state) => PublicProfileScreen(publicId: state.pathParameters['publicId']!),
-      ),
-      GoRoute(path: '/settings', builder: (_, _) => const ProfileSettingsScreen()),
-      StatefulShellRoute.indexedStack(
-        builder: (context, state, navigationShell) => HomeShell(shell: navigationShell),
-        branches: [
-          StatefulShellBranch(routes: [GoRoute(path: '/messages', builder: (_, _) => const MessagesScreen())]),
-          StatefulShellBranch(routes: [GoRoute(path: '/friends', builder: (_, _) => const FriendsScreen())]),
-          StatefulShellBranch(routes: [GoRoute(path: '/profile', builder: (_, _) => const SelfProfileScreen())]),
-        ],
-      ),
+      GoRoute(path: '/app', builder: (_, _) => const AppShell()),
     ],
     redirect: (context, state) {
       final loc = state.matchedLocation;
@@ -46,18 +32,46 @@ GoRouter buildRouter(AuthController auth) {
       // и регистрации внутри приложения нет, роутер работает только для уже
       // авторизованного пользователя.
       if (!auth.authenticated) return loc == '/splash' ? null : '/splash';
-      return loc == '/splash' ? '/messages' : null;
+      return loc == '/splash' ? '/app' : null;
     },
   );
 }
 
+/// Восстановление сессии: знак и слово VELLIN на том же фоне, что у апдейтера,
+/// а не голый крутящийся кружок — иначе стык с апдейтером виден.
 class _SplashScreen extends StatelessWidget {
   const _SplashScreen();
+
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: VellinColors.bg0,
-      body: Center(child: CircularProgressIndicator(color: VellinColors.accentHi)),
+    return const ColoredBox(
+      color: VellinColors.bg1,
+      child: Center(child: _Wordmark()),
+    );
+  }
+}
+
+class _Wordmark extends StatelessWidget {
+  const _Wordmark();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Image.asset('assets/vellin_icon.png', width: 44, height: 44, filterQuality: FilterQuality.high),
+        const SizedBox(height: 14),
+        Text(
+          'VELLIN',
+          style: TextStyle(
+            fontFamily: VellinType.family,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            letterSpacing: 13 * 0.42,
+            color: VellinColors.ink45,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -65,11 +79,12 @@ class _SplashScreen extends StatelessWidget {
 class _UpgradeScreen extends StatelessWidget {
   final String minVersion;
   const _UpgradeScreen({required this.minVersion});
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: VellinColors.bg0,
-      body: Center(
+    return ColoredBox(
+      color: VellinColors.bg1,
+      child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 380),
           child: Padding(
@@ -77,14 +92,18 @@ class _UpgradeScreen extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Нужно обновление',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: VellinColors.text0)),
-                const SizedBox(height: 12),
+                const _Wordmark(),
+                const SizedBox(height: 24),
+                Text(
+                  'Нужно обновление',
+                  style: VellinType.paneTitle.copyWith(fontSize: 20),
+                ),
+                const SizedBox(height: 10),
                 Text(
                   'Ваша версия (${AppConfig.appVersion}) больше не поддерживается. '
                   'Обновите Vellin${minVersion.isNotEmpty ? ' до версии $minVersion или новее' : ''}, чтобы продолжить.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 14, color: VellinColors.text1, height: 1.5),
+                  style: VellinType.body.copyWith(color: VellinColors.ink55, height: 1.6),
                 ),
               ],
             ),

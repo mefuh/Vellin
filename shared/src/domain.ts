@@ -112,6 +112,8 @@ export interface AuthUser extends PublicUser {
   /** Город. Null — не указан. */
   city: string | null;
   createdAt: string;
+  /** Выбранный статус присутствия (не то же, что реальная связь). */
+  presenceStatus: PresenceStatus;
   /** True only for the single user whose email matches ADMIN_EMAIL on the server. */
   isAdmin: boolean;
 }
@@ -127,6 +129,8 @@ export interface DeviceSession {
   deviceLabel: string;
   browser: string;
   os: string;
+  /** Вход из нативного клиента Vellin, а не из браузера. */
+  app: boolean;
   ip: string | null;
   createdAt: string;
   lastSeenAt: string;
@@ -503,6 +507,36 @@ export interface AppNotification {
 
 // ── Личные сообщения (ЛС) ────────────────────────────────────────────────
 
+/** Что показывать в цитате ответа. */
+export type DirectMessageKind = 'text' | 'image' | 'voice' | 'video' | 'invite' | 'call';
+
+/** Краткая ссылка на сообщение — для цитаты ответа и полосы закрепа. */
+export interface DirectMessageReplyRef {
+  id: string;
+  /** Оригинал удалён для всех — цитата остаётся, но без содержимого. */
+  deleted?: boolean;
+  senderId?: string;
+  kind?: DirectMessageKind;
+  /** Начало текста, не длиннее 160 символов. */
+  body?: string;
+}
+
+/** Больше снимков в одном сообщении не отправить. */
+export const DM_MAX_IMAGES = 10;
+
+/** Снимок альбома. */
+export interface DirectMessageImage {
+  url: string;
+  width: number;
+  height: number;
+}
+
+/** Реакция одного участника на сообщение. */
+export interface DirectMessageReactionDTO {
+  userId: string;
+  emoji: string;
+}
+
 /** Одно личное сообщение. */
 export interface DirectMessageDTO {
   id: string;
@@ -516,6 +550,11 @@ export interface DirectMessageDTO {
   /** Исходные размеры изображения — чтобы зарезервировать место без скачка вёрстки. */
   imageWidth?: number;
   imageHeight?: number;
+  /**
+   * Альбом: все снимки сообщения по порядку (2–10). Первый совпадает с
+   * `imageUrl`. Отсутствует — снимок один или его нет.
+   */
+  images?: DirectMessageImage[];
   /** URL голосового сообщения (`/api/uploads/dm-voice/...`), либо отсутствует. */
   voiceUrl?: string;
   /** Длительность голосового в секундах. */
@@ -536,6 +575,8 @@ export interface DirectMessageDTO {
   videoThumbUrl?: string;
   /** Длительность видеосообщения, сек. */
   videoDurationSec?: number;
+  /** Посмотрен ли кружок получателем — точка «просмотрено» у автора. */
+  videoPlayed?: boolean;
   /** Стадия видеосообщения: обрабатывается / готово / ошибка. */
   videoStatus?: 'processing' | 'ready' | 'failed';
   /**
@@ -563,6 +604,21 @@ export interface DirectMessageDTO {
   callOutcome?: 'completed' | 'missed' | 'declined' | 'cancelled' | 'failed';
   /** Длительность разговора в секундах; 0 у несостоявшихся звонков. */
   callDurationSec?: number;
+  /** Цитата сообщения, на которое это — ответ. */
+  replyTo?: DirectMessageReplyRef;
+  /** Пересланное сообщение: чьё оно было изначально. */
+  forwardedFrom?: { userId: string; name: string };
+  /** Когда текст последний раз меняли (ISO). Отсутствует — не менялся. */
+  editedAt?: string;
+  /**
+   * Когда получатель прочитал именно это сообщение (ISO). Отсутствует — не
+   * читал либо прочитал до того, как сервер начал это запоминать.
+   */
+  readAt?: string;
+  /** Когда голосовое или кружок впервые прослушали (ISO). Прочитано ≠ прослушано. */
+  playedAt?: string;
+  /** Реакции участников — не больше одной на человека. Отсутствует — реакций нет. */
+  reactions?: DirectMessageReactionDTO[];
   /**
    * Эхо клиентского nonce — отдаётся только отправителю, чтобы он сопоставил
    * пришедшее с сервера сообщение со своей оптимистичной отправкой.
@@ -599,6 +655,43 @@ export interface DmConversation {
   online: boolean;
   /** Время последнего сообщения (ISO) — для сортировки списка. */
   lastMessageAt: string;
+  /** Уведомления этого диалога выключены мной. Доставка сообщений не меняется. */
+  muted: boolean;
+}
+
+/**
+ * Снимок в «витрине» вложений диалога: одна картинка, а не сообщение —
+ * альбом из десяти фото даёт десять записей подряд.
+ */
+export interface DmMediaItem {
+  /** Сообщение, в котором пришёл снимок: по нему открывается место в ленте. */
+  messageId: string;
+  url: string;
+  width: number;
+  height: number;
+  senderId: string;
+  createdAt: string;
+}
+
+/**
+ * Строка истории звонков: одна на состоявшийся или несостоявшийся разговор.
+ *
+ * Записи живут сообщениями внутри переписок (у них проставлен `callId`), но
+ * разделу «Звонки» нужен сквозной список по всем диалогам, а не по одному.
+ */
+export interface CallHistoryEntry {
+  /** Идентификатор сообщения-записи. */
+  id: string;
+  /** С кем был разговор. */
+  peer: PublicUser;
+  /** Звонил я (исходящий) или мне (входящий). */
+  direction: 'outgoing' | 'incoming';
+  kind: 'audio' | 'video';
+  outcome: 'completed' | 'missed' | 'declined' | 'cancelled' | 'failed';
+  /** Длительность разговора в секундах; 0 — не состоялся. */
+  durationSec: number;
+  /** Когда (ISO). */
+  createdAt: string;
 }
 
 /** Можно ли писать данному пользователю + причина запрета (для UI чата). */
@@ -608,9 +701,23 @@ export interface DmEligibility {
 }
 
 /** Live-присутствие друга, рассылается по пользовательскому WS-каналу. */
+/**
+ * Присутствие: «в сети» / «не беспокоить» / «не в сети».
+ *
+ * Первые два состояния возможны только при живом соединении: статус, выбранный
+ * руками, показывается собеседникам лишь пока человек на связи.
+ *
+ * `dnd` для доставки ничего не меняет: сообщения и звонки идут как обычно, а
+ * глушит их у себя клиент — прячет всплывающие окна и звук. Поэтому серверу
+ * достаточно хранить и раздавать сам статус.
+ */
+export type PresenceStatus = 'online' | 'dnd' | 'offline';
+
 export interface FriendPresence {
   userId: string;
   online: boolean;
+  /** Что показывать в списках: учитывает и связь, и выбранный статус. */
+  status: PresenceStatus;
   currentRoom: RoomRef | null;
   /** ISO-время последнего захода (момент ухода в офлайн). Null, если онлайн или неизвестно. */
   lastSeenAt: string | null;

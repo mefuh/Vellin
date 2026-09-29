@@ -2,6 +2,7 @@ import type {
   AdminRoomSummary,
   AppNotification,
   AuthUser,
+  CallHistoryEntry,
   DeviceSession,
   FavoriteTitle,
   FriendRequest,
@@ -18,11 +19,12 @@ import type {
   RoomPermissions,
   RoomRole,
   DmConversation,
+  DmMediaItem,
   DirectMessageDTO,
   DmEligibility,
   PublicUser,
 } from './domain.js';
-import type { PlatformToggles, PlatformMaintenance, PlatformLimits } from './admin.js';
+import type { LandingMode, PlatformToggles, PlatformMaintenance, PlatformLimits } from './admin.js';
 
 // ── Auth ────────────────────────────────────────────────────────────────
 export interface RegisterRequest {
@@ -225,6 +227,8 @@ export type RoomInviteRespondResponse =
 /** Живая инфо-сводка комнаты для попапа по тапу на карточку-приглашение. */
 export interface RoomInviteInfoResponse {
   roomName: string;
+  /** Слаг комнаты для ссылки на сайт: десктоп-клиент открывает её в браузере. */
+  slug: string | null;
   videoTitle: string | null;
   videoPoster: string | null;
   ownerUsername: string;
@@ -292,6 +296,12 @@ export interface ListConversationsResponse {
   /** Суммарно непрочитанных ЛС по всем диалогам — для бейджа в навбаре. */
   unreadTotal: number;
 }
+/** История звонков по всем диалогам — раздел «Звонки». */
+export interface ListCallHistoryResponse {
+  calls: CallHistoryEntry[];
+  /** Есть ли записи раньше последней в выдаче (для подгрузки). */
+  hasMore: boolean;
+}
 /** Тред переписки с одним собеседником (последняя страница сообщений). */
 export interface ConversationThreadResponse {
   /** Пусто, если диалога ещё нет (создастся при первой отправке). */
@@ -309,6 +319,25 @@ export interface ConversationThreadResponse {
   /** Пол собеседника (для грамматики «был/была»), с учётом приватности. */
   peerGender: Gender | null;
   eligibility: DmEligibility;
+  /** Закреплённое в диалоге сообщение. Null — ничего не закреплено. */
+  pinned: DirectMessageDTO | null;
+  /** Уведомления диалога выключены мной. */
+  muted: boolean;
+}
+
+/** Страница витрины вложений диалога: снимки от новых к старым. */
+export interface ListDmMediaResponse {
+  items: DmMediaItem[];
+  /** Есть снимки старше последнего в выдаче. */
+  hasMore: boolean;
+}
+
+/** Переключение уведомлений одного диалога. */
+export interface SetDmMutedRequest {
+  muted: boolean;
+}
+export interface SetDmMutedResponse {
+  muted: boolean;
 }
 
 /** Ответ на загрузку изображения для ЛС (multipart). */
@@ -557,6 +586,11 @@ export interface AppConfigResponse {
    * полностью спрятать страницу и все ссылки на неё.
    */
   windowsDownloadVisible: boolean;
+  /**
+   * Каким вариантом открыть главную для этого посетителя. Сервер уже учёл,
+   * видна ли ему страница скачивания: без неё всегда `watch`.
+   */
+  landingMode: LandingMode;
 }
 
 /** Публикация обновления десктоп-клиента: версия + URL установщика. */

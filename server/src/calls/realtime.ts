@@ -146,20 +146,12 @@ export async function handleDmCallInvite(
 ): Promise<void> {
   const { toUserId, video, nonce } = p;
 
-  if (!(await isToggleEnabled('dmCalls'))) return fail(callerId, 'disabled', { nonce });
   if (toUserId === callerId) return fail(callerId, 'self', { nonce });
 
-  const peer = await loadCallPeer(toUserId);
-  if (!peer) return fail(callerId, 'not_found', { nonce });
-
-  const elig = await checkCallEligibility(callerId, peer);
-  if (!elig.canCall) {
-    return fail(callerId, elig.reason === 'blocked' ? 'blocked' : 'privacy', { nonce });
-  }
-
-  // Комната и звонок несовместимы в обе стороны.
-  if (userHub.roomOfAny(callerId)) return fail(callerId, 'caller_in_room', { nonce });
-
+  // ВСЁ, что решает «можно ли занимать пару», делается синхронно и до первого
+  // await. Между проверкой и бронью не должно быть точек передачи управления:
+  // иначе пачка приглашений (двойное нажатие, две вкладки) проходит проверку
+  // занятости целиком и создаёт несколько звонков на одну пару.
   const existing = dmCallHub.betweenUsers(callerId, toUserId);
   if (existing && existing.phase === 'ringing' && existing.calleeId === callerId) {
     // Встречный звонок: вместо обоюдного «занято» соединяем — второе
@@ -167,13 +159,29 @@ export async function handleDmCallInvite(
     const s = dmCallHub.accept(existing.callId, connId, video);
     if (s) return;
   }
-  if (dmCallHub.isBusy(callerId)) return fail(callerId, 'busy_in_call', { nonce });
+  // Комната и звонок несовместимы в обе стороны.
+  if (userHub.roomOfAny(callerId)) return fail(callerId, 'caller_in_room', { nonce });
   if (userHub.roomOfAny(toUserId)) return fail(callerId, 'busy_in_room', { nonce });
-  if (dmCallHub.isBusy(toUserId)) return fail(callerId, 'busy_in_call', { nonce });
   if (dmCallHub.isRateLimited(callerId, toUserId)) return fail(callerId, 'rate_limited', { nonce });
+  if (!dmCallHub.reserve(callerId, toUserId)) return fail(callerId, 'busy_in_call', { nonce });
+
+  // Дальше идут обращения к базе — на любом отказе бронь надо снять, иначе
+  // пара останется занятой навсегда.
+  const deny = (code: ErrorCode): void => {
+    dmCallHub.release(callerId, toUserId);
+    fail(callerId, code, { nonce });
+  };
+
+  if (!(await isToggleEnabled('dmCalls'))) return deny('disabled');
+
+  const peer = await loadCallPeer(toUserId);
+  if (!peer) return deny('not_found');
+
+  const elig = await checkCallEligibility(callerId, peer);
+  if (!elig.canCall) return deny(elig.reason === 'blocked' ? 'blocked' : 'privacy');
 
   const caller = await loadCallPeer(callerId);
-  if (!caller) return fail(callerId, 'not_found', { nonce });
+  if (!caller) return deny('not_found');
 
   const session = dmCallHub.create({ callerId, calleeId: toUserId, callerConnId: connId, video });
 
@@ -209,7 +217,9 @@ export async function handleDmCallAccept(
 
 export function handleDmCallDecline(userId: string, callId: string): void {
   const s = dmCallHub.get(callId);
-  if (!s || s.calleeId !== userId) return;
+  // Отказаться можно только от дозвона: в разговоре это сообщение обрывало его
+  // и записывало состоявшуюся беседу в переписку как отклонённую.
+  if (!s || s.calleeId !== userId || s.phase !== 'ringing') return;
   dmCallHub.end(callId, 'declined');
 }
 
@@ -244,6 +254,11 @@ export async function handleDmCallMedia(
   media: { audio: boolean; video: boolean; screen: boolean },
   screen?: { mid?: string; streamId?: string },
 ): Promise<void> {
+  // Сначала — свой ли это звонок. Без проверки посторонний прописывался в
+  // состав звонка и слал участнику состояние своих микрофона и демонстрации.
+  const call = dmCallHub.get(callId);
+  if (!call || !dmCallHub.isParticipant(call, userId)) return;
+
   // Демонстрацию можно выключить отдельно от звонков: она заметно тяжелее для
   // канала. Отказ гасит только её — разговор продолжается.
   let next = media;
@@ -271,6 +286,9 @@ export async function handleDmCallMedia(
 export function handleDmCallSpeaking(userId: string, callId: string, speaking: boolean): void {
   const s = dmCallHub.get(callId);
   if (!s || s.phase !== 'active') return;
+  // Индикатор речи — тоже сообщение внутрь чужого разговора: без проверки
+  // посторонний зажигал участнику кольцо «говорит».
+  if (!dmCallHub.isParticipant(s, userId)) return;
   const peerId = dmCallHub.peerOf(s, userId);
   const peerConn = dmCallHub.connOf(s, peerId);
   const msg = { t: 'dmcall_speaking', callId, fromUserId: userId, speaking } as const;

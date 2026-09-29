@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'fixed_window.dart';
 import 'installer_engine.dart';
 import 'installer_ui.dart';
 import 'vellin_theme.dart';
@@ -36,6 +37,8 @@ void main(List<String> args) async {
       await windowManager.setResizable(false);
       await windowManager.setMaximizable(false);
       await windowManager.setMinimizable(false);
+      // Установщик держит свой размер: вёрстка рассчитана ровно на него.
+      FixedWindowGuard.instance.enable();
       // Полностью убираем неклиентскую рамку (иначе сверху остаётся 1px кромка).
       await windowManager.setAsFrameless();
       await windowManager.setHasShadow(false);

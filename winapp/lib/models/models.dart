@@ -15,6 +15,9 @@ class AuthUser {
   final String? city;
   final String kind;
   final String createdAt;
+
+  /// Выбранный статус присутствия: online | dnd | offline.
+  final String presenceStatus;
   final bool isAdmin;
 
   const AuthUser({
@@ -31,6 +34,7 @@ class AuthUser {
     required this.kind,
     required this.createdAt,
     required this.isAdmin,
+    this.presenceStatus = 'online',
   });
 
   factory AuthUser.fromJson(Map<String, dynamic> j) => AuthUser(
@@ -46,7 +50,27 @@ class AuthUser {
         city: j['city'] as String?,
         kind: j['kind'] as String? ?? 'user',
         createdAt: j['createdAt'] as String? ?? '',
+        presenceStatus: j['presenceStatus'] as String? ?? 'online',
         isAdmin: j['isAdmin'] as bool? ?? false,
+      );
+
+  /// Копия с другим статусом присутствия — остальные поля профиля при смене
+  /// статуса не трогаются.
+  AuthUser withPresenceStatus(String status) => AuthUser(
+        id: id,
+        publicId: publicId,
+        email: email,
+        username: username,
+        avatarSeed: avatarSeed,
+        avatarUrl: avatarUrl,
+        bio: bio,
+        gender: gender,
+        birthDate: birthDate,
+        city: city,
+        kind: kind,
+        createdAt: createdAt,
+        isAdmin: isAdmin,
+        presenceStatus: status,
       );
 
   Map<String, dynamic> toJson() => {
@@ -62,6 +86,7 @@ class AuthUser {
         'city': city,
         'kind': kind,
         'createdAt': createdAt,
+        'presenceStatus': presenceStatus,
         'isAdmin': isAdmin,
       };
 }

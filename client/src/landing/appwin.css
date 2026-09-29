@@ -1,0 +1,762 @@
+/* Веер окон клиента для Windows. Окна собраны токенами клиента (vx.css). */
+
+.vx-fan {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.vx-fan__tabs {
+  display: none;
+}
+
+.vx-fan__stage {
+  position: relative;
+  height: 470px;
+}
+
+.vx-fan__stage::before {
+  content: "";
+  position: absolute;
+  inset: -60px -8% -40px;
+  pointer-events: none;
+  background: radial-gradient(50% 55% at 50% 42%, rgba(122, 96, 68, 0.28), transparent 72%);
+}
+
+/* ── Окно ───────────────────────────────────────────────────────── */
+
+.vx-win {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--vx-bg1);
+  border: 1px solid var(--vx-line10);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 40px 90px -40px rgba(0, 0, 0, 0.95);
+  outline: none;
+  /* Окно стоит в центрированном первом экране, но внутри — обычный интерфейс. */
+  text-align: left;
+  transition:
+    transform 0.6s var(--vx-ease),
+    filter 0.6s var(--vx-ease),
+    opacity 0.6s var(--vx-ease),
+    box-shadow 0.6s var(--vx-ease),
+    border-color 0.6s var(--vx-ease);
+  cursor: default;
+}
+
+.vx-win[data-slot="center"] {
+  left: 50%;
+  top: 0;
+  width: 46%;
+  height: 430px;
+  z-index: 2;
+  transform: translateX(-50%);
+}
+
+.vx-win[data-slot="left"] {
+  left: 0;
+  top: 40px;
+  width: 38%;
+  height: 300px;
+  z-index: 1;
+  transform: rotate(-3.5deg) scale(0.96);
+  transform-origin: 100% 50%;
+}
+
+.vx-win[data-slot="right"] {
+  right: 0;
+  top: 24px;
+  width: 36%;
+  height: 330px;
+  z-index: 1;
+  transform: rotate(3.5deg) scale(0.96);
+  transform-origin: 0% 50%;
+}
+
+/* Окна не в фокусе чуть отступают в тень — вперёд смотрит одно. */
+.vx-win:not([data-front]) {
+  filter: brightness(0.8) saturate(0.92);
+}
+
+.vx-win[data-front] {
+  z-index: 3;
+  border-color: var(--vx-line14);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.07) inset,
+    0 50px 110px -40px rgba(0, 0, 0, 1),
+    0 30px 80px -50px rgba(214, 174, 110, 0.35);
+}
+
+.vx-win[data-front][data-slot="left"] {
+  transform: rotate(0deg) scale(1.03) translate(26px, -10px);
+}
+
+.vx-win[data-front][data-slot="right"] {
+  transform: rotate(0deg) scale(1.03) translate(-26px, -10px);
+}
+
+.vx-win[data-front][data-slot="center"] {
+  transform: translateX(-50%) translateY(-4px);
+}
+
+.vx-win:focus-visible {
+  outline: 1px solid var(--vx-gold-strong);
+  outline-offset: 4px;
+}
+
+.vx-win__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 4px 0 12px;
+  background: var(--vx-chrome);
+  border-bottom: 1px solid var(--vx-line05);
+  font-size: 11px;
+  color: var(--vx-ink62);
+}
+
+.vx-win__brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 500;
+}
+
+.vx-win__crumb {
+  color: var(--vx-ink42);
+  font-weight: 400;
+}
+
+.vx-win__controls {
+  display: flex;
+  color: var(--vx-ink42);
+}
+
+.vx-win__controls svg {
+  width: 36px;
+  height: 30px;
+  padding: 10px 13px;
+}
+
+.vx-win__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.vx-win__body > * {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Аватар мини-интерфейса ─────────────────────────────────────── */
+
+.vx-ava {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-weight: 500;
+  color: var(--vx-ink88);
+  border: 1px solid var(--vx-line10);
+}
+
+.vx-ava__dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--vx-panel);
+  background: var(--vx-offline);
+}
+
+.vx-ava__dot[data-p="on"] {
+  background: var(--vx-online);
+}
+
+.vx-ava__dot[data-p="dnd"] {
+  background: var(--vx-glow);
+}
+
+/* ── Переписка ─────────────────────────────────────────────────── */
+
+.vx-msg {
+  display: grid;
+  grid-template-columns: 40px minmax(150px, 0.8fr) minmax(0, 1.6fr);
+  min-height: 0;
+}
+
+.vx-msg__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding-top: 12px;
+  background: var(--vx-chrome);
+  border-right: 1px solid var(--vx-line05);
+}
+
+.vx-msg__rail span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--vx-ink42);
+}
+
+.vx-msg__rail span[data-on] {
+  color: var(--vx-gold);
+  background: var(--vx-gold-wash);
+  box-shadow: inset 0 0 0 1px var(--vx-gold-line);
+}
+
+.vx-msg__list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 6px;
+  background: var(--vx-panel);
+  border-right: 1px solid var(--vx-line05);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vx-msg__list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 7px;
+  border-radius: 9px;
+  min-width: 0;
+}
+
+.vx-msg__list li[data-on] {
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.vx-msg__meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--vx-ink42);
+}
+
+.vx-msg__meta b {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--vx-ink88);
+}
+
+.vx-msg__meta span,
+.vx-msg__meta b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vx-msg__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 9.5px;
+  color: var(--vx-ink42);
+}
+
+.vx-msg__badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--vx-on-gold);
+  background: var(--vx-gold);
+}
+
+.vx-msg__chat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--vx-bg1);
+}
+
+.vx-msg__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--vx-line05);
+}
+
+.vx-msg__head > span {
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  color: var(--vx-online);
+}
+
+.vx-msg__head b {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--vx-ink94);
+}
+
+.vx-msg__feed {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 12px 14px;
+  overflow: hidden;
+}
+
+.vx-msg__bubble {
+  max-width: 78%;
+  padding: 7px 11px;
+  border-radius: 4px 12px 12px 12px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--vx-ink88);
+  background: var(--vx-bubble);
+}
+
+.vx-msg__bubble[data-own] {
+  align-self: flex-end;
+  border-radius: 12px 4px 12px 12px;
+  background: var(--vx-bubble-own);
+  color: var(--vx-ink94);
+}
+
+.vx-msg__album {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  width: 58%;
+  aspect-ratio: 2 / 1;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.vx-msg__album svg {
+  width: 100%;
+  height: 100%;
+}
+
+.vx-msg__voice {
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px 7px 8px;
+  border-radius: 12px 4px 12px 12px;
+  background: var(--vx-bubble-own);
+  font-size: 10px;
+  color: var(--vx-ink62);
+}
+
+.vx-msg__play {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: var(--vx-on-gold);
+  background: var(--vx-gold);
+}
+
+.vx-msg__wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+}
+
+.vx-msg__wave i {
+  display: block;
+  width: 2px;
+  border-radius: 2px;
+  background: rgba(226, 201, 155, 0.7);
+}
+
+.vx-msg__react {
+  align-self: flex-end;
+  margin-top: -3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--vx-gold);
+  background: var(--vx-gold-wash);
+  border: 1px solid var(--vx-gold-line);
+}
+
+.vx-msg__composer {
+  margin: 0 12px 12px;
+  padding: 9px 13px;
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--vx-ink42);
+  background: var(--vx-fill045);
+  border: 1px solid var(--vx-line07);
+}
+
+/* ── Звонок ───────────────────────────────────────────────────── */
+
+.vx-call {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(70% 60% at 50% 38%, rgba(122, 96, 68, 0.42), transparent 70%),
+    var(--vx-chrome);
+}
+
+.vx-call__pill {
+  position: absolute;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--vx-ink72);
+  background: rgba(10, 9, 8, 0.62);
+  border: 1px solid var(--vx-line10);
+}
+
+.vx-call__pill i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--vx-online);
+}
+
+.vx-call__stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: -18px;
+}
+
+.vx-call__stage .vx-ava {
+  box-shadow:
+    0 0 0 2px rgba(232, 207, 158, 0.7),
+    0 0 26px rgba(214, 174, 110, 0.5);
+}
+
+.vx-call__name {
+  font-size: 14px;
+  font-weight: 300;
+  color: var(--vx-ink94);
+}
+
+.vx-call__self {
+  position: absolute;
+  right: 12px;
+  bottom: 56px;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 42px;
+  border-radius: 9px;
+  background: #131110;
+  border: 1px solid var(--vx-line10);
+}
+
+.vx-call__dock {
+  position: absolute;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  border-radius: 999px;
+  background: rgba(18, 16, 15, 0.7);
+  border: 1px solid var(--vx-line07);
+}
+
+.vx-call__btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--vx-ink88);
+  background: var(--vx-fill045);
+  border: 1px solid var(--vx-line07);
+}
+
+.vx-call__btn[data-gold] {
+  color: var(--vx-gold);
+  background: rgba(226, 201, 155, 0.14);
+  border-color: rgba(226, 201, 155, 0.5);
+}
+
+.vx-call__end {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 24px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--vx-destructive);
+}
+
+/* ── Друзья ───────────────────────────────────────────────────── */
+
+.vx-fr {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--vx-panel);
+}
+
+.vx-fr__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px 14px 8px;
+  font-size: 13px;
+}
+
+.vx-fr__head b {
+  font-weight: 500;
+  color: var(--vx-ink94);
+}
+
+.vx-fr__head span {
+  font-size: 10.5px;
+  color: var(--vx-ink42);
+}
+
+.vx-fr__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vx-fr__list li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 6px;
+  border-radius: 9px;
+}
+
+.vx-fr__list li > span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 10.5px;
+  color: var(--vx-ink42);
+}
+
+.vx-fr__list b {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--vx-ink88);
+}
+
+.vx-fr__list span[data-p="on"] {
+  color: var(--vx-online);
+}
+
+.vx-fr__list span[data-p="dnd"] {
+  color: var(--vx-glow);
+}
+
+/* Уведомление поверх окон — как тост клиента. */
+.vx-fr__toast {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: rgba(19, 17, 16, 0.94);
+  border: 1px solid var(--vx-line14);
+  box-shadow: 0 16px 34px -14px rgba(0, 0, 0, 0.9);
+}
+
+.vx-fr__toast > span {
+  display: flex;
+  flex-direction: column;
+  font-size: 10.5px;
+  color: var(--vx-ink72);
+}
+
+.vx-fr__toast b {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vx-ink94);
+}
+
+/* ── Узкие экраны: одно окно и переключатель ─────────────────── */
+
+@media (max-width: 860px) {
+  .vx-fan__tabs {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  .vx-fan__tab {
+    height: 34px;
+    padding: 0 16px;
+    border-radius: 999px;
+    border: 1px solid var(--vx-line07);
+    background: var(--vx-fill045);
+    color: var(--vx-ink72);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition:
+      background-color 0.4s var(--vx-ease),
+      color 0.4s var(--vx-ease),
+      border-color 0.4s var(--vx-ease);
+  }
+
+  .vx-fan__tab[aria-pressed="true"] {
+    background: var(--vx-gold-wash);
+    border-color: var(--vx-gold-line);
+    color: var(--vx-gold);
+  }
+
+  .vx-fan__stage {
+    height: auto;
+  }
+
+  .vx-win,
+  .vx-win[data-slot] {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    height: 360px;
+    transform: none;
+    filter: none;
+  }
+
+  .vx-win:not([data-front]) {
+    display: none;
+  }
+
+  .vx-win[data-front][data-slot] {
+    transform: none;
+  }
+
+  .vx-msg {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .vx-msg__list {
+    display: none;
+  }
+}
+
+
+/* ── Первый экран «+ приложение» ─────────────────────────────── */
+
+.vx-apphero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 20px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(12px, 3vh, 40px) var(--vx-gutter) 0;
+}
+
+.vx-apphero .vx-hero__lead {
+  max-width: 36em;
+}
+
+.vx-apphero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: clamp(10px, 2.4vh, 26px);
+}
+
+.vx-apphero__cta {
+  --h: 50px;
+  padding: 0 26px;
+  font-size: 14px;
+}
+
+.vx-copy .vx-appfacts__note {
+  font-size: 14px;
+  color: var(--vx-ink55);
+}
+
+.vx-appfacts__cta {
+  --h: 48px;
+  align-self: flex-start;
+  margin-top: 14px;
+  padding: 0 24px;
+}
+
+/* Граница двух частей главной: приложение сверху, просмотр ниже. */
+.vx-watchhead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 24px;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 var(--vx-gutter);
+  scroll-margin-top: 40px;
+}
+
+.vx-watchhead h2 {
+  font-size: clamp(30px, 3.4vw, 44px);
+  font-weight: 300;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--vx-ink94);
+}
+
+.vx-watchhead .vx-hero__form {
+  margin-top: 4px;
+}
+
+@media (max-width: 560px) {
+  .vx-apphero__actions {
+    flex-direction: column;
+    align-self: stretch;
+  }
+}
