@@ -118,7 +118,7 @@ export function Friends() {
         <div
           style={{
             position: 'sticky',
-            top: 14,
+            top: 'calc(var(--call-bar, 0px) + 14px)',
             zIndex: 40,
             marginTop: isMobile ? 26 : 34,
             display: 'flex',
@@ -147,8 +147,8 @@ export function Friends() {
     <div
       style={
         isMobile
-          ? { height: '100svh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)' }
-          : { minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }
+          ? { height: 'var(--app-h)', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)' }
+          : { minHeight: 'var(--app-h)', background: 'var(--bg-0)', color: 'var(--text-0)' }
       }
     >
       <AppHeader active="friends" />

@@ -9,6 +9,13 @@ import { useCallSettingsStore } from '../stores/callSettingsStore';
 import type { WSConnectionState } from '../ws/WSClient';
 import { setupAudioPipeline, type AudioPipeline } from './audioPipeline';
 import { startMirrorPipeline, type VideoMirrorPipeline } from './videoMirror';
+import {
+  saveScreenOptions,
+  screenMaxBitrate,
+  screenVideoConstraints,
+  type ScreenShareOptions,
+  type ScreenSurface,
+} from './screenShare';
 import { isIOS } from '../utils/platform';
 
 /**
@@ -35,7 +42,11 @@ export interface CallTransport {
   join(wantVideo: boolean): void;
   leave(): void;
   signal(toUserId: string, payload: CallSignalPayload): void;
-  media(audio: boolean, video: boolean): void;
+  /**
+   * Своё состояние. `screen` — идущая демонстрация с приметами её дорожки
+   * (null — демонстрации нет); комната демонстрацию не ведёт и его не читает.
+   */
+  media(audio: boolean, video: boolean, screen?: ScreenTrackHint | null): void;
   speaking(speaking: boolean): void;
 }
 
@@ -82,20 +93,57 @@ export interface ScreenTrackHint {
   streamId?: string;
 }
 
+/** Идущая своя демонстрация экрана. */
+export interface ActiveScreenShare {
+  /** Захват — им рисуется своё превью. */
+  stream: MediaStream;
+  surface: ScreenSurface;
+  options: ScreenShareOptions;
+  /** Звук удалось захватить (браузер мог его не дать). */
+  hasAudio: boolean;
+  /** Что показывается — как назвал источник браузер. */
+  label: string;
+}
+
+/** Чем кончилась попытка начать или изменить демонстрацию. */
+export type ScreenShareResult = 'ok' | 'no-audio' | 'cancelled' | 'failed';
+
 export interface UseCallApi {
   state: CallState;
   permissionError: PermissionError;
   myStream: MediaStream | null;
+  /** Включён ли свой микрофон — по самому тракту, а не по флагу дорожки. */
+  micOn: boolean;
+  /** Состояние соединения с каждым собеседником. */
+  linkStates: Map<string, RTCPeerConnectionState>;
+  /** Статистика соединения с собеседником — по ней судят о качестве связи. */
+  getStats: (peerUserId: string) => Promise<RTCStatsReport | null>;
+  /** Своя демонстрация экрана, null — не идёт. */
+  screenShare: ActiveScreenShare | null;
+  startScreenShare: (surface: ScreenSurface, options: ScreenShareOptions) => Promise<ScreenShareResult>;
+  /** Изменить идущую демонстрацию, не прерывая её у собеседника. */
+  updateScreenShare: (surface: ScreenSurface, options: ScreenShareOptions) => Promise<ScreenShareResult>;
+  stopScreenShare: () => void;
+  /**
+   * Начать проверку микрофона: собеседник на это время вас не слышит, а
+   * возвращённый поток — ваш голос после всей обработки, как его слышат.
+   * null — проверять нечего (вы не в звонке).
+   */
+  startMicCheck: () => MediaStream | null;
+  /** Закончить проверку и вернуть микрофон собеседнику, если он был включён. */
+  stopMicCheck: () => void;
   remoteStreams: Map<string, MediaStream>;
   /** Сообщить, какая дорожка собеседника — демонстрация экрана (null — её нет). */
   setScreenHint: (userId: string, hint: ScreenTrackHint | null) => void;
   speaking: Set<string>;
   /** Latest enumerateDevices snapshot — populated once the mic permission is granted. */
   availableDevices: { mics: MediaDeviceInfo[]; cameras: MediaDeviceInfo[] };
-  join: (opts: { withVideo: boolean }) => Promise<void>;
+  /** `micOn` — начать с включённым микрофоном (личный звонок); в комнате он выключен. */
+  join: (opts: { withVideo: boolean; micOn?: boolean }) => Promise<void>;
   leave: () => void;
   toggleMic: () => void;
-  toggleCamera: () => Promise<void>;
+  /** Возвращает, включена ли камера в итоге: включение может не удаться. */
+  toggleCamera: () => Promise<boolean>;
   /** Switch the active mic without renegotiating SDP (pipeline-internal swap). */
   switchMic: (deviceId: string) => Promise<void>;
   /** Switch the active camera without renegotiating SDP (`sender.replaceTrack`). */
@@ -121,7 +169,40 @@ interface PeerRecord {
    * добавленный после initial-negotiation.
    */
   videoSender: RTCRtpSender | null;
+  /**
+   * Линии демонстрации. После остановки остаются в соединении пустыми:
+   * повторный запуск — подмена дорожки, без нового согласования.
+   */
+  screenVideoSender: RTCRtpSender | null;
+  screenAudioSender: RTCRtpSender | null;
+  /**
+   * Кандидаты ICE, пришедшие раньше описания собеседника. Применить их можно
+   * только после него — иначе браузер их отвергает, и при встречном
+   * согласовании обе стороны теряли кандидатов: связь не поднималась вовсе.
+   */
+  pendingCandidates: (RTCIceCandidateInit | null)[];
+  /** Сторож соединения — см. `watchLink` в `createPeer`. */
+  watchdog: number | null;
 }
+
+/**
+ * Сколько ждать, прежде чем перезапустить поиск пути между собеседниками.
+ * Проверка путей ещё не началась — значит, у одной из сторон нет кандидатов
+ * (так бывает после встречного согласования: откат своего предложения
+ * останавливает их сбор, и браузер его не возобновляет). Идёт, но затянулась —
+ * путь не находится. Связь была и пропала — сеть сменилась или моргнула.
+ */
+const ICE_NEW_TIMEOUT_MS = 3000;
+const ICE_CHECKING_TIMEOUT_MS = 10_000;
+const ICE_LOST_TIMEOUT_MS = 4000;
+const ICE_RESTART_LIMIT = 5;
+/**
+ * Своё предложение без ответа дольше этого — откатываем и предлагаем заново.
+ * Ответ мог потеряться: собеседник как раз пересоздавал соединение, и наше
+ * предложение пришло ему в никуда, а его встречное мы как невежливая сторона
+ * отклоняем. Без повтора обе стороны ждали друг друга вечно.
+ */
+const OFFER_ANSWER_TIMEOUT_MS = 5000;
 
 interface AnalyserRecord {
   // `source` is non-null only for analysers we own (e.g. raw-mic fallback);
@@ -187,7 +268,21 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   // любом порядке: раскладка пересобирается из них при каждом изменении.
   const inboundRef = useRef<Map<string, InboundStream[]>>(new Map());
   const screenHintsRef = useRef<Map<string, ScreenTrackHint>>(new Map());
+  // Все приметы, которые когда-либо называли демонстрацией. Линия демонстрации
+  // переживает её остановку (дорожка в ней просто гаснет), и без этой памяти
+  // после снятия подсказки поток экрана записывался бы на место камеры.
+  const knownScreenRef = useRef<Map<string, { mids: Set<string>; streamIds: Set<string> }>>(
+    new Map(),
+  );
   const [speaking, setSpeaking] = useState<Set<string>>(new Set());
+  const [micOn, setMicOn] = useState(false);
+  const [linkStates, setLinkStates] = useState<Map<string, RTCPeerConnectionState>>(new Map());
+  const [screenShare, setScreenShareState] = useState<ActiveScreenShare | null>(null);
+  const screenShareRef = useRef<ActiveScreenShare | null>(null);
+  // Поток-контейнер, в котором уходят дорожки демонстрации. Один на весь
+  // звонок: его идентификатор — примета демонстрации для собеседника, и при
+  // смене источника она не должна меняться.
+  const screenOutRef = useRef<MediaStream | null>(null);
   const [availableDevices, setAvailableDevices] = useState<{
     mics: MediaDeviceInfo[];
     cameras: MediaDeviceInfo[];
@@ -218,6 +313,11 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   stateRef.current = state;
   // Signals that arrived while we were still joining — replayed on entry.
   const pendingSignalsRef = useRef<{ fromUserId: string; payload: CallSignalPayload }[]>([]);
+  const pendingJoinRef = useRef<{ withVideo: boolean; micOn: boolean } | null>(null);
+  // Сигналы одного собеседника обрабатываются строго по очереди: описание,
+  // затем его кандидаты. Параллельная обработка давала гонку — кандидат
+  // применялся, пока описание ещё ставилось, и терялся.
+  const signalChainsRef = useRef<Map<string, Promise<void>>>(new Map());
 
   // ── Signaling envelope helpers ──────────────────────────────────────────
 
@@ -228,6 +328,24 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     [transport],
   );
 
+  /**
+   * Приметы своей демонстрации: номер линии в согласовании и идентификатор
+   * потока-контейнера. Номер линии появляется только после согласования.
+   */
+  const screenMarks = useCallback((): ScreenTrackHint | null => {
+    if (!screenShareRef.current) return null;
+    let mid: string | undefined;
+    for (const rec of pcsRef.current.values()) {
+      const t = rec.pc.getTransceivers().find((x) => x.sender === rec.screenVideoSender);
+      if (t?.mid) {
+        mid = t.mid;
+        break;
+      }
+    }
+    const streamId = screenOutRef.current?.id;
+    return { ...(mid ? { mid } : {}), ...(streamId ? { streamId } : {}) };
+  }, []);
+
   const broadcastMyMedia = useCallback((): void => {
     // Authoritative source for mic state is the GainNode ref (track.enabled
     // doesn't reflect the post-RNNoise mute when the pipeline is active).
@@ -235,8 +353,10 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     const audio = micOnRef.current;
     const video = !!stream?.getVideoTracks()[0]?.enabled;
     onLocalMedia({ audio, video });
-    transport.media(audio, video);
-  }, [transport, onLocalMedia]);
+    // Состояние уходит целиком — с демонстрацией и её приметами, — чтобы у
+    // собеседника не разъехалась картина, что бы из этого ни переключалось.
+    transport.media(audio, video, screenMarks());
+  }, [transport, onLocalMedia, screenMarks]);
 
   // ── Speaker detection ───────────────────────────────────────────────────
 
@@ -374,12 +494,16 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   const rebuildRemoteStreams = useCallback((): void => {
     const next = new Map<string, MediaStream>();
     for (const [userId, entries] of inboundRef.current) {
-      const hint = screenHintsRef.current.get(userId);
+      const known = knownScreenRef.current.get(userId);
       for (const e of entries) {
         const isScreen =
-          !!hint &&
-          ((!!hint.mid && e.mid === hint.mid) || (!!hint.streamId && e.streamId === hint.streamId));
-        next.set(isScreen ? screenKey(userId) : userId, e.stream);
+          !!known &&
+          ((!!e.mid && known.mids.has(e.mid)) || known.streamIds.has(e.streamId));
+        // Камера не перезаписывается потоком неизвестного назначения: пустая
+        // линия демонстрации, о которой ещё не сказали, не вытесняет лицо.
+        const key = isScreen ? screenKey(userId) : userId;
+        if (!isScreen && next.has(key) && !e.stream.getVideoTracks().some((t) => !t.muted)) continue;
+        next.set(key, e.stream);
       }
     }
     setRemoteStreams((prev) => {
@@ -390,8 +514,15 @@ export function useCall(opts: UseCallOpts): UseCallApi {
 
   const setScreenHint = useCallback(
     (userId: string, hint: ScreenTrackHint | null): void => {
-      if (hint && (hint.mid || hint.streamId)) screenHintsRef.current.set(userId, hint);
-      else screenHintsRef.current.delete(userId);
+      if (hint && (hint.mid || hint.streamId)) {
+        screenHintsRef.current.set(userId, hint);
+        const known = knownScreenRef.current.get(userId) ?? { mids: new Set(), streamIds: new Set() };
+        if (hint.mid) known.mids.add(hint.mid);
+        if (hint.streamId) known.streamIds.add(hint.streamId);
+        knownScreenRef.current.set(userId, known);
+      } else {
+        screenHintsRef.current.delete(userId);
+      }
       rebuildRemoteStreams();
     },
     [rebuildRemoteStreams],
@@ -410,6 +541,10 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         makingOffer: false,
         isSettingRemoteAnswer: false,
         videoSender: null,
+        screenVideoSender: null,
+        screenAudioSender: null,
+        pendingCandidates: [],
+        watchdog: null,
       };
 
       // Аудио добавляем через addTrack — оно есть всегда после входа и
@@ -447,6 +582,17 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         console.warn(`[call] createPeer ${peerUserId}: no outbound stream — peer will be receive-only`);
       }
 
+      // Соединение пересоздано посреди демонстрации (собеседник перезашёл) —
+      // она должна продолжиться и в новом.
+      const share = screenShareRef.current;
+      const screenOut = screenOutRef.current;
+      if (share && screenOut) {
+        const v = share.stream.getVideoTracks()[0];
+        const a = share.stream.getAudioTracks()[0];
+        if (v) rec.screenVideoSender = pc.addTrack(v, screenOut);
+        if (a) rec.screenAudioSender = pc.addTrack(a, screenOut);
+      }
+
       pc.onicecandidate = (ev) => {
         const candidate: IceCandidatePayload | null = ev.candidate ? ev.candidate.toJSON() : null;
         sendSignal(peerUserId, { kind: 'ice', candidate });
@@ -477,7 +623,28 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         // for remote peers is intentionally left for a future getStats() pass.
       };
 
+      // Первое предложение делает невежливая сторона. Если начнут обе сразу,
+      // вежливой придётся откатить своё, а откат во время сбора кандидатов
+      // оставляет её без кандидатов навсегда (так ведёт себя Chrome) — связь
+      // не поднимается вовсе. Вежливая ждёт чужое предложение и начинает
+      // сама, только если его так и не пришло: собеседник может быть давно в
+      // звонке и сам ничего не начнёт.
+      let politeWait: number | null = null;
+      let politeMayOffer = false;
+      const POLITE_FIRST_OFFER_WAIT_MS = 2500;
+
       pc.onnegotiationneeded = async () => {
+        if (polite && !politeMayOffer && !pc.remoteDescription && pc.signalingState === 'stable') {
+          if (politeWait !== null) return;
+          politeWait = window.setTimeout(() => {
+            politeWait = null;
+            if (pc.signalingState !== 'stable' || pc.remoteDescription) return;
+            politeMayOffer = true;
+            console.log(`[call] ${peerUserId} предложения не пришло — начинаем сами`);
+            pc.onnegotiationneeded?.(new Event('negotiationneeded'));
+          }, POLITE_FIRST_OFFER_WAIT_MS);
+          return;
+        }
         try {
           rec.makingOffer = true;
           console.log(`[call] ${peerUserId} negotiationneeded → creating offer`);
@@ -504,11 +671,73 @@ export function useCall(opts: UseCallOpts): UseCallApi {
 
       pc.onconnectionstatechange = () => {
         console.log(`[call] ${peerUserId} connection: ${pc.connectionState}`);
+        // Закрытое соединение уже убрано из списка — его состояние не пишем,
+        // иначе оно воскресло бы в карте после closePeer.
+        if (pcsRef.current.get(peerUserId)?.pc !== pc) return;
+        setLinkStates((prev) => {
+          if (prev.get(peerUserId) === pc.connectionState) return prev;
+          const next = new Map(prev);
+          next.set(peerUserId, pc.connectionState);
+          return next;
+        });
       };
 
       pc.onsignalingstatechange = () => {
         console.log(`[call] ${peerUserId} signaling: ${pc.signalingState}`);
       };
+
+      // Сторож соединения. Перезапуск делает только одна сторона — невежливая:
+      // если начнут обе, получится новое встречное согласование.
+      let stateSince = performance.now();
+      let lastState: RTCIceConnectionState = pc.iceConnectionState;
+      let restarts = 0;
+      let offerSince = 0;
+      let reoffers = 0;
+      rec.watchdog = window.setInterval(() => {
+        const ice = pc.iceConnectionState;
+        if (pc.signalingState === 'closed') return;
+        if (pc.signalingState === 'have-local-offer') {
+          if (offerSince === 0) offerSince = performance.now();
+          if (!polite && reoffers < ICE_RESTART_LIMIT && performance.now() - offerSince > OFFER_ANSWER_TIMEOUT_MS) {
+            reoffers++;
+            offerSince = 0;
+            console.log(`[call] ${peerUserId} ответа на предложение нет — предлагаем заново (${reoffers})`);
+            void pc
+              .setLocalDescription({ type: 'rollback' })
+              // Заново — с новым сбором кандидатов: откат во время сбора мог его
+              // остановить, и прежние учётные данные остались бы без кандидатов.
+              .then(() => pc.restartIce())
+              .catch(() => undefined);
+          }
+          return;
+        }
+        offerSince = 0;
+        if (ice !== lastState) {
+          lastState = ice;
+          stateSince = performance.now();
+        }
+        if (ice === 'connected' || ice === 'completed') {
+          restarts = 0;
+          return;
+        }
+        if (polite || pc.signalingState !== 'stable' || restarts >= ICE_RESTART_LIMIT) return;
+        const waited = performance.now() - stateSince;
+        const limit =
+          ice === 'new'
+            ? ICE_NEW_TIMEOUT_MS
+            : ice === 'checking'
+              ? ICE_CHECKING_TIMEOUT_MS
+              : ICE_LOST_TIMEOUT_MS;
+        if (waited < limit) return;
+        restarts++;
+        stateSince = performance.now();
+        console.log(`[call] ${peerUserId} ICE ${ice} ${Math.round(waited)} мс — перезапуск (${restarts})`);
+        try {
+          pc.restartIce();
+        } catch {
+          /* соединение уже закрыто */
+        }
+      }, 1000);
 
       pcsRef.current.set(peerUserId, rec);
       return rec;
@@ -520,6 +749,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     (peerUserId: string): void => {
       const rec = pcsRef.current.get(peerUserId);
       if (!rec) return;
+      if (rec.watchdog !== null) window.clearInterval(rec.watchdog);
       try {
         rec.pc.close();
       } catch {
@@ -530,7 +760,16 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       // Уходят оба потока — и камера, и демонстрация.
       inboundRef.current.delete(peerUserId);
       screenHintsRef.current.delete(peerUserId);
+      // Память о приметах демонстрации остаётся до конца звонка: собеседник,
+      // перезашедший посреди неё, шлёт тот же поток, а повторной подсказки
+      // может и не прислать.
       rebuildRemoteStreams();
+      setLinkStates((prev) => {
+        if (!prev.has(peerUserId)) return prev;
+        const next = new Map(prev);
+        next.delete(peerUserId);
+        return next;
+      });
       // Clear any lingering speaking indicator — handles hard-disconnects
       // where the peer left while their last `call_speaking: true` was the
       // most recent broadcast.
@@ -563,6 +802,18 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         }
       }
       const { pc, polite } = rec;
+      // Описание собеседника встало — теперь можно применить кандидатов,
+      // которые пришли раньше него.
+      const flushCandidates = async (): Promise<void> => {
+        const queued = rec.pendingCandidates.splice(0);
+        for (const c of queued) {
+          try {
+            await pc.addIceCandidate(c ?? undefined);
+          } catch {
+            // Кандидат от отвергнутого встречного предложения — не нужен.
+          }
+        }
+      };
       try {
         if (payload.kind === 'offer') {
           const readyForOffer =
@@ -577,6 +828,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
             return;
           }
           await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
+          await flushCandidates();
           await pc.setLocalDescription();
           if (!pc.localDescription) return;
           sendSignal(fromUserId, { kind: 'answer', sdp: pc.localDescription.sdp });
@@ -586,7 +838,12 @@ export function useCall(opts: UseCallOpts): UseCallApi {
           rec.isSettingRemoteAnswer = true;
           await pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
           rec.isSettingRemoteAnswer = false;
+          await flushCandidates();
         } else if (payload.kind === 'ice') {
+          if (!pc.remoteDescription) {
+            if (rec.pendingCandidates.length < 200) rec.pendingCandidates.push(payload.candidate ?? null);
+            return;
+          }
           try {
             await pc.addIceCandidate(payload.candidate ?? undefined);
           } catch (e) {
@@ -614,7 +871,12 @@ export function useCall(opts: UseCallOpts): UseCallApi {
         }
         return;
       }
-      await handleSignal(fromUserId, payload);
+      const chains = signalChainsRef.current;
+      const next = (chains.get(fromUserId) ?? Promise.resolve())
+        .then(() => handleSignal(fromUserId, payload))
+        .catch(() => undefined);
+      chains.set(fromUserId, next);
+      await next;
     });
     return off;
   }, [handleSignal]);
@@ -736,8 +998,18 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   // ── Public actions ──────────────────────────────────────────────────────
 
   const join = useCallback<UseCallApi['join']>(
-    async ({ withVideo }) => {
-      if (!myUserId || myUserKind !== 'user') {
+    async ({ withVideo, micOn: startMicOn = false }) => {
+      // Кто вошёл, комната сообщает не сразу. Нажатие «войти в звонок» до этого
+      // раньше сразу показывало «нет доступа к микрофону», хотя доступ есть, —
+      // теперь оно ждёт и выполняется, как только пользователь известен.
+      if (!myUserId || myUserKind === null) {
+        if (stateRef.current !== 'idle') return;
+        pendingJoinRef.current = { withVideo, micOn: startMicOn };
+        stateRef.current = 'connecting';
+        setState('connecting');
+        return;
+      }
+      if (myUserKind !== 'user') {
         setPermissionError('denied');
         return;
       }
@@ -821,7 +1093,19 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       // ourselves; the snapshot watcher uses outbound's tracks to build PCs.
       await syncOutboundVideo();
 
-      onLocalMedia({ audio: false, video: withVideo });
+      // Личный звонок начинается с включённым микрофоном — как в приложении:
+      // ответив, человек сразу говорит. В комнате микрофон включают сами.
+      if (startMicOn) {
+        micOnRef.current = true;
+        if (pipeline) pipeline.setMicEnabled(true);
+        else {
+          const t = stream.getAudioTracks()[0];
+          if (t) t.enabled = true;
+        }
+      }
+      setMicOn(micOnRef.current);
+
+      onLocalMedia({ audio: micOnRef.current, video: withVideo });
       transport.join(withVideo);
       setState('in');
       // React applies the state on the next render, but the queued signals
@@ -843,11 +1127,45 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     ],
   );
 
+  // Отложенный вход в звонок — пользователь стал известен.
+  useEffect(() => {
+    const pending = pendingJoinRef.current;
+    if (!pending || !myUserId || myUserKind === null) return;
+    pendingJoinRef.current = null;
+    stateRef.current = 'idle';
+    void join(pending);
+  }, [myUserId, myUserKind, join]);
+
   const leave = useCallback<UseCallApi['leave']>(() => {
+    if (pendingJoinRef.current) {
+      // Вход ещё только ждал пользователя — отменить его достаточно.
+      pendingJoinRef.current = null;
+      stateRef.current = 'idle';
+      setState('idle');
+      return;
+    }
     if (stateRef.current === 'idle') return;
+    // Проверка микрофона кончается вместе со звонком.
+    micCheckRef.current?.clone?.stop();
+    micCheckRef.current = null;
     transport.leave();
     pendingSignalsRef.current = [];
+    // Демонстрация гаснет вместе со звонком — иначе браузер так и держал бы
+    // захват экрана с плашкой «вы показываете этот экран».
+    const share = screenShareRef.current;
+    if (share) {
+      for (const t of share.stream.getTracks()) {
+        t.onended = null;
+        t.stop();
+      }
+    }
+    screenShareRef.current = null;
+    setScreenShareState(null);
+    screenOutRef.current = null;
+    knownScreenRef.current.clear();
+    setMicOn(false);
     closeAllPeers();
+    setLinkStates(new Map());
     pipelineRef.current?.teardown();
     pipelineRef.current = null;
     mirrorPipelineRef.current?.teardown();
@@ -883,8 +1201,271 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       const t = stream?.getAudioTracks()[0];
       if (t) t.enabled = next;
     }
+    setMicOn(next);
     broadcastMyMedia();
   }, [broadcastMyMedia]);
+
+  // ── Проверка микрофона ─────────────────────────────────────────────────
+
+  /**
+   * Идущая проверка: был ли микрофон включён до неё (чтобы вернуть) и копия
+   * дорожки — для пути без обработки, где отвода у тракта нет.
+   */
+  const micCheckRef = useRef<{ restoreMic: boolean; stream: MediaStream; clone: MediaStreamTrack | null } | null>(
+    null,
+  );
+
+  const startMicCheck = useCallback<UseCallApi['startMicCheck']>(() => {
+    if (stateRef.current !== 'in') return null;
+    if (micCheckRef.current) return micCheckRef.current.stream;
+    // Собеседник на время проверки вас не слышит — и видит это как обычное
+    // выключение микрофона.
+    const restoreMic = micOnRef.current;
+    if (restoreMic) toggleMic();
+
+    const pipeline = pipelineRef.current;
+    let stream: MediaStream;
+    let clone: MediaStreamTrack | null = null;
+    if (pipeline) {
+      stream = pipeline.startMonitor();
+    } else {
+      // Без своего тракта (iOS, сбой шумодава) обработку делает сам браузер —
+      // её несёт дорожка, а копия слышна и тогда, когда для звонка она выключена.
+      const raw = localStreamRef.current?.getAudioTracks()[0];
+      if (!raw) return null;
+      clone = raw.clone();
+      clone.enabled = true;
+      stream = new MediaStream([clone]);
+    }
+    micCheckRef.current = { restoreMic, stream, clone };
+    return stream;
+  }, [toggleMic]);
+
+  const stopMicCheck = useCallback<UseCallApi['stopMicCheck']>(() => {
+    const check = micCheckRef.current;
+    if (!check) return;
+    micCheckRef.current = null;
+    pipelineRef.current?.stopMonitor();
+    check.clone?.stop();
+    // Вернуть собеседнику микрофон, если он был включён, — и только если его
+    // за время проверки не включили вручную.
+    if (check.restoreMic && !micOnRef.current && stateRef.current === 'in') toggleMic();
+  }, [toggleMic]);
+
+  // ── Демонстрация экрана ────────────────────────────────────────────────
+
+  /** Потолок битрейта и частоты: без него крупная картинка съедает канал. */
+  const limitScreenSending = useCallback(async (options: ScreenShareOptions): Promise<void> => {
+    for (const rec of pcsRef.current.values()) {
+      const sender = rec.screenVideoSender;
+      if (!sender) continue;
+      try {
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+        for (const e of params.encodings) {
+          e.maxBitrate = screenMaxBitrate(options);
+          e.maxFramerate = options.fps;
+        }
+        await sender.setParameters(params);
+      } catch {
+        /* ограничить не вышло — демонстрация пойдёт как есть */
+      }
+    }
+  }, []);
+
+  /** Положить дорожки захвата в линии демонстрации каждого соединения. */
+  const attachScreenTracks = useCallback(async (capture: MediaStream | null): Promise<void> => {
+    const video = capture?.getVideoTracks()[0] ?? null;
+    const audio = capture?.getAudioTracks()[0] ?? null;
+    let out = screenOutRef.current;
+    if (!out && capture) {
+      out = new MediaStream();
+      screenOutRef.current = out;
+    }
+    if (out) {
+      for (const t of out.getTracks()) out.removeTrack(t);
+      if (video) out.addTrack(video);
+      if (audio) out.addTrack(audio);
+    }
+    for (const rec of pcsRef.current.values()) {
+      // Есть линия — подменяем дорожку в ней, без нового согласования. Нет —
+      // добавляем: браузер сам попросит согласование.
+      if (rec.screenVideoSender) {
+        await rec.screenVideoSender.replaceTrack(video).catch(() => undefined);
+      } else if (video && out) {
+        rec.screenVideoSender = rec.pc.addTrack(video, out);
+      }
+      if (rec.screenAudioSender) {
+        await rec.screenAudioSender.replaceTrack(audio).catch(() => undefined);
+      } else if (audio && out) {
+        rec.screenAudioSender = rec.pc.addTrack(audio, out);
+      }
+    }
+  }, []);
+
+  /**
+   * Дождаться номера линии демонстрации: он появляется только после
+   * согласования, а без него приложение для Windows не всегда узнаёт поток.
+   */
+  const waitScreenMid = useCallback(async (): Promise<void> => {
+    const started = performance.now();
+    while (performance.now() - started < 4000) {
+      const marks = screenMarks();
+      if (!marks || marks.mid || pcsRef.current.size === 0) return;
+      await new Promise((r) => window.setTimeout(r, 120));
+    }
+  }, [screenMarks]);
+
+  /** Захватить экран через системное окно браузера. */
+  const captureScreen = useCallback(
+    async (surface: ScreenSurface, options: ScreenShareOptions): Promise<MediaStream | 'cancelled' | 'failed'> => {
+      const constraints = {
+        video: { ...screenVideoConstraints(options), displaySurface: surface },
+        audio: options.withAudio
+          ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+          : false,
+        // Подсказки системному окну: свою вкладку не предлагать, звук системы
+        // при показе экрана — разрешить, переключать источник на ходу — тоже.
+        selfBrowserSurface: 'exclude',
+        systemAudio: 'include',
+        surfaceSwitching: 'include',
+      } as DisplayMediaStreamOptions;
+      try {
+        return await navigator.mediaDevices.getDisplayMedia(constraints);
+      } catch (err) {
+        const name = (err as Error).name;
+        // Человек закрыл окно выбора — это не ошибка.
+        if (name === 'NotAllowedError' || name === 'AbortError') return 'cancelled';
+        return 'failed';
+      }
+    },
+    [],
+  );
+
+  const stopScreenShare = useCallback<UseCallApi['stopScreenShare']>(() => {
+    const share = screenShareRef.current;
+    if (!share) return;
+    screenShareRef.current = null;
+    setScreenShareState(null);
+    for (const t of share.stream.getTracks()) {
+      t.onended = null;
+      t.stop();
+    }
+    // Линии остаются в соединении пустыми — следующий запуск их переиспользует.
+    void attachScreenTracks(null).finally(() => broadcastMyMedia());
+  }, [attachScreenTracks, broadcastMyMedia]);
+
+  /** Принять новый захват: показать, отправить, сообщить собеседнику. */
+  const adoptCapture = useCallback(
+    async (
+      capture: MediaStream,
+      surface: ScreenSurface,
+      options: ScreenShareOptions,
+    ): Promise<ScreenShareResult> => {
+      const video = capture.getVideoTracks()[0];
+      // Передача остановлена из самого браузера («Прекратить показ») — гасим
+      // демонстрацию, иначе у собеседника застынет кадр.
+      if (video) {
+        video.contentHint = 'detail';
+        video.onended = () => {
+          if (screenShareRef.current?.stream === capture) stopScreenShare();
+        };
+      }
+      const settings = video?.getSettings() as (MediaTrackSettings & { displaySurface?: string }) | undefined;
+      const actualSurface =
+        settings?.displaySurface === 'monitor' ||
+        settings?.displaySurface === 'window' ||
+        settings?.displaySurface === 'browser'
+          ? settings.displaySurface
+          : surface;
+      const share: ActiveScreenShare = {
+        stream: capture,
+        surface: actualSurface,
+        options,
+        hasAudio: capture.getAudioTracks().length > 0,
+        label: video?.label ?? '',
+      };
+      screenShareRef.current = share;
+      setScreenShareState(share);
+      await attachScreenTracks(capture);
+      await limitScreenSending(options);
+      saveScreenOptions(options);
+      await waitScreenMid();
+      broadcastMyMedia();
+      return options.withAudio && !share.hasAudio ? 'no-audio' : 'ok';
+    },
+    [attachScreenTracks, limitScreenSending, waitScreenMid, broadcastMyMedia, stopScreenShare],
+  );
+
+  const startScreenShare = useCallback<UseCallApi['startScreenShare']>(
+    async (surface, options) => {
+      if (stateRef.current !== 'in' || screenShareRef.current) return 'failed';
+      const capture = await captureScreen(surface, options);
+      if (typeof capture === 'string') return capture;
+      // Пока выбирали, звонок мог закончиться.
+      if (stateRef.current !== 'in') {
+        for (const t of capture.getTracks()) t.stop();
+        return 'cancelled';
+      }
+      return adoptCapture(capture, surface, options);
+    },
+    [captureScreen, adoptCapture],
+  );
+
+  const updateScreenShare = useCallback<UseCallApi['updateScreenShare']>(
+    async (surface, options) => {
+      const current = screenShareRef.current;
+      if (!current) return startScreenShare(surface, options);
+      const video = current.stream.getVideoTracks()[0];
+
+      // Тот же источник и звук не просят заново — меняем только качество на
+      // ходу: дорожка та же, у собеседника картинка не мигает.
+      const sameSource = surface === current.surface;
+      const audioSame = options.withAudio === current.hasAudio;
+      if (sameSource && (audioSame || !options.withAudio)) {
+        if (video) await video.applyConstraints(screenVideoConstraints(options)).catch(() => undefined);
+        if (!options.withAudio && current.hasAudio) {
+          for (const t of current.stream.getAudioTracks()) {
+            current.stream.removeTrack(t);
+            t.stop();
+          }
+        }
+        const next: ActiveScreenShare = {
+          ...current,
+          options,
+          hasAudio: current.stream.getAudioTracks().length > 0,
+        };
+        screenShareRef.current = next;
+        setScreenShareState(next);
+        await attachScreenTracks(current.stream);
+        await limitScreenSending(options);
+        saveScreenOptions(options);
+        broadcastMyMedia();
+        return 'ok';
+      }
+
+      // Другой источник или понадобился звук — нужен новый захват. Старая
+      // демонстрация идёт, пока человек выбирает, и сменяется подменой дорожки.
+      const capture = await captureScreen(surface, options);
+      if (typeof capture === 'string') return capture;
+      for (const t of current.stream.getTracks()) {
+        t.onended = null;
+        t.stop();
+      }
+      return adoptCapture(capture, surface, options);
+    },
+    [startScreenShare, captureScreen, adoptCapture, attachScreenTracks, limitScreenSending, broadcastMyMedia],
+  );
+
+  const getStats = useCallback<UseCallApi['getStats']>(async (peerUserId) => {
+    const rec = pcsRef.current.get(peerUserId);
+    if (!rec) return null;
+    try {
+      return await rec.pc.getStats();
+    } catch {
+      return null;
+    }
+  }, []);
 
   // ── Device enumeration ─────────────────────────────────────────────────
   // Labels in `enumerateDevices()` are empty strings until the user has
@@ -1064,7 +1645,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
   const toggleCamera = useCallback<UseCallApi['toggleCamera']>(async () => {
     const stream = localStreamRef.current;
     const outbound = outboundStreamRef.current;
-    if (!stream || !outbound) return;
+    if (!stream || !outbound) return false;
     const existing = rawCameraTrackRef.current;
     if (existing) {
       // Turn camera OFF: stop raw track, clear ref, let syncOutboundVideo
@@ -1074,7 +1655,7 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       rawCameraTrackRef.current = null;
       await syncOutboundVideo();
       broadcastMyMedia();
-      return;
+      return false;
     }
     const { preferredCameraId } = useCallSettingsStore.getState();
     let camStream: MediaStream;
@@ -1084,16 +1665,17 @@ export function useCall(opts: UseCallOpts): UseCallApi {
       });
     } catch {
       setPermissionError('denied');
-      return;
+      return false;
     }
     const track = camStream.getVideoTracks()[0];
-    if (!track) return;
+    if (!track) return false;
     stream.addTrack(track);
     rawCameraTrackRef.current = track;
     // syncOutboundVideo builds the mirror pipeline (if mirror is on), wires
     // up the outbound stream, and adds the track to each PC.
     await syncOutboundVideo();
     broadcastMyMedia();
+    return true;
   }, [broadcastMyMedia, syncOutboundVideo]);
 
   // ── Cleanup on unmount ──────────────────────────────────────────────────
@@ -1102,6 +1684,9 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     return () => {
       // Hook-level teardown. Avoid sending leave during route changes since the
       // server cleans us up on WS close anyway.
+      const share = screenShareRef.current;
+      if (share) for (const t of share.stream.getTracks()) t.stop();
+      screenShareRef.current = null;
       closeAllPeers();
       pipelineRef.current?.teardown();
       pipelineRef.current = null;
@@ -1124,6 +1709,15 @@ export function useCall(opts: UseCallOpts): UseCallApi {
     state,
     permissionError,
     myStream,
+    micOn,
+    linkStates,
+    getStats,
+    screenShare,
+    startScreenShare,
+    updateScreenShare,
+    stopScreenShare,
+    startMicCheck,
+    stopMicCheck,
     remoteStreams,
     setScreenHint,
     speaking,

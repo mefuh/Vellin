@@ -154,7 +154,8 @@ export function Messages() {
       // встаёт над клавиатурой. Без ручного расчёта высоты клавиатуры.
       const wrapStyle: CSSProperties = {
         position: 'fixed',
-        top: 0,
+        // Под полосой свёрнутого звонка, если она есть.
+        top: 'var(--call-bar, 0px)',
         left: 0,
         right: 0,
         bottom: 0,
@@ -167,7 +168,7 @@ export function Messages() {
       return <div style={wrapStyle}>{chat}</div>;
     }
     return (
-      <div style={{ height: '100svh', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ height: 'var(--app-h)', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}>
         <AppHeader active="messages" />
         <div style={{ flex: 1, minHeight: 0 }}>{list}</div>
       </div>
@@ -175,7 +176,7 @@ export function Messages() {
   }
 
   return (
-    <div style={{ height: '100svh', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: 'var(--app-h)', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}>
       <AppHeader active="messages" />
       <div
         style={{

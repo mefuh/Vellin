@@ -372,8 +372,8 @@ export function PublicProfile() {
     <div
       style={
         isMobile
-          ? { height: '100svh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)' }
-          : { minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }
+          ? { height: 'var(--app-h)', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)' }
+          : { minHeight: 'var(--app-h)', background: 'var(--bg-0)', color: 'var(--text-0)' }
       }
     >
       {header}
