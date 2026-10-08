@@ -45,3 +45,8 @@ __pycache__/
 **/.impeccable/
 release/winapp/*
 !release/winapp/README.md
+
+# Сквозные тесты: служебные файлы прогона и отчёты
+e2e/.run/
+e2e/report/
+e2e/results/
