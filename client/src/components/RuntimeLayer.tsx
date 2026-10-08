@@ -77,7 +77,7 @@ export function RuntimeLayer() {
   return (
     <>
       {banners.length > 0 && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 900, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'fixed', top: 'var(--call-bar, 0px)', left: 0, right: 0, zIndex: 900, display: 'flex', flexDirection: 'column' }}>
           {banners.map((a) => <Banner key={a.id} a={a} onClose={() => dismiss(a.id)} />)}
         </div>
       )}

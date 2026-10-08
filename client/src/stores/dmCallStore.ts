@@ -26,11 +26,25 @@ interface DmCallState {
   rtc: RtcConfig | null;
   /** Идентификатор своего соединения из hello: по нему понятно, наш ли звонок. */
   myConnId: string | null;
+  /**
+   * Прежние соединения этой вкладки, которые вели идущий звонок. После
+   * обрыва связи с сервером вкладка получает новое соединение, а в снимке
+   * звонка до ответа на `dmcall_rejoin` остаётся старое. Без этой памяти
+   * вкладка на миг считала звонок чужим, выходила из разговора — и выход
+   * отправлял серверу отбой: звонок рвался после любой просадки сети.
+   */
+  ownedConnIds: string[];
   uiMode: DmCallUiMode;
   /** Текст последней ошибки для показа пользователю. */
   error: string | null;
   /** Свой nonce ожидаемого звонка — чтобы не путать с чужими ответами. */
   pendingNonce: string | null;
+  /**
+   * Ответ уже отправлен, а свой снимок звонка ещё не пришёл. Без этого окно
+   * вызова успевало мигнуть: входящий уже снят, а звонок, где мы значимся
+   * участником, приходит только следующим сообщением.
+   */
+  accepting: boolean;
 
   setMyConnId: (connId: string) => void;
   setSender: (fn: ((msg: UserC2S) => void) | null) => void;
@@ -64,12 +78,20 @@ export const useDmCallStore = create<DmCallState>((set, get) => ({
   incoming: null,
   rtc: null,
   myConnId: null,
+  ownedConnIds: [],
   uiMode: 'hidden',
   error: null,
   pendingNonce: null,
+  accepting: false,
   _send: null,
 
-  setMyConnId: (connId) => set({ myConnId: connId }),
+  setMyConnId: (connId) =>
+    set((s) => {
+      // Звонок вела эта вкладка — её прежнее соединение остаётся «своим»,
+      // пока звонок не кончится.
+      const keep = s.call && s.myConnId && s.isMine() ? [...s.ownedConnIds, s.myConnId] : s.ownedConnIds;
+      return { myConnId: connId, ownedConnIds: keep };
+    }),
   setSender: (fn) => set({ _send: fn }),
   send: (msg) => get()._send?.(msg),
 
@@ -79,8 +101,8 @@ export const useDmCallStore = create<DmCallState>((set, get) => ({
   },
 
   onState: (call, peer, rtc) => {
-    const { myConnId } = get();
-    const mine = call.callerConnId === myConnId || call.calleeConnId === myConnId;
+    const owned = new Set([get().myConnId, ...get().ownedConnIds]);
+    const mine = owned.has(call.callerConnId ?? null) || owned.has(call.calleeConnId ?? null);
 
     if (call.phase === 'ended') {
       set({
@@ -90,6 +112,8 @@ export const useDmCallStore = create<DmCallState>((set, get) => ({
         rtc: null,
         uiMode: 'hidden',
         pendingNonce: null,
+        accepting: false,
+        ownedConnIds: [],
       });
       return;
     }
@@ -101,6 +125,7 @@ export const useDmCallStore = create<DmCallState>((set, get) => ({
       // Ответили на другом устройстве — гасим у себя входящий.
       incoming: call.phase === 'active' && !mine ? null : s.incoming,
       uiMode: mine ? (s.uiMode === 'hidden' ? 'expanded' : s.uiMode) : 'hidden',
+      accepting: mine ? false : s.accepting,
     }));
   },
 
@@ -122,13 +147,23 @@ export const useDmCallStore = create<DmCallState>((set, get) => ({
     const { pendingNonce } = get();
     // Ошибка чужой попытки (другая вкладка) нас не касается.
     if (nonce && pendingNonce && nonce !== pendingNonce) return;
-    set({ error: message, call: null, peer: null, rtc: null, uiMode: 'hidden', pendingNonce: null });
+    set({
+      error: message,
+      call: null,
+      peer: null,
+      rtc: null,
+      uiMode: 'hidden',
+      pendingNonce: null,
+      accepting: false,
+      ownedConnIds: [],
+    });
   },
 
   isMine: () => {
-    const { call, myConnId } = get();
+    const { call, myConnId, ownedConnIds } = get();
     if (!call || !myConnId) return false;
-    return call.callerConnId === myConnId || call.calleeConnId === myConnId;
+    const owned = new Set([myConnId, ...ownedConnIds]);
+    return owned.has(call.callerConnId ?? '') || owned.has(call.calleeConnId ?? '');
   },
 
   invite: (toUserId, video) => {
@@ -140,7 +175,9 @@ export const useDmCallStore = create<DmCallState>((set, get) => ({
   accept: (video) => {
     const inc = get().incoming;
     if (!inc) return;
-    set({ incoming: null });
+    // Собеседник известен из входящего — показываем его, пока не пришёл снимок
+    // звонка: иначе окно на миг осталось бы без имени и лица.
+    set({ incoming: null, accepting: true, peer: inc.from });
     get().send({ t: 'dmcall_accept', callId: inc.call.callId, video });
   },
 
@@ -170,5 +207,7 @@ export const useDmCallStore = create<DmCallState>((set, get) => ({
       uiMode: 'hidden',
       error: null,
       pendingNonce: null,
+      accepting: false,
+      ownedConnIds: [],
     }),
 }));

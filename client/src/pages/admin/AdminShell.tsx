@@ -122,7 +122,7 @@ function AdminShellInner() {
   if (isMobile) {
     return (
       <div
-        style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}
+        style={{ minHeight: 'var(--app-h)', background: 'var(--bg-0)', color: 'var(--text-0)', display: 'flex', flexDirection: 'column' }}
         className="admin-shell admin-shell--mobile"
       >
         <header
@@ -136,7 +136,7 @@ function AdminShellInner() {
             flexDirection: 'column',
             gap: 10,
             position: 'sticky',
-            top: 0,
+            top: 'var(--call-bar, 0px)',
             zIndex: 10,
           }}
         >
@@ -167,7 +167,7 @@ function AdminShellInner() {
   return (
     <div
       style={{
-        minHeight: '100svh',
+        minHeight: 'var(--app-h)',
         background: 'var(--bg-0)',
         color: 'var(--text-0)',
         display: 'grid',
@@ -184,9 +184,9 @@ function AdminShellInner() {
           flexDirection: 'column',
           gap: 14,
           position: 'sticky',
-          top: 0,
+          top: 'var(--call-bar, 0px)',
           alignSelf: 'start',
-          height: '100svh',
+          height: 'var(--app-h)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

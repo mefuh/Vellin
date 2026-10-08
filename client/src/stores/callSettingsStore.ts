@@ -47,7 +47,8 @@ export interface CallSettingsState {
    * fullscreen overlay. Tiles missing here use the default top-right stack.
    */
   tilePositions: Record<string, TilePosition>;
-  // keyed by peer userId. Missing entry == 1.0 (full volume).
+  // keyed by peer userId. Missing entry == 1.0 (full volume). Up to 2.0 —
+  // личный звонок, как и приложение, позволяет усилить тихого собеседника.
   peerVolumes: Record<string, number>;
 
   setPreferredMicId: (id: string | null) => void;
@@ -67,6 +68,7 @@ export interface CallSettingsState {
 }
 
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
+const clampVolume = (v: number): number => (v < 0 ? 0 : v > 2 ? 2 : v);
 
 export const useCallSettingsStore = create<CallSettingsState>()(
   persist(
@@ -99,7 +101,7 @@ export const useCallSettingsStore = create<CallSettingsState>()(
         })),
       resetTilePositions: () => set({ tilePositions: {} }),
       setPeerVolume: (userId, vol) =>
-        set((s) => ({ peerVolumes: { ...s.peerVolumes, [userId]: clamp01(vol) } })),
+        set((s) => ({ peerVolumes: { ...s.peerVolumes, [userId]: clampVolume(vol) } })),
       resetPeerVolume: (userId) =>
         set((s) => {
           if (!(userId in s.peerVolumes)) return s;

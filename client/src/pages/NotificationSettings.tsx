@@ -234,7 +234,7 @@ export function NotificationSettings(): React.ReactElement {
 
   if (isMobile) {
     return (
-      <div style={{ height: '100svh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
+      <div style={{ height: 'var(--app-h)', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
         <AppHeader />
         <main style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 14px 104px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           {body}
@@ -244,7 +244,7 @@ export function NotificationSettings(): React.ReactElement {
   }
 
   return (
-    <div style={{ minHeight: '100svh', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
+    <div style={{ minHeight: 'var(--app-h)', background: 'var(--bg-0)', color: 'var(--text-0)' }}>
       <AppHeader />
       <div style={{ maxWidth: 680, margin: '0 auto', padding: '36px max(24px, 4vw) 80px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         {body}

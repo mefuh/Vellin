@@ -38,6 +38,13 @@ export interface AudioPipeline {
    * feeds into it changes.
    */
   replaceMicStream: (newStream: MediaStream) => void;
+  /**
+   * Отвод для проверки микрофона: звук после всей обработки — ровно то, что
+   * уходит собеседнику, — но до выключателя микрофона. Так человек слышит
+   * себя, как его слышат, даже когда для собеседника он выключен.
+   */
+  startMonitor: () => MediaStream;
+  stopMonitor: () => void;
   teardown: () => void;
 }
 
@@ -77,6 +84,9 @@ export async function setupAudioPipeline(
   const dest = ctx.createMediaStreamDestination();
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 512;
+  // Отвод проверки микрофона подключается только на время проверки.
+  const monitorDest = ctx.createMediaStreamDestination();
+  let monitoring = false;
 
   // Маршрут собирается заново при каждой смене входа или тумблера: узлы те же,
   // меняются только связи, поэтому исходящая дорожка остаётся прежней и
@@ -85,12 +95,10 @@ export async function setupAudioPipeline(
   const route = (): void => {
     try { source.disconnect(); } catch { /* ignore */ }
     try { rnnoise.disconnect(); } catch { /* ignore */ }
-    if (denoise) {
-      source.connect(rnnoise);
-      rnnoise.connect(gain);
-    } else {
-      source.connect(gain);
-    }
+    const processed = denoise ? rnnoise : source;
+    if (denoise) source.connect(rnnoise);
+    processed.connect(gain);
+    if (monitoring) processed.connect(monitorDest);
   };
   route();
   gain.connect(dest);
@@ -112,6 +120,18 @@ export async function setupAudioPipeline(
     setDenoiseEnabled: (on) => {
       if (torn || denoise === on) return;
       denoise = on;
+      route();
+    },
+    startMonitor: () => {
+      if (!torn && !monitoring) {
+        monitoring = true;
+        route();
+      }
+      return monitorDest.stream;
+    },
+    stopMonitor: () => {
+      if (torn || !monitoring) return;
+      monitoring = false;
       route();
     },
     replaceMicStream: (newStream) => {

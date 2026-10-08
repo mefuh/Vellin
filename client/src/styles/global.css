@@ -22,6 +22,21 @@ body,
 html {
   height: 100%;
 }
+
+/* Свёрнутый звонок — полоса над сайтом (DmCallBar). Её высота лежит в
+   --call-bar: страницы отступают на неё и считают свою высоту от --app-h,
+   поэтому полоса раздвигает сайт, а не накрывает его шапку. */
+:root {
+  --app-h: calc(100vh - var(--call-bar, 0px));
+}
+@supports (height: 100svh) {
+  :root {
+    --app-h: calc(100svh - var(--call-bar, 0px));
+  }
+}
+#root {
+  padding-top: var(--call-bar, 0px);
+}
 body {
   /* Гасим «резинку» — она дёргает fixed-элементы на iOS. */
   overscroll-behavior-y: none;

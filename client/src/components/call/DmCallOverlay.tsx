@@ -1,423 +1,565 @@
-import { useEffect, useRef, useState } from 'react';
-import { Avatar } from '../../shared';
-import { Icon } from '../../shared/Icon';
-import { useDmCallStore } from '../../stores/dmCallStore';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { DmCallSnapshot, PublicUser } from '@vellin/shared';
+import { useAuthStore } from '../../stores/authStore';
 import { screenKey, type UseCallApi } from '../../hooks/useCall';
-import { startRingbackTone } from '../../utils/sound';
-import { CallDeviceSettings } from './CallDeviceSettings';
+import {
+  canShareScreen,
+  loadScreenOptions,
+  resolutionLabel,
+  type ScreenSurface,
+} from '../../hooks/screenShare';
+import {
+  CallAvatar,
+  CallBackdrop,
+  CallButton,
+  EndCallButton,
+  IconButton,
+  PulseDot,
+  VideoView,
+  elapsed,
+  useSecondTick,
+} from './CallBits';
+import { CallIcon } from './CallGlyph';
+import { CallSettingsPanel } from './CallSettingsPanel';
+import { ScreenSharePicker, type ScreenSharePick } from './ScreenSharePicker';
 
-/** «5:32» — длительность разговора. */
-function formatDuration(startedAt: number | null): string {
-  if (!startedAt) return '';
-  const total = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
+/** Состояние связи — им подписана пилюля вверху экрана разговора. */
+export type CallNetState = 'connecting' | 'good' | 'weak' | 'lost';
 
-/** Один показываемый поток разговора: демонстрация, камера или аватар. */
-interface Tile {
-  key: string;
-  kind: 'screen' | 'camera' | 'avatar';
-  stream: MediaStream | null;
-  label: string;
-  /** Свой поток: он не звучит (иначе эхо) и камера показывается зеркально. */
-  mine: boolean;
-}
+/** Какая трансляция развёрнута, когда демонстрируют оба. */
+type Focus = 'none' | 'mine' | 'peer';
 
-/** Развёрнутый экран разговора. */
-export function DmCallOverlay({ api }: { api: UseCallApi }): React.ReactElement | null {
-  const call = useDmCallStore((s) => s.call);
-  const peer = useDmCallStore((s) => s.peer);
-  const hangup = useDmCallStore((s) => s.hangup);
-  const setUiMode = useDmCallStore((s) => s.setUiMode);
-  const [, tick] = useState(0);
-  // Какой поток показан крупно. null — по порядку: демонстрация собеседника,
-  // затем его камера. Выбор живёт, пока открыт экран звонка.
-  const [mainKey, setMainKey] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-
-  const answeredAt = call?.answeredAt ? Date.parse(call.answeredAt) : null;
-  const ringing = call?.phase === 'ringing';
-
-  // Секундная перерисовка нужна только ради таймера разговора.
-  useEffect(() => {
-    if (!answeredAt) return;
-    const t = window.setInterval(() => tick((v) => v + 1), 1000);
-    return () => window.clearInterval(t);
-  }, [answeredAt]);
-
-  // Гудки, пока идёт дозвон: звук следует за нажатием кнопки, поэтому играет.
-  useEffect(() => {
-    if (!ringing) return;
-    return startRingbackTone();
-  }, [ringing]);
-
-  if (!call || !peer) return null;
-
-  const speaking = api.speaking.has(peer.id);
-  const micOn = call.media[peer.id]?.audio !== false;
-  const peerVideoOn = call.media[peer.id]?.video === true;
-  const myVideoOn = api.myStream?.getVideoTracks()[0]?.enabled === true;
-  const peerStream = api.remoteStreams.get(peer.id) ?? null;
-  const peerScreenStream = api.remoteStreams.get(screenKey(peer.id)) ?? null;
-
-  // Все потоки разговора: демонстрация не заменяет камеру, поэтому их может
-  // быть несколько. Первый в списке показывается крупно, остальные — плитками;
-  // клик по плитке меняет её с главным потоком местами.
-  const tiles: Tile[] = [];
-  if (call.media[peer.id]?.screen && peerScreenStream) {
-    tiles.push({
-      key: 'peer-screen',
-      kind: 'screen',
-      stream: peerScreenStream,
-      label: `Экран: ${peer.username}`,
-      mine: false,
-    });
-  }
-  tiles.push(
-    peerVideoOn && peerStream
-      ? { key: 'peer-camera', kind: 'camera', stream: peerStream, label: peer.username, mine: false }
-      : { key: 'peer-avatar', kind: 'avatar', stream: null, label: peer.username, mine: false },
-  );
-  if (myVideoOn && api.myStream) {
-    tiles.push({ key: 'my-camera', kind: 'camera', stream: api.myStream, label: 'Вы', mine: true });
-  }
-
-  const main = tiles.find((t) => t.key === mainKey) ?? tiles[0]!;
-  const others = tiles.filter((t) => t.key !== main.key);
-
-  return (
-    <div
-      role="dialog"
-      aria-label={`Звонок с ${peer.username}`}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1300,
-        background: 'var(--bg-0)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 18,
-      }}
-    >
-      <button
-        type="button"
-        onClick={() => setUiMode('minimized')}
-        title="Свернуть звонок"
-        aria-label="Свернуть звонок"
-        style={{
-          position: 'absolute',
-          top: 18,
-          left: 18,
-          width: 40,
-          height: 40,
-          borderRadius: 'var(--r-md)',
-          border: '1px solid var(--line-2)',
-          background: 'var(--bg-2)',
-          color: 'var(--text-1)',
-          cursor: 'pointer',
-          display: 'grid',
-          placeItems: 'center',
-        }}
-      >
-        <Icon name="chevronD" size={18} />
-      </button>
-
-      {main.kind === 'avatar' ? (
-        <Avatar
-          name={peer.username}
-          seed={peer.avatarSeed}
-          src={peer.avatarUrl}
-          size={148}
-          style={
-            speaking
-              ? { boxShadow: '0 0 0 4px var(--accent), 0 0 32px var(--accent-glow)' }
-              : undefined
-          }
-        />
-      ) : (
-        <VideoTile
-          stream={main.stream!}
-          label={main.label}
-          muted={main.mine}
-          mirrored={main.kind === 'camera' && main.mine}
-          contain={main.kind === 'screen'}
-        />
-      )}
-      <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-0)' }}>{peer.username}</div>
-
-      {/* Остальные потоки — плитками в углу; клик меняет плитку с главной. */}
-      {others.length > 0 && (
-        <div
-          style={{
-            position: 'absolute',
-            right: 20,
-            bottom: 20,
-            display: 'flex',
-            gap: 10,
-            flexWrap: 'wrap',
-            justifyContent: 'flex-end',
-            maxWidth: 'min(560px, 60vw)',
-          }}
-        >
-          {others.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setMainKey(t.key)}
-              title={`Показать крупно: ${t.label}`}
-              aria-label={`Показать крупно: ${t.label}`}
-              style={{
-                width: 180,
-                aspectRatio: '16 / 9',
-                padding: 0,
-                border: 'none',
-                background: 'transparent',
-                borderRadius: 'var(--r-md)',
-                cursor: 'pointer',
-                overflow: 'hidden',
-              }}
-            >
-              {t.kind === 'avatar' ? (
-                <div
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    display: 'grid',
-                    placeItems: 'center',
-                    background: 'var(--bg-2)',
-                    border: '1px solid var(--line-2)',
-                    borderRadius: 'var(--r-md)',
-                  }}
-                >
-                  <Avatar name={peer.username} seed={peer.avatarSeed} src={peer.avatarUrl} size={48} />
-                </div>
-              ) : (
-                <VideoTile
-                  stream={t.stream!}
-                  label={t.label}
-                  muted={t.mine}
-                  mirrored={t.kind === 'camera' && t.mine}
-                  contain={t.kind === 'screen'}
-                  fill
-                />
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-      <div style={{ fontSize: 14, color: 'var(--text-2)', minHeight: 20 }}>
-        {ringing ? 'Дозвон…' : formatDuration(answeredAt)}
-        {!ringing && !micOn && ' · микрофон выключен у собеседника'}
-      </div>
-
-      <div style={{ display: 'flex', gap: 14, marginTop: 12 }}>
-        <ControlButton
-          label={api.myStream?.getAudioTracks()[0]?.enabled === false ? 'Включить микрофон' : 'Выключить микрофон'}
-          icon={api.myStream?.getAudioTracks()[0]?.enabled === false ? 'micOff' : 'mic'}
-          onClick={api.toggleMic}
-        />
-        <ControlButton
-          label={myVideoOn ? 'Выключить камеру' : 'Включить камеру'}
-          icon={myVideoOn ? 'video' : 'videoOff'}
-          onClick={() => void api.toggleCamera()}
-        />
-        {/* Демонстрацию умеет вести только клиент для Windows; здесь кнопка
-            нужна, чтобы о такой возможности вообще узнали. */}
-        <ControlButton
-          label="Демонстрация экрана доступна в приложении для Windows"
-          icon="cast"
-          disabled
-          onClick={() => {}}
-        />
-        <ControlButton
-          label="Настройки звонка"
-          icon="settings"
-          onClick={() => setSettingsOpen(true)}
-        />
-        <ControlButton label="Завершить" icon="phoneOff" danger onClick={hangup} />
-      </div>
-
-      {settingsOpen && (
-        <CallSettingsSheet
-          peerId={peer.id}
-          peerName={peer.username}
-          onClose={() => setSettingsOpen(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-/** Настройки звонка поверх разговора. */
-function CallSettingsSheet({
-  peerId,
-  peerName,
-  onClose,
+/**
+ * Экран разговора. Перенос `_CallScreen` из winapp/lib/widgets/call_overlay.dart:
+ * те же раскладки кадра, плашки, капсула управления и своё превью.
+ *
+ * Дозвон и подключение сюда не доходят — их показывает окно вызова, здесь
+ * разговор уже идёт.
+ */
+export function CallScreen({
+  api,
+  call,
+  peer,
+  net,
+  showMyPreview,
+  setShowMyPreview,
+  onMinimize,
+  onHangup,
+  onError,
 }: {
-  peerId: string;
-  peerName: string;
-  onClose: () => void;
-}) {
+  api: UseCallApi;
+  call: DmCallSnapshot;
+  peer: PublicUser;
+  net: CallNetState;
+  /** Показывать свою демонстрацию крупно, когда собеседник не демонстрирует. */
+  showMyPreview: boolean;
+  setShowMyPreview: (v: boolean) => void;
+  onMinimize: () => void;
+  onHangup: () => void;
+  onError: (message: string) => void;
+}): React.ReactElement {
+  useSecondTick(true);
+  const me = useAuthStore((s) => s.user);
+  const [focus, setFocus] = useState<Focus>('none');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidePreviewOpen, setSidePreviewOpen] = useState(true);
+  // Выбор источника демонстрации: null — закрыт, иначе запуск или настройка.
+  const [picker, setPicker] = useState<'start' | 'adjust' | null>(null);
+
+  const share = api.screenShare;
+  const sharing = !!share;
+  const peerScreenStream = api.remoteStreams.get(screenKey(peer.id)) ?? null;
+  const peerStream = api.remoteStreams.get(peer.id) ?? null;
+  const peerSharing = call.media[peer.id]?.screen === true && !!peerScreenStream;
+  const peerCam = call.media[peer.id]?.video === true && !!peerStream;
+  const myCamTrack = api.myStream?.getVideoTracks()[0] ?? null;
+  const myCam = !!myCamTrack && myCamTrack.enabled && myCamTrack.readyState === 'live';
+  const peerMuted = call.media[peer.id]?.audio === false;
+  const mySpeaking = !!me && api.micOn && api.speaking.has(me.id);
+  const peerSpeaking = api.speaking.has(peer.id);
+  const shareSupported = canShareScreen();
+
+  // Раскладка кадра — теми же правилами, что в приложении. Своя демонстрация
+  // крупно, когда собеседник не демонстрирует и превью включено, либо когда
+  // демонстрируют оба и развёрнута именно она.
+  const myScreenBig =
+    sharing && ((!peerSharing && showMyPreview) || (peerSharing && focus === 'mine'));
+  const peerScreenBig = peerSharing && (!sharing || focus === 'peer');
+  const bothSharing = sharing && peerSharing && focus === 'none';
+  // Кадр свободен под собеседника: ни одна демонстрация его не занимает.
+  const stageFree = !peerSharing && !myScreenBig;
+  const selfPipVisible = !(!peerSharing && !peerCam && !myCam) && !bothSharing;
+  const peerCamThumb = peerCam && (myScreenBig || peerScreenBig);
+
+  const myName = me?.username ?? 'Вы';
+
+  // Escape закрывает только верхний слой: окно демонстрации поверх настроек
+  // уходит первым, а сам разговор Escape не сворачивает.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      if (picker) setPicker(null);
+      else if (settingsOpen) setSettingsOpen(false);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [picker, settingsOpen]);
+
+  // Фокус — в капсулу управления, когда экран разговора открылся.
+  const dockRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    dockRef.current
+      ?.querySelector<HTMLButtonElement>('.vc-btn')
+      ?.focus({ preventScroll: true, focusVisible: false } as FocusOptions);
+  }, []);
+
+  const onPick = useCallback(
+    async (pick: ScreenSharePick) => {
+      const adjusting = picker === 'adjust';
+      setPicker(null);
+      setShowMyPreview(pick.showPreview);
+      const result = adjusting
+        ? await api.updateScreenShare(pick.surface, pick.options)
+        : await api.startScreenShare(pick.surface, pick.options);
+      if (result === 'failed') {
+        onError(adjusting ? 'Не удалось изменить демонстрацию' : 'Не удалось начать демонстрацию экрана');
+      } else if (result === 'no-audio') {
+        onError('Звук захватить не удалось — демонстрация идёт без него');
+      }
+    },
+    [api, picker, setShowMyPreview, onError],
+  );
+
+  const toggleCamera = useCallback(async () => {
+    const wasOn = myCam;
+    const on = await api.toggleCamera();
+    // Включить не вышло — камеру занял кто-то другой или её отключили. Без
+    // сообщения человек жмёт кнопку и не понимает, почему ничего не вышло.
+    if (!wasOn && !on) onError('Камера недоступна — возможно, её занял другой сеанс');
+  }, [api, myCam, onError]);
+
+  const stopShare = useCallback(() => {
+    api.stopScreenShare();
+    setShowMyPreview(false);
+    setFocus('none');
+  }, [api, setShowMyPreview]);
+
+  const quality = share ? `${resolutionLabel(share.options.resolution)} · ${share.options.fps} FPS` : '';
+  const shareTitle = share
+    ? share.surface === 'monitor'
+      ? 'экран'
+      : share.surface === 'window'
+        ? share.label
+          ? `окно «${share.label}»`
+          : 'окно'
+        : share.label
+          ? `вкладку «${share.label}»`
+          : 'вкладку'
+    : '';
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1310,
-        background: 'rgba(10,8,7,0.66)',
-        backdropFilter: 'blur(6px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '24px max(16px, 3vw)',
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Настройки звонка"
-        style={{
-          width: '100%',
-          maxWidth: 520,
-          maxHeight: 'calc(100svh - 48px)',
-          overflow: 'auto',
-          background: 'var(--bg-1)',
-          border: '1px solid var(--line-2)',
-          borderRadius: 'var(--r-2xl)',
-          boxShadow: 'var(--shadow-3)',
-          padding: '20px 22px 22px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 18,
-        }}
-      >
-        <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--text-0)' }}>
-            Настройки звонка
-          </h3>
+    <>
+      <CallBackdrop />
+
+      <div className="vc-frame">
+        {bothSharing && peerScreenStream && share ? (
+          <div className="vc-split">
+            <div className="vc-split-cell">
+              <button
+                type="button"
+                className="vc-split-tile"
+                data-accent
+                onClick={() => setFocus('peer')}
+                aria-label={`Развернуть экран: ${peer.username}`}
+              >
+                <VideoView stream={peerScreenStream} contain label={`Экран: ${peer.username}`} />
+                <span className="vc-split-label">
+                  <PulseDot period={2000} />
+                  <span className="vc-pill-text">Экран: {peer.username}</span>
+                </span>
+              </button>
+            </div>
+            <div className="vc-split-cell">
+              <button
+                type="button"
+                className="vc-split-tile"
+                onClick={() => setFocus('mine')}
+                aria-label="Развернуть ваш экран"
+              >
+                <VideoView stream={share.stream} contain label="Ваш экран" />
+                <span className="vc-split-label">
+                  <PulseDot period={2000} />
+                  <span className="vc-pill-text">Ваш экран</span>
+                </span>
+              </button>
+            </div>
+            <div className="vc-glass-pill vc-split-hint">
+              <span className="vc-plaque">Две трансляции · нажмите на любую, чтобы развернуть</span>
+            </div>
+          </div>
+        ) : peerScreenBig && peerScreenStream ? (
+          <div className="vc-screen-stage">
+            <VideoView stream={peerScreenStream} contain label={`Экран: ${peer.username}`} />
+          </div>
+        ) : myScreenBig && share ? (
+          <div className="vc-screen-stage" data-own>
+            <VideoView stream={share.stream} contain label="Ваш экран" />
+          </div>
+        ) : stageFree && peerCam && peerStream ? (
+          <VideoView stream={peerStream} label={peer.username} />
+        ) : stageFree && !peerCam && myCam ? (
+          <div className="vc-center">
+            <CallAvatar username={peer.username} avatarUrl={peer.avatarUrl} size={132} speaking={peerSpeaking} />
+          </div>
+        ) : (
+          <div className="vc-center">
+            <div className="vc-duo">
+              <Person
+                name={peer.username}
+                initialFrom={peer.username}
+                avatarUrl={peer.avatarUrl ?? null}
+                speaking={peerSpeaking}
+                muted={peerMuted}
+              />
+              {/* Подписано «Вы», но лицо и буква — свои: подпись объясняет, кто
+                  это, а не заменяет человека. */}
+              <Person
+                name="Вы"
+                initialFrom={myName}
+                avatarUrl={me?.avatarUrl ?? null}
+                speaking={mySpeaking}
+                muted={!api.micOn}
+                dim
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="vc-shade" aria-hidden />
+
+        {/* Имя собеседника внизу слева — только когда кадр занят им. */}
+        {stageFree && (peerCam || myCam) && (
+          <div className="vc-peer-label">
+            <span className="vc-panel-title vc-ellipsis">{peer.username}</span>
+            {peerMuted && <MutedChip />}
+          </div>
+        )}
+
+        {/* Плашки поверх кадра. */}
+        {peerScreenBig && (
+          <div className="vc-glass-pill vc-plaque-pill" data-pos="right">
+            <PulseDot period={2000} />
+            <span className="vc-plaque vc-plaque-long">{peer.username} демонстрирует экран</span>
+            {/* На узком экране — коротко, чтобы глагол не обрезался. */}
+            <span className="vc-plaque vc-plaque-short" aria-hidden>
+              Экран: {peer.username}
+            </span>
+          </div>
+        )}
+
+        {share && (
+          <MyShareBadge
+            title={shareTitle}
+            quality={quality}
+            previewShown={showMyPreview || peerSharing}
+            onAdjust={shareSupported ? () => setPicker('adjust') : undefined}
+            onTogglePreview={peerSharing ? undefined : () => setShowMyPreview(!showMyPreview)}
+          />
+        )}
+
+        {myScreenBig && !peerSharing && (
           <button
             type="button"
-            onClick={onClose}
-            aria-label="Закрыть"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-2)',
-              cursor: 'pointer',
-              width: 32,
-              height: 32,
-              display: 'grid',
-              placeItems: 'center',
-              borderRadius: 8,
-            }}
+            className="vc-glass-pill vc-plaque-pill vc-preview-pill"
+            data-pos="right"
+            onClick={() => setShowMyPreview(false)}
           >
-            <Icon name="close" size={18} />
+            <CallIcon name="eyeOff" size={13} />
+            <span className="vc-plaque">Так это видит {peer.username} · скрыть</span>
           </button>
-        </header>
-        <CallDeviceSettings peerId={peerId} peerName={peerName} />
+        )}
+
+        {/* Вернуться к двум трансляциям. */}
+        {sharing && peerSharing && focus !== 'none' && (
+          <button type="button" className="vc-glass-pill vc-both-pill" onClick={() => setFocus('none')}>
+            <CallIcon name="split" size={12} />
+            <span className="vc-plaque">Показать обе трансляции</span>
+          </button>
+        )}
+
+        {/* Вторая трансляция карточкой слева, когда одна развёрнута. */}
+        {sharing && peerSharing && focus !== 'none' && share && peerScreenStream && (
+          <SidePreview
+            open={sidePreviewOpen}
+            title={focus === 'peer' ? 'Ваша трансляция' : `Экран: ${peer.username}`}
+            stream={focus === 'peer' ? share.stream : peerScreenStream}
+            onToggle={() => setSidePreviewOpen(!sidePreviewOpen)}
+            onExpand={focus === 'peer' ? undefined : () => setFocus('peer')}
+          />
+        )}
+
+        {/* Камера собеседника отдельным превью, когда кадр занят экраном. */}
+        {peerCamThumb && peerStream && (
+          <div className="vc-tile vc-peer-cam" data-speaking={peerSpeaking || undefined}>
+            <VideoView stream={peerStream} label={peer.username} />
+            {peerSpeaking && <span className="vc-speaking-frame" aria-hidden />}
+            <span className="vc-tile-label">
+              <span className="vc-ellipsis">{peer.username}</span>
+            </span>
+          </div>
+        )}
+
+        {/* Своё превью: уезжает влево, когда открыта панель настроек. */}
+        <div
+          className="vc-tile vc-self"
+          data-hidden={selfPipVisible ? undefined : ''}
+          data-shift={selfPipVisible && settingsOpen ? '' : undefined}
+          data-speaking={mySpeaking || undefined}
+          aria-hidden={!selfPipVisible}
+        >
+          {myCam && api.myStream ? (
+            <VideoView stream={api.myStream} mirror label="Ваша камера" />
+          ) : (
+            <div className="vc-self-empty">
+              <CallAvatar username={myName} avatarUrl={me?.avatarUrl ?? null} dim />
+            </div>
+          )}
+          {mySpeaking && <span className="vc-speaking-frame" aria-hidden />}
+          <span className="vc-tile-label">
+            Вы
+            {!api.micOn && <CallIcon name="micMutedSmall" size={11} />}
+          </span>
+        </div>
       </div>
+
+      {/* Пилюля состояния связи и таймер; «свернуть» слева. */}
+      <div className="vc-top">
+        <span className="vc-minimize">
+          <IconButton glyph="minus" label="Свернуть звонок" onClick={onMinimize} />
+        </span>
+        <StatusPill net={net} time={elapsed(call.answeredAt)} />
+      </div>
+
+      {/* Капсула управления. */}
+      <div className="vc-dock" ref={dockRef}>
+        <div className="vc-capsule" role="toolbar" aria-label="Управление звонком">
+          <CallButton
+            glyph={api.micOn ? 'mic' : 'micOff'}
+            label={api.micOn ? 'Выключить микрофон' : 'Включить микрофон'}
+            tone={api.micOn ? 'plain' : 'off'}
+            speaking={mySpeaking}
+            onClick={api.toggleMic}
+          />
+          <CallButton
+            glyph={myCam ? 'camera' : 'cameraOff'}
+            label={myCam ? 'Выключить камеру' : 'Включить камеру'}
+            tone={myCam ? 'plain' : 'off'}
+            onClick={() => void toggleCamera()}
+          />
+          {/* Демонстрацию браузеры на телефонах не умеют — там кнопки нет. */}
+          {shareSupported && (
+            <CallButton
+              glyph="screen"
+              label={sharing ? 'Остановить демонстрацию' : 'Демонстрация экрана'}
+              tone={sharing ? 'gold' : 'plain'}
+              pressed={sharing}
+              onClick={() => (sharing ? stopShare() : setPicker('start'))}
+            />
+          )}
+          <CallButton
+            glyph="gear"
+            label="Настройки звонка"
+            tone={settingsOpen ? 'active' : 'plain'}
+            pressed={settingsOpen}
+            onClick={() => setSettingsOpen(!settingsOpen)}
+          />
+        </div>
+        <EndCallButton onClick={onHangup} />
+      </div>
+
+      {settingsOpen && (
+        <CallSettingsPanel
+          peerId={peer.id}
+          peerName={peer.username}
+          onClose={() => setSettingsOpen(false)}
+          onSwitchMic={(id) => {
+            if (id) void api.switchMic(id);
+          }}
+          micCheck={{ start: api.startMicCheck, stop: api.stopMicCheck }}
+          onSwitchCamera={(id) => {
+            if (id) void api.switchCamera(id);
+          }}
+        />
+      )}
+
+      {picker && (
+        <ScreenSharePicker
+          peerName={peer.username}
+          adjusting={picker === 'adjust'}
+          initialSurface={(share?.surface ?? 'monitor') as ScreenSurface}
+          initialOptions={share?.options ?? loadScreenOptions()}
+          showPreview={showMyPreview}
+          onCancel={() => setPicker(null)}
+          onPick={(pick) => void onPick(pick)}
+        />
+      )}
+    </>
+  );
+}
+
+/** Прощальный кадр: тот же фон разговора и короткая надпись. */
+export function EndedCurtain({ peerName }: { peerName: string | null }): React.ReactElement {
+  return (
+    <>
+      <CallBackdrop />
+      <div className="vc-curtain" role="status">
+        <div>
+          <span className="vc-section">Звонок завершён</span>
+          {peerName && <span className="vc-display-name">{peerName}</span>}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** Голосовой звонок: колонка с аватаром и именем. */
+function Person({
+  name,
+  initialFrom,
+  avatarUrl,
+  speaking,
+  muted,
+  dim = false,
+}: {
+  name: string;
+  initialFrom: string;
+  avatarUrl: string | null;
+  speaking: boolean;
+  muted: boolean;
+  dim?: boolean;
+}) {
+  return (
+    <div className="vc-person" data-dim={dim || undefined}>
+      <CallAvatar username={initialFrom} avatarUrl={avatarUrl} speaking={speaking} dim={dim} />
+      <span className="vc-person-name">{name}</span>
+      {muted && <span className="vc-pill-text vc-person-muted">Микрофон выключен</span>}
     </div>
   );
 }
 
-/** Кадр видео: главный во всю ширину либо плитка в углу. */
-function VideoTile({
-  stream,
-  label,
-  muted,
-  mirrored,
-  contain,
-  fill,
-}: {
-  stream: MediaStream;
-  label: string;
-  muted?: boolean;
-  mirrored?: boolean;
-  /** Демонстрацию показываем целиком: обрезать чужой экран нельзя. */
-  contain?: boolean;
-  /** Растянуть на размер родителя — режим плитки. */
-  fill?: boolean;
-}) {
-  const ref = useRef<HTMLVideoElement | null>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (el.srcObject !== stream) el.srcObject = stream;
-    // Автозапуск может не сработать без жеста — тогда кадр просто замрёт,
-    // звук при этом идёт через общий микшер и не страдает.
-    void el.play().catch(() => {});
-  }, [stream]);
-
+/** Пилюля состояния связи с таймером. */
+function StatusPill({ net, time }: { net: CallNetState; time: string }) {
+  const [color, period, text] =
+    net === 'connecting'
+      ? ['#c9a45c', 1200, 'Подключение…']
+      : net === 'good'
+        ? ['#d8cbb4', 3400, 'Соединение стабильно']
+        : net === 'weak'
+          ? ['#c9a45c', 1500, 'Нестабильная сеть']
+          : ['#d65c52', 1000, 'Переподключение…'];
   return (
-    <video
-      ref={ref}
-      autoPlay
-      playsInline
-      muted={muted}
-      aria-label={label}
-      style={{
-        width: '100%',
-        maxWidth: fill ? undefined : 'min(960px, 88vw)',
-        maxHeight: fill ? undefined : '56vh',
-        height: fill ? '100%' : undefined,
-        objectFit: contain ? 'contain' : 'cover',
-        borderRadius: fill ? 'var(--r-md)' : 'var(--r-lg)',
-        background: 'var(--bg-2)',
-        border: '1px solid var(--line-2)',
-        transform: mirrored ? 'scaleX(-1)' : undefined,
-      }}
-    />
+    <div className="vc-glass-pill vc-status-pill" role="status">
+      <PulseDot key={text} color={color} period={period} />
+      <span className="vc-pill-text">{text}</span>
+      <span className="vc-status-sep" aria-hidden />
+      <span className="vc-timer" aria-label={`Длительность ${time}`}>
+        {time}
+      </span>
+    </div>
   );
 }
 
-function ControlButton({
-  label,
-  icon,
-  onClick,
-  danger,
-  disabled,
+/** Метка «микрофон выключен» рядом с именем. */
+function MutedChip() {
+  return (
+    <span className="vc-muted-chip">
+      <CallIcon name="micMutedSmall" size={11} />
+      <span className="vc-row-hint">Микрофон выключен</span>
+    </span>
+  );
+}
+
+/**
+ * Плашка «вы демонстрируете»: что уходит собеседнику и с каким качеством.
+ * Нажатие открывает настройку идущей демонстрации — она меняется без
+ * перезапуска, и у собеседника картинка не мигает.
+ */
+function MyShareBadge({
+  title,
+  quality,
+  previewShown,
+  onAdjust,
+  onTogglePreview,
 }: {
-  label: string;
-  icon: 'mic' | 'micOff' | 'video' | 'videoOff' | 'phoneOff' | 'cast' | 'settings';
-  onClick: () => void;
-  danger?: boolean;
-  disabled?: boolean;
+  title: string;
+  quality: string;
+  previewShown: boolean;
+  onAdjust?: () => void;
+  onTogglePreview?: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      aria-label={label}
-      style={{
-        width: 58,
-        height: 58,
-        borderRadius: 999,
-        border: danger ? 'none' : '1px solid var(--line-2)',
-        background: danger ? 'var(--accent)' : 'var(--bg-3)',
-        color: danger ? '#fff' : disabled ? 'var(--text-3)' : 'var(--text-1)',
-        display: 'grid',
-        placeItems: 'center',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.55 : 1,
-      }}
-    >
-      <Icon name={icon} size={22} />
-    </button>
+    <div className="vc-glass-pill vc-share-badge" data-toggle={onTogglePreview ? '' : undefined}>
+      <button
+        type="button"
+        className="vc-share-badge-main"
+        onClick={onAdjust}
+        disabled={!onAdjust}
+        title={onAdjust ? 'Настроить демонстрацию' : undefined}
+      >
+        <PulseDot period={2000} />
+        <span className="vc-pill-text vc-ellipsis vc-share-badge-title">Вы демонстрируете {title}</span>
+        <span className="vc-plaque">{quality}</span>
+      </button>
+      {onTogglePreview && (
+        <button type="button" className="vc-tiny-pill" onClick={onTogglePreview}>
+          {previewShown ? 'Скрыть' : 'Показать мне'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Карточка второй трансляции слева. Сворачивается в пилюлю «Превью
+ * трансляции».
+ */
+function SidePreview({
+  open,
+  title,
+  stream,
+  onToggle,
+  onExpand,
+}: {
+  open: boolean;
+  title: string;
+  stream: MediaStream;
+  onToggle: () => void;
+  /** Развернуть эту трансляцию на весь кадр (только для чужой). */
+  onExpand?: () => void;
+}) {
+  if (!open) {
+    return (
+      <button type="button" className="vc-glass-pill vc-side-pill" onClick={onToggle}>
+        <CallIcon name="monitor" size={13} />
+        <span className="vc-pill-text">Превью трансляции</span>
+      </button>
+    );
+  }
+  return (
+    <div className="vc-side" data-accent={onExpand ? '' : undefined}>
+      <div className="vc-side-head">
+        <span className="vc-plaque vc-ellipsis">{title}</span>
+        {onExpand ? (
+          <button type="button" className="vc-side-expand" onClick={onExpand}>
+            развернуть
+          </button>
+        ) : (
+          <IconButton glyph="minus" label="Свернуть превью" onClick={onToggle} size={22} bare />
+        )}
+      </div>
+      <div className="vc-side-video">
+        <VideoView stream={stream} contain label={title} />
+      </div>
+    </div>
   );
 }
